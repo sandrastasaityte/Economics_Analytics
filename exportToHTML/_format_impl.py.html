@@ -1,0 +1,1062 @@
+<html>
+<head>
+<title>_format_impl.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #a5c261;}
+.s6 { color: #2aacb8;}
+.s7 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_format_impl.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Binary serialization 
+ 
+NPY format 
+========== 
+ 
+A simple format for saving numpy arrays to disk with the full 
+information about them. 
+ 
+The ``.npy`` format is the standard binary file format in NumPy for 
+persisting a *single* arbitrary NumPy array on disk. The format stores all 
+of the shape and dtype information necessary to reconstruct the array 
+correctly even on another machine with a different architecture. 
+The format is designed to be as simple as possible while achieving 
+its limited goals. 
+ 
+The ``.npz`` format is the standard format for persisting *multiple* NumPy 
+arrays on disk. A ``.npz`` file is a zip file containing multiple ``.npy`` 
+files, one for each array. 
+ 
+Capabilities 
+------------ 
+ 
+- Can represent all NumPy arrays including nested record arrays and 
+  object arrays. 
+ 
+- Represents the data in its native binary form. 
+ 
+- Supports Fortran-contiguous arrays directly. 
+ 
+- Stores all of the necessary information to reconstruct the array 
+  including shape and dtype on a machine of a different 
+  architecture.  Both little-endian and big-endian arrays are 
+  supported, and a file with little-endian numbers will yield 
+  a little-endian array on any machine reading the file. The 
+  types are described in terms of their actual sizes. For example, 
+  if a machine with a 64-bit C &quot;long int&quot; writes out an array with 
+  &quot;long ints&quot;, a reading machine with 32-bit C &quot;long ints&quot; will yield 
+  an array with 64-bit integers. 
+ 
+- Is straightforward to reverse engineer. Datasets often live longer than 
+  the programs that created them. A competent developer should be 
+  able to create a solution in their preferred programming language to 
+  read most ``.npy`` files that they have been given without much 
+  documentation. 
+ 
+- Allows memory-mapping of the data. See `open_memmap`. 
+ 
+- Can be read from a filelike stream object instead of an actual file. 
+ 
+- Stores object arrays, i.e. arrays containing elements that are arbitrary 
+  Python objects. Files with object arrays are not to be mmapable, but 
+  can be read and written to disk. 
+ 
+Limitations 
+----------- 
+ 
+- Arbitrary subclasses of numpy.ndarray are not completely preserved. 
+  Subclasses will be accepted for writing, but only the array data will 
+  be written out. A regular numpy.ndarray object will be created 
+  upon reading the file. 
+ 
+.. warning:: 
+ 
+  Due to limitations in the interpretation of structured dtypes, dtypes 
+  with fields with empty names will have the names replaced by 'f0', 'f1', 
+  etc. Such arrays will not round-trip through the format entirely 
+  accurately. The data is intact; only the field names will differ. We are 
+  working on a fix for this. This fix will not require a change in the 
+  file format. The arrays with such structures can still be saved and 
+  restored, and the correct dtype may be restored by using the 
+  ``loadedarray.view(correct_dtype)`` method. 
+ 
+File extensions 
+--------------- 
+ 
+We recommend using the ``.npy`` and ``.npz`` extensions for files saved 
+in this format. This is by no means a requirement; applications may wish 
+to use these file formats but use an extension specific to the 
+application. In the absence of an obvious alternative, however, 
+we suggest using ``.npy`` and ``.npz``. 
+ 
+Version numbering 
+----------------- 
+ 
+The version numbering of these formats is independent of NumPy version 
+numbering. If the format is upgraded, the code in `numpy.io` will still 
+be able to read and write Version 1.0 files. 
+ 
+Format Version 1.0 
+------------------ 
+ 
+The first 6 bytes are a magic string: exactly ``\\x93NUMPY``. 
+ 
+The next 1 byte is an unsigned byte: the major version number of the file 
+format, e.g. ``\\x01``. 
+ 
+The next 1 byte is an unsigned byte: the minor version number of the file 
+format, e.g. ``\\x00``. Note: the version of the file format is not tied 
+to the version of the numpy package. 
+ 
+The next 2 bytes form a little-endian unsigned short int: the length of 
+the header data HEADER_LEN. 
+ 
+The next HEADER_LEN bytes form the header data describing the array's 
+format. It is an ASCII string which contains a Python literal expression 
+of a dictionary. It is terminated by a newline (``\\n``) and padded with 
+spaces (``\\x20``) to make the total of 
+``len(magic string) + 2 + len(length) + HEADER_LEN`` be evenly divisible 
+by 64 for alignment purposes. 
+ 
+The dictionary contains three keys: 
+ 
+    &quot;descr&quot; : dtype.descr 
+      An object that can be passed as an argument to the `numpy.dtype` 
+      constructor to create the array's dtype. 
+    &quot;fortran_order&quot; : bool 
+      Whether the array data is Fortran-contiguous or not. Since 
+      Fortran-contiguous arrays are a common form of non-C-contiguity, 
+      we allow them to be written directly to disk for efficiency. 
+    &quot;shape&quot; : tuple of int 
+      The shape of the array. 
+ 
+For repeatability and readability, the dictionary keys are sorted in 
+alphabetic order. This is for convenience only. A writer SHOULD implement 
+this if possible. A reader MUST NOT depend on this. 
+ 
+Following the header comes the array data. If the dtype contains Python 
+objects (i.e. ``dtype.hasobject is True``), then the data is a Python 
+pickle of the array. Otherwise the data is the contiguous (either C- 
+or Fortran-, depending on ``fortran_order``) bytes of the array. 
+Consumers can figure out the number of bytes by multiplying the number 
+of elements given by the shape (noting that ``shape=()`` means there is 
+1 element) by ``dtype.itemsize``. 
+ 
+Format Version 2.0 
+------------------ 
+ 
+The version 1.0 format only allowed the array header to have a total size of 
+65535 bytes.  This can be exceeded by structured arrays with a large number of 
+columns.  The version 2.0 format extends the header size to 4 GiB. 
+`numpy.save` will automatically save in 2.0 format if the data requires it, 
+else it will always use the more compatible 1.0 format. 
+ 
+The description of the fourth element of the header therefore has become: 
+&quot;The next 4 bytes form a little-endian unsigned int: the length of the header 
+data HEADER_LEN.&quot; 
+ 
+Format Version 3.0 
+------------------ 
+ 
+This version replaces the ASCII string (which in practice was latin1) with 
+a utf8-encoded string, so supports structured types with any unicode field 
+names. 
+ 
+Notes 
+----- 
+The ``.npy`` format, including motivation for creating it and a comparison of 
+alternatives, is described in the 
+:doc:`&quot;npy-format&quot; NEP &lt;neps:nep-0001-npy-format&gt;`, however details have 
+evolved with time and this document is more current. 
+ 
+&quot;&quot;&quot;</span>
+<span class="s2">import </span><span class="s1">io</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">pickle</span>
+<span class="s2">import </span><span class="s1">warnings</span>
+
+<span class="s2">import </span><span class="s1">numpy</span>
+<span class="s2">from </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">_utils </span><span class="s2">import </span><span class="s1">set_module</span>
+<span class="s2">from </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">lib</span><span class="s3">.</span><span class="s1">_utils_impl </span><span class="s2">import </span><span class="s1">drop_metadata</span>
+
+<span class="s1">__all__ </span><span class="s3">= []</span>
+
+<span class="s1">drop_metadata</span><span class="s3">.</span><span class="s1">__module__ </span><span class="s3">= </span><span class="s4">&quot;numpy.lib.format&quot;</span>
+
+<span class="s1">EXPECTED_KEYS </span><span class="s3">= {</span><span class="s4">'descr'</span><span class="s3">, </span><span class="s4">'fortran_order'</span><span class="s3">, </span><span class="s4">'shape'</span><span class="s3">}</span>
+<span class="s1">MAGIC_PREFIX </span><span class="s3">= </span><span class="s5">b'</span><span class="s2">\x93</span><span class="s5">NUMPY'</span>
+<span class="s1">MAGIC_LEN </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">MAGIC_PREFIX</span><span class="s3">) + </span><span class="s6">2</span>
+<span class="s1">ARRAY_ALIGN </span><span class="s3">= </span><span class="s6">64  </span><span class="s7"># plausible values are powers of 2 between 16 and 4096</span>
+<span class="s1">BUFFER_SIZE </span><span class="s3">= </span><span class="s6">2</span><span class="s3">**</span><span class="s6">18  </span><span class="s7"># size of buffer for reading npz files in bytes</span>
+<span class="s7"># allow growth within the address space of a 64 bit machine along one axis</span>
+<span class="s1">GROWTH_AXIS_MAX_DIGITS </span><span class="s3">= </span><span class="s6">21  </span><span class="s7"># = len(str(8*2**64-1)) hypothetical int1 dtype</span>
+
+<span class="s7"># difference between version 1.0 and 2.0 is a 4 byte (I) header length</span>
+<span class="s7"># instead of 2 bytes (H) allowing storage of large structured arrays</span>
+<span class="s1">_header_size_info </span><span class="s3">= {</span>
+    <span class="s3">(</span><span class="s6">1</span><span class="s3">, </span><span class="s6">0</span><span class="s3">): (</span><span class="s4">'&lt;H'</span><span class="s3">, </span><span class="s4">'latin1'</span><span class="s3">),</span>
+    <span class="s3">(</span><span class="s6">2</span><span class="s3">, </span><span class="s6">0</span><span class="s3">): (</span><span class="s4">'&lt;I'</span><span class="s3">, </span><span class="s4">'latin1'</span><span class="s3">),</span>
+    <span class="s3">(</span><span class="s6">3</span><span class="s3">, </span><span class="s6">0</span><span class="s3">): (</span><span class="s4">'&lt;I'</span><span class="s3">, </span><span class="s4">'utf8'</span><span class="s3">),</span>
+<span class="s3">}</span>
+
+<span class="s7"># Python's literal_eval is not actually safe for large inputs, since parsing</span>
+<span class="s7"># may become slow or even cause interpreter crashes.</span>
+<span class="s7"># This is an arbitrary, low limit which should make it safe in practice.</span>
+<span class="s1">_MAX_HEADER_SIZE </span><span class="s3">= </span><span class="s6">10000</span>
+
+
+<span class="s2">def </span><span class="s1">_check_version</span><span class="s3">(</span><span class="s1">version</span><span class="s3">):</span>
+    <span class="s2">if </span><span class="s1">version </span><span class="s2">not in </span><span class="s3">[(</span><span class="s6">1</span><span class="s3">, </span><span class="s6">0</span><span class="s3">), (</span><span class="s6">2</span><span class="s3">, </span><span class="s6">0</span><span class="s3">), (</span><span class="s6">3</span><span class="s3">, </span><span class="s6">0</span><span class="s3">), </span><span class="s2">None</span><span class="s3">]:</span>
+        <span class="s1">msg </span><span class="s3">= </span><span class="s4">&quot;we only support format version (1,0), (2,0), and (3,0), not %s&quot;</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s1">msg </span><span class="s3">% (</span><span class="s1">version</span><span class="s3">,))</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;numpy.lib.format&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">magic</span><span class="s3">(</span><span class="s1">major</span><span class="s3">, </span><span class="s1">minor</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; Return the magic string for the given file format version. 
+ 
+    Parameters 
+    ---------- 
+    major : int in [0, 255] 
+    minor : int in [0, 255] 
+ 
+    Returns 
+    ------- 
+    magic : str 
+ 
+    Raises 
+    ------ 
+    ValueError if the version cannot be formatted. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">major </span><span class="s3">&lt; </span><span class="s6">0 </span><span class="s2">or </span><span class="s1">major </span><span class="s3">&gt; </span><span class="s6">255</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;major version must be 0 &lt;= major &lt; 256&quot;</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">minor </span><span class="s3">&lt; </span><span class="s6">0 </span><span class="s2">or </span><span class="s1">minor </span><span class="s3">&gt; </span><span class="s6">255</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;minor version must be 0 &lt;= minor &lt; 256&quot;</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">MAGIC_PREFIX </span><span class="s3">+ </span><span class="s1">bytes</span><span class="s3">([</span><span class="s1">major</span><span class="s3">, </span><span class="s1">minor</span><span class="s3">])</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;numpy.lib.format&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">read_magic</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; Read the magic string to get the version of the file format. 
+ 
+    Parameters 
+    ---------- 
+    fp : filelike object 
+ 
+    Returns 
+    ------- 
+    major : int 
+    minor : int 
+    &quot;&quot;&quot;</span>
+    <span class="s1">magic_str </span><span class="s3">= </span><span class="s1">_read_bytes</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">, </span><span class="s1">MAGIC_LEN</span><span class="s3">, </span><span class="s4">&quot;magic string&quot;</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">magic_str</span><span class="s3">[:-</span><span class="s6">2</span><span class="s3">] != </span><span class="s1">MAGIC_PREFIX</span><span class="s3">:</span>
+        <span class="s1">msg </span><span class="s3">= </span><span class="s4">&quot;the magic string is not correct; expected %r, got %r&quot;</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s1">msg </span><span class="s3">% (</span><span class="s1">MAGIC_PREFIX</span><span class="s3">, </span><span class="s1">magic_str</span><span class="s3">[:-</span><span class="s6">2</span><span class="s3">]))</span>
+    <span class="s1">major</span><span class="s3">, </span><span class="s1">minor </span><span class="s3">= </span><span class="s1">magic_str</span><span class="s3">[-</span><span class="s6">2</span><span class="s3">:]</span>
+    <span class="s2">return </span><span class="s1">major</span><span class="s3">, </span><span class="s1">minor</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;numpy.lib.format&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">dtype_to_descr</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Get a serializable descriptor from the dtype. 
+ 
+    The .descr attribute of a dtype object cannot be round-tripped through 
+    the dtype() constructor. Simple types, like dtype('float32'), have 
+    a descr which looks like a record array with one field with '' as 
+    a name. The dtype() constructor interprets this as a request to give 
+    a default name.  Instead, we construct descriptor that can be passed to 
+    dtype(). 
+ 
+    Parameters 
+    ---------- 
+    dtype : dtype 
+        The dtype of the array that will be written to disk. 
+ 
+    Returns 
+    ------- 
+    descr : object 
+        An object that can be passed to `numpy.dtype()` in order to 
+        replicate the input dtype. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s7"># NOTE: that drop_metadata may not return the right dtype e.g. for user</span>
+    <span class="s7">#       dtypes.  In that case our code below would fail the same, though.</span>
+    <span class="s1">new_dtype </span><span class="s3">= </span><span class="s1">drop_metadata</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">new_dtype </span><span class="s2">is not </span><span class="s1">dtype</span><span class="s3">:</span>
+        <span class="s1">warnings</span><span class="s3">.</span><span class="s1">warn</span><span class="s3">(</span><span class="s4">&quot;metadata on a dtype is not saved to an npy/npz. &quot;</span>
+                      <span class="s4">&quot;Use another format (such as pickle) to store it.&quot;</span><span class="s3">,</span>
+                      <span class="s1">UserWarning</span><span class="s3">, </span><span class="s1">stacklevel</span><span class="s3">=</span><span class="s6">2</span><span class="s3">)</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">new_dtype</span>
+
+    <span class="s2">if </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">names </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s7"># This is a record array. The .descr is fine.  XXX: parts of the</span>
+        <span class="s7"># record array with an empty name, like padding bytes, still get</span>
+        <span class="s7"># fiddled with. This needs to be fixed in the C implementation of</span>
+        <span class="s7"># dtype().</span>
+        <span class="s2">return </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">descr</span>
+    <span class="s2">elif not </span><span class="s1">type</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">).</span><span class="s1">_legacy</span><span class="s3">:</span>
+        <span class="s7"># this must be a user-defined dtype since numpy does not yet expose any</span>
+        <span class="s7"># non-legacy dtypes in the public API</span>
+        <span class="s7">#</span>
+        <span class="s7"># non-legacy dtypes don't yet have __array_interface__</span>
+        <span class="s7"># support. Instead, as a hack, we use pickle to save the array, and lie</span>
+        <span class="s7"># that the dtype is object. When the array is loaded, the descriptor is</span>
+        <span class="s7"># unpickled with the array and the object dtype in the header is</span>
+        <span class="s7"># discarded.</span>
+        <span class="s7">#</span>
+        <span class="s7"># a future NEP should define a way to serialize user-defined</span>
+        <span class="s7"># descriptors and ideally work out the possible security implications</span>
+        <span class="s1">warnings</span><span class="s3">.</span><span class="s1">warn</span><span class="s3">(</span><span class="s4">&quot;Custom dtypes are saved as python objects using the &quot;</span>
+                      <span class="s4">&quot;pickle protocol. Loading this file requires &quot;</span>
+                      <span class="s4">&quot;allow_pickle=True to be set.&quot;</span><span class="s3">,</span>
+                      <span class="s1">UserWarning</span><span class="s3">, </span><span class="s1">stacklevel</span><span class="s3">=</span><span class="s6">2</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s4">&quot;|O&quot;</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">str</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;numpy.lib.format&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">descr_to_dtype</span><span class="s3">(</span><span class="s1">descr</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Returns a dtype based off the given description. 
+ 
+    This is essentially the reverse of `~lib.format.dtype_to_descr`. It will 
+    remove the valueless padding fields created by, i.e. simple fields like 
+    dtype('float32'), and then convert the description to its corresponding 
+    dtype. 
+ 
+    Parameters 
+    ---------- 
+    descr : object 
+        The object retrieved by dtype.descr. Can be passed to 
+        `numpy.dtype` in order to replicate the input dtype. 
+ 
+    Returns 
+    ------- 
+    dtype : dtype 
+        The dtype constructed by the description. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">descr</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+        <span class="s7"># No padding removal needed</span>
+        <span class="s2">return </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">descr</span><span class="s3">)</span>
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">descr</span><span class="s3">, </span><span class="s1">tuple</span><span class="s3">):</span>
+        <span class="s7"># subtype, will always have a shape descr[1]</span>
+        <span class="s1">dt </span><span class="s3">= </span><span class="s1">descr_to_dtype</span><span class="s3">(</span><span class="s1">descr</span><span class="s3">[</span><span class="s6">0</span><span class="s3">])</span>
+        <span class="s2">return </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">((</span><span class="s1">dt</span><span class="s3">, </span><span class="s1">descr</span><span class="s3">[</span><span class="s6">1</span><span class="s3">]))</span>
+
+    <span class="s1">titles </span><span class="s3">= []</span>
+    <span class="s1">names </span><span class="s3">= []</span>
+    <span class="s1">formats </span><span class="s3">= []</span>
+    <span class="s1">offsets </span><span class="s3">= []</span>
+    <span class="s1">offset </span><span class="s3">= </span><span class="s6">0</span>
+    <span class="s2">for </span><span class="s1">field </span><span class="s2">in </span><span class="s1">descr</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">field</span><span class="s3">) == </span><span class="s6">2</span><span class="s3">:</span>
+            <span class="s1">name</span><span class="s3">, </span><span class="s1">descr_str </span><span class="s3">= </span><span class="s1">field</span>
+            <span class="s1">dt </span><span class="s3">= </span><span class="s1">descr_to_dtype</span><span class="s3">(</span><span class="s1">descr_str</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">name</span><span class="s3">, </span><span class="s1">descr_str</span><span class="s3">, </span><span class="s1">shape </span><span class="s3">= </span><span class="s1">field</span>
+            <span class="s1">dt </span><span class="s3">= </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">((</span><span class="s1">descr_to_dtype</span><span class="s3">(</span><span class="s1">descr_str</span><span class="s3">), </span><span class="s1">shape</span><span class="s3">))</span>
+
+        <span class="s7"># Ignore padding bytes, which will be void bytes with '' as name</span>
+        <span class="s7"># Once support for blank names is removed, only &quot;if name == ''&quot; needed)</span>
+        <span class="s1">is_pad </span><span class="s3">= (</span><span class="s1">name </span><span class="s3">== </span><span class="s4">'' </span><span class="s2">and </span><span class="s1">dt</span><span class="s3">.</span><span class="s1">type </span><span class="s2">is </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">void </span><span class="s2">and </span><span class="s1">dt</span><span class="s3">.</span><span class="s1">names </span><span class="s2">is None</span><span class="s3">)</span>
+        <span class="s2">if not </span><span class="s1">is_pad</span><span class="s3">:</span>
+            <span class="s1">title</span><span class="s3">, </span><span class="s1">name </span><span class="s3">= </span><span class="s1">name </span><span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">name</span><span class="s3">, </span><span class="s1">tuple</span><span class="s3">) </span><span class="s2">else </span><span class="s3">(</span><span class="s2">None</span><span class="s3">, </span><span class="s1">name</span><span class="s3">)</span>
+            <span class="s1">titles</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">title</span><span class="s3">)</span>
+            <span class="s1">names</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">name</span><span class="s3">)</span>
+            <span class="s1">formats</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">dt</span><span class="s3">)</span>
+            <span class="s1">offsets</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">offset</span><span class="s3">)</span>
+        <span class="s1">offset </span><span class="s3">+= </span><span class="s1">dt</span><span class="s3">.</span><span class="s1">itemsize</span>
+
+    <span class="s2">return </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">({</span><span class="s4">'names'</span><span class="s3">: </span><span class="s1">names</span><span class="s3">, </span><span class="s4">'formats'</span><span class="s3">: </span><span class="s1">formats</span><span class="s3">, </span><span class="s4">'titles'</span><span class="s3">: </span><span class="s1">titles</span><span class="s3">,</span>
+                        <span class="s4">'offsets'</span><span class="s3">: </span><span class="s1">offsets</span><span class="s3">, </span><span class="s4">'itemsize'</span><span class="s3">: </span><span class="s1">offset</span><span class="s3">})</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;numpy.lib.format&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">header_data_from_array_1_0</span><span class="s3">(</span><span class="s1">array</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; Get the dictionary of header metadata from a numpy.ndarray. 
+ 
+    Parameters 
+    ---------- 
+    array : numpy.ndarray 
+ 
+    Returns 
+    ------- 
+    d : dict 
+        This has the appropriate entries for writing its string representation 
+        to the header of the file. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">d </span><span class="s3">= {</span><span class="s4">'shape'</span><span class="s3">: </span><span class="s1">array</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">}</span>
+    <span class="s2">if </span><span class="s1">array</span><span class="s3">.</span><span class="s1">flags</span><span class="s3">.</span><span class="s1">c_contiguous</span><span class="s3">:</span>
+        <span class="s1">d</span><span class="s3">[</span><span class="s4">'fortran_order'</span><span class="s3">] = </span><span class="s2">False</span>
+    <span class="s2">elif </span><span class="s1">array</span><span class="s3">.</span><span class="s1">flags</span><span class="s3">.</span><span class="s1">f_contiguous</span><span class="s3">:</span>
+        <span class="s1">d</span><span class="s3">[</span><span class="s4">'fortran_order'</span><span class="s3">] = </span><span class="s2">True</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s7"># Totally non-contiguous data. We will have to make it C-contiguous</span>
+        <span class="s7"># before writing. Note that we need to test for C_CONTIGUOUS first</span>
+        <span class="s7"># because a 1-D array is both C_CONTIGUOUS and F_CONTIGUOUS.</span>
+        <span class="s1">d</span><span class="s3">[</span><span class="s4">'fortran_order'</span><span class="s3">] = </span><span class="s2">False</span>
+
+    <span class="s1">d</span><span class="s3">[</span><span class="s4">'descr'</span><span class="s3">] = </span><span class="s1">dtype_to_descr</span><span class="s3">(</span><span class="s1">array</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">d</span>
+
+
+<span class="s2">def </span><span class="s1">_wrap_header</span><span class="s3">(</span><span class="s1">header</span><span class="s3">, </span><span class="s1">version</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Takes a stringified header, and attaches the prefix and padding to it 
+    &quot;&quot;&quot;</span>
+    <span class="s2">import </span><span class="s1">struct</span>
+    <span class="s2">assert </span><span class="s1">version </span><span class="s2">is not None</span>
+    <span class="s1">fmt</span><span class="s3">, </span><span class="s1">encoding </span><span class="s3">= </span><span class="s1">_header_size_info</span><span class="s3">[</span><span class="s1">version</span><span class="s3">]</span>
+    <span class="s1">header </span><span class="s3">= </span><span class="s1">header</span><span class="s3">.</span><span class="s1">encode</span><span class="s3">(</span><span class="s1">encoding</span><span class="s3">)</span>
+    <span class="s1">hlen </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">header</span><span class="s3">) + </span><span class="s6">1</span>
+    <span class="s1">padlen </span><span class="s3">= </span><span class="s1">ARRAY_ALIGN </span><span class="s3">- ((</span><span class="s1">MAGIC_LEN </span><span class="s3">+ </span><span class="s1">struct</span><span class="s3">.</span><span class="s1">calcsize</span><span class="s3">(</span><span class="s1">fmt</span><span class="s3">) + </span><span class="s1">hlen</span><span class="s3">) % </span><span class="s1">ARRAY_ALIGN</span><span class="s3">)</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s1">header_prefix </span><span class="s3">= </span><span class="s1">magic</span><span class="s3">(*</span><span class="s1">version</span><span class="s3">) + </span><span class="s1">struct</span><span class="s3">.</span><span class="s1">pack</span><span class="s3">(</span><span class="s1">fmt</span><span class="s3">, </span><span class="s1">hlen </span><span class="s3">+ </span><span class="s1">padlen</span><span class="s3">)</span>
+    <span class="s2">except </span><span class="s1">struct</span><span class="s3">.</span><span class="s1">error</span><span class="s3">:</span>
+        <span class="s1">msg </span><span class="s3">= </span><span class="s4">f&quot;Header length </span><span class="s2">{</span><span class="s1">hlen</span><span class="s2">} </span><span class="s4">too big for version=</span><span class="s2">{</span><span class="s1">version</span><span class="s2">}</span><span class="s4">&quot;</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s1">msg</span><span class="s3">) </span><span class="s2">from None</span>
+
+    <span class="s7"># Pad the header with spaces and a final newline such that the magic</span>
+    <span class="s7"># string, the header-length short and the header are aligned on a</span>
+    <span class="s7"># ARRAY_ALIGN byte boundary.  This supports memory mapping of dtypes</span>
+    <span class="s7"># aligned up to ARRAY_ALIGN on systems like Linux where mmap()</span>
+    <span class="s7"># offset must be page-aligned (i.e. the beginning of the file).</span>
+    <span class="s2">return </span><span class="s1">header_prefix </span><span class="s3">+ </span><span class="s1">header </span><span class="s3">+ </span><span class="s5">b' ' </span><span class="s3">* </span><span class="s1">padlen </span><span class="s3">+ </span><span class="s5">b'</span><span class="s2">\n</span><span class="s5">'</span>
+
+
+<span class="s2">def </span><span class="s1">_wrap_header_guess_version</span><span class="s3">(</span><span class="s1">header</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Like `_wrap_header`, but chooses an appropriate version given the contents 
+    &quot;&quot;&quot;</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">_wrap_header</span><span class="s3">(</span><span class="s1">header</span><span class="s3">, (</span><span class="s6">1</span><span class="s3">, </span><span class="s6">0</span><span class="s3">))</span>
+    <span class="s2">except </span><span class="s1">ValueError</span><span class="s3">:</span>
+        <span class="s2">pass</span>
+
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s1">ret </span><span class="s3">= </span><span class="s1">_wrap_header</span><span class="s3">(</span><span class="s1">header</span><span class="s3">, (</span><span class="s6">2</span><span class="s3">, </span><span class="s6">0</span><span class="s3">))</span>
+    <span class="s2">except </span><span class="s1">UnicodeEncodeError</span><span class="s3">:</span>
+        <span class="s2">pass</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">warnings</span><span class="s3">.</span><span class="s1">warn</span><span class="s3">(</span><span class="s4">&quot;Stored array in format 2.0. It can only be&quot;</span>
+                      <span class="s4">&quot;read by NumPy &gt;= 1.9&quot;</span><span class="s3">, </span><span class="s1">UserWarning</span><span class="s3">, </span><span class="s1">stacklevel</span><span class="s3">=</span><span class="s6">2</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">ret</span>
+
+    <span class="s1">header </span><span class="s3">= </span><span class="s1">_wrap_header</span><span class="s3">(</span><span class="s1">header</span><span class="s3">, (</span><span class="s6">3</span><span class="s3">, </span><span class="s6">0</span><span class="s3">))</span>
+    <span class="s1">warnings</span><span class="s3">.</span><span class="s1">warn</span><span class="s3">(</span><span class="s4">&quot;Stored array in format 3.0. It can only be &quot;</span>
+                  <span class="s4">&quot;read by NumPy &gt;= 1.17&quot;</span><span class="s3">, </span><span class="s1">UserWarning</span><span class="s3">, </span><span class="s1">stacklevel</span><span class="s3">=</span><span class="s6">2</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">header</span>
+
+
+<span class="s2">def </span><span class="s1">_write_array_header</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">, </span><span class="s1">d</span><span class="s3">, </span><span class="s1">version</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; Write the header for an array and returns the version used 
+ 
+    Parameters 
+    ---------- 
+    fp : filelike object 
+    d : dict 
+        This has the appropriate entries for writing its string representation 
+        to the header of the file. 
+    version : tuple or None 
+        None means use oldest that works. Providing an explicit version will 
+        raise a ValueError if the format does not allow saving this data. 
+        Default: None 
+    &quot;&quot;&quot;</span>
+    <span class="s1">header </span><span class="s3">= [</span><span class="s4">&quot;{&quot;</span><span class="s3">]</span>
+    <span class="s2">for </span><span class="s1">key</span><span class="s3">, </span><span class="s1">value </span><span class="s2">in </span><span class="s1">sorted</span><span class="s3">(</span><span class="s1">d</span><span class="s3">.</span><span class="s1">items</span><span class="s3">()):</span>
+        <span class="s7"># Need to use repr here, since we eval these when reading</span>
+        <span class="s1">header</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s4">f&quot;'</span><span class="s2">{</span><span class="s1">key</span><span class="s2">}</span><span class="s4">': </span><span class="s2">{</span><span class="s1">repr</span><span class="s3">(</span><span class="s1">value</span><span class="s3">)</span><span class="s2">}</span><span class="s4">, &quot;</span><span class="s3">)</span>
+    <span class="s1">header</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s4">&quot;}&quot;</span><span class="s3">)</span>
+    <span class="s1">header </span><span class="s3">= </span><span class="s4">&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">header</span><span class="s3">)</span>
+
+    <span class="s7"># Add some spare space so that the array header can be modified in-place</span>
+    <span class="s7"># when changing the array size, e.g. when growing it by appending data at</span>
+    <span class="s7"># the end.</span>
+    <span class="s1">shape </span><span class="s3">= </span><span class="s1">d</span><span class="s3">[</span><span class="s4">'shape'</span><span class="s3">]</span>
+    <span class="s1">header </span><span class="s3">+= </span><span class="s4">&quot; &quot; </span><span class="s3">* ((</span><span class="s1">GROWTH_AXIS_MAX_DIGITS </span><span class="s3">- </span><span class="s1">len</span><span class="s3">(</span><span class="s1">repr</span><span class="s3">(</span>
+        <span class="s1">shape</span><span class="s3">[-</span><span class="s6">1 </span><span class="s2">if </span><span class="s1">d</span><span class="s3">[</span><span class="s4">'fortran_order'</span><span class="s3">] </span><span class="s2">else </span><span class="s6">0</span><span class="s3">]</span>
+    <span class="s3">))) </span><span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">shape</span><span class="s3">) &gt; </span><span class="s6">0 </span><span class="s2">else </span><span class="s6">0</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">version </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">header </span><span class="s3">= </span><span class="s1">_wrap_header_guess_version</span><span class="s3">(</span><span class="s1">header</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">header </span><span class="s3">= </span><span class="s1">_wrap_header</span><span class="s3">(</span><span class="s1">header</span><span class="s3">, </span><span class="s1">version</span><span class="s3">)</span>
+    <span class="s1">fp</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">header</span><span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;numpy.lib.format&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">write_array_header_1_0</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">, </span><span class="s1">d</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; Write the header for an array using the 1.0 format. 
+ 
+    Parameters 
+    ---------- 
+    fp : filelike object 
+    d : dict 
+        This has the appropriate entries for writing its string 
+        representation to the header of the file. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">_write_array_header</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">, </span><span class="s1">d</span><span class="s3">, (</span><span class="s6">1</span><span class="s3">, </span><span class="s6">0</span><span class="s3">))</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;numpy.lib.format&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">write_array_header_2_0</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">, </span><span class="s1">d</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; Write the header for an array using the 2.0 format. 
+        The 2.0 format allows storing very large structured arrays. 
+ 
+    Parameters 
+    ---------- 
+    fp : filelike object 
+    d : dict 
+        This has the appropriate entries for writing its string 
+        representation to the header of the file. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">_write_array_header</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">, </span><span class="s1">d</span><span class="s3">, (</span><span class="s6">2</span><span class="s3">, </span><span class="s6">0</span><span class="s3">))</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;numpy.lib.format&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">read_array_header_1_0</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">, </span><span class="s1">max_header_size</span><span class="s3">=</span><span class="s1">_MAX_HEADER_SIZE</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Read an array header from a filelike object using the 1.0 file format 
+    version. 
+ 
+    This will leave the file object located just after the header. 
+ 
+    Parameters 
+    ---------- 
+    fp : filelike object 
+        A file object or something with a `.read()` method like a file. 
+ 
+    Returns 
+    ------- 
+    shape : tuple of int 
+        The shape of the array. 
+    fortran_order : bool 
+        The array data will be written out directly if it is either 
+        C-contiguous or Fortran-contiguous. Otherwise, it will be made 
+        contiguous before writing it out. 
+    dtype : dtype 
+        The dtype of the file's data. 
+    max_header_size : int, optional 
+        Maximum allowed size of the header.  Large headers may not be safe 
+        to load securely and thus require explicitly passing a larger value. 
+        See :py:func:`ast.literal_eval()` for details. 
+ 
+    Raises 
+    ------ 
+    ValueError 
+        If the data is invalid. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s2">return </span><span class="s1">_read_array_header</span><span class="s3">(</span>
+            <span class="s1">fp</span><span class="s3">, </span><span class="s1">version</span><span class="s3">=(</span><span class="s6">1</span><span class="s3">, </span><span class="s6">0</span><span class="s3">), </span><span class="s1">max_header_size</span><span class="s3">=</span><span class="s1">max_header_size</span><span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;numpy.lib.format&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">read_array_header_2_0</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">, </span><span class="s1">max_header_size</span><span class="s3">=</span><span class="s1">_MAX_HEADER_SIZE</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Read an array header from a filelike object using the 2.0 file format 
+    version. 
+ 
+    This will leave the file object located just after the header. 
+ 
+    Parameters 
+    ---------- 
+    fp : filelike object 
+        A file object or something with a `.read()` method like a file. 
+    max_header_size : int, optional 
+        Maximum allowed size of the header.  Large headers may not be safe 
+        to load securely and thus require explicitly passing a larger value. 
+        See :py:func:`ast.literal_eval()` for details. 
+ 
+    Returns 
+    ------- 
+    shape : tuple of int 
+        The shape of the array. 
+    fortran_order : bool 
+        The array data will be written out directly if it is either 
+        C-contiguous or Fortran-contiguous. Otherwise, it will be made 
+        contiguous before writing it out. 
+    dtype : dtype 
+        The dtype of the file's data. 
+ 
+    Raises 
+    ------ 
+    ValueError 
+        If the data is invalid. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s2">return </span><span class="s1">_read_array_header</span><span class="s3">(</span>
+            <span class="s1">fp</span><span class="s3">, </span><span class="s1">version</span><span class="s3">=(</span><span class="s6">2</span><span class="s3">, </span><span class="s6">0</span><span class="s3">), </span><span class="s1">max_header_size</span><span class="s3">=</span><span class="s1">max_header_size</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_filter_header</span><span class="s3">(</span><span class="s1">s</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Clean up 'L' in npz header ints. 
+ 
+    Cleans up the 'L' in strings representing integers. Needed to allow npz 
+    headers produced in Python2 to be read in Python3. 
+ 
+    Parameters 
+    ---------- 
+    s : string 
+        Npy file header. 
+ 
+    Returns 
+    ------- 
+    header : str 
+        Cleaned up header. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s2">import </span><span class="s1">tokenize</span>
+    <span class="s2">from </span><span class="s1">io </span><span class="s2">import </span><span class="s1">StringIO</span>
+
+    <span class="s1">tokens </span><span class="s3">= []</span>
+    <span class="s1">last_token_was_number </span><span class="s3">= </span><span class="s2">False</span>
+    <span class="s2">for </span><span class="s1">token </span><span class="s2">in </span><span class="s1">tokenize</span><span class="s3">.</span><span class="s1">generate_tokens</span><span class="s3">(</span><span class="s1">StringIO</span><span class="s3">(</span><span class="s1">s</span><span class="s3">).</span><span class="s1">readline</span><span class="s3">):</span>
+        <span class="s1">token_type </span><span class="s3">= </span><span class="s1">token</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]</span>
+        <span class="s1">token_string </span><span class="s3">= </span><span class="s1">token</span><span class="s3">[</span><span class="s6">1</span><span class="s3">]</span>
+        <span class="s2">if </span><span class="s3">(</span><span class="s1">last_token_was_number </span><span class="s2">and</span>
+                <span class="s1">token_type </span><span class="s3">== </span><span class="s1">tokenize</span><span class="s3">.</span><span class="s1">NAME </span><span class="s2">and</span>
+                <span class="s1">token_string </span><span class="s3">== </span><span class="s4">&quot;L&quot;</span><span class="s3">):</span>
+            <span class="s2">continue</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">tokens</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">token</span><span class="s3">)</span>
+        <span class="s1">last_token_was_number </span><span class="s3">= (</span><span class="s1">token_type </span><span class="s3">== </span><span class="s1">tokenize</span><span class="s3">.</span><span class="s1">NUMBER</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">tokenize</span><span class="s3">.</span><span class="s1">untokenize</span><span class="s3">(</span><span class="s1">tokens</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_read_array_header</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">, </span><span class="s1">version</span><span class="s3">, </span><span class="s1">max_header_size</span><span class="s3">=</span><span class="s1">_MAX_HEADER_SIZE</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    see read_array_header_1_0 
+    &quot;&quot;&quot;</span>
+    <span class="s7"># Read an unsigned, little-endian short int which has the length of the</span>
+    <span class="s7"># header.</span>
+    <span class="s2">import </span><span class="s1">ast</span>
+    <span class="s2">import </span><span class="s1">struct</span>
+    <span class="s1">hinfo </span><span class="s3">= </span><span class="s1">_header_size_info</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">version</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">hinfo </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">f&quot;Invalid version </span><span class="s2">{</span><span class="s1">version</span><span class="s2">!r}</span><span class="s4">&quot;</span><span class="s3">)</span>
+    <span class="s1">hlength_type</span><span class="s3">, </span><span class="s1">encoding </span><span class="s3">= </span><span class="s1">hinfo</span>
+
+    <span class="s1">hlength_str </span><span class="s3">= </span><span class="s1">_read_bytes</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">, </span><span class="s1">struct</span><span class="s3">.</span><span class="s1">calcsize</span><span class="s3">(</span><span class="s1">hlength_type</span><span class="s3">), </span><span class="s4">&quot;array header length&quot;</span><span class="s3">)</span>
+    <span class="s1">header_length </span><span class="s3">= </span><span class="s1">struct</span><span class="s3">.</span><span class="s1">unpack</span><span class="s3">(</span><span class="s1">hlength_type</span><span class="s3">, </span><span class="s1">hlength_str</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]</span>
+    <span class="s1">header </span><span class="s3">= </span><span class="s1">_read_bytes</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">, </span><span class="s1">header_length</span><span class="s3">, </span><span class="s4">&quot;array header&quot;</span><span class="s3">)</span>
+    <span class="s1">header </span><span class="s3">= </span><span class="s1">header</span><span class="s3">.</span><span class="s1">decode</span><span class="s3">(</span><span class="s1">encoding</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">header</span><span class="s3">) &gt; </span><span class="s1">max_header_size</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+            <span class="s4">f&quot;Header info length (</span><span class="s2">{</span><span class="s1">len</span><span class="s3">(</span><span class="s1">header</span><span class="s3">)</span><span class="s2">}</span><span class="s4">) is large and may not be safe &quot;</span>
+            <span class="s4">&quot;to load securely.</span><span class="s2">\n</span><span class="s4">&quot;</span>
+            <span class="s4">&quot;To allow loading, adjust `max_header_size` or fully trust &quot;</span>
+            <span class="s4">&quot;the `.npy` file using `allow_pickle=True`.</span><span class="s2">\n</span><span class="s4">&quot;</span>
+            <span class="s4">&quot;For safety against large resource use or crashes, sandboxing &quot;</span>
+            <span class="s4">&quot;may be necessary.&quot;</span><span class="s3">)</span>
+
+    <span class="s7"># The header is a pretty-printed string representation of a literal</span>
+    <span class="s7"># Python dictionary with trailing newlines padded to an ARRAY_ALIGN byte</span>
+    <span class="s7"># boundary. The keys are strings.</span>
+    <span class="s7">#   &quot;shape&quot; : tuple of int</span>
+    <span class="s7">#   &quot;fortran_order&quot; : bool</span>
+    <span class="s7">#   &quot;descr&quot; : dtype.descr</span>
+    <span class="s7"># Versions (2, 0) and (1, 0) could have been created by a Python 2</span>
+    <span class="s7"># implementation before header filtering was implemented.</span>
+    <span class="s7">#</span>
+    <span class="s7"># For performance reasons, we try without _filter_header first though</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s1">d </span><span class="s3">= </span><span class="s1">ast</span><span class="s3">.</span><span class="s1">literal_eval</span><span class="s3">(</span><span class="s1">header</span><span class="s3">)</span>
+    <span class="s2">except </span><span class="s1">SyntaxError </span><span class="s2">as </span><span class="s1">e</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">version </span><span class="s3">&lt;= (</span><span class="s6">2</span><span class="s3">, </span><span class="s6">0</span><span class="s3">):</span>
+            <span class="s1">header </span><span class="s3">= </span><span class="s1">_filter_header</span><span class="s3">(</span><span class="s1">header</span><span class="s3">)</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">d </span><span class="s3">= </span><span class="s1">ast</span><span class="s3">.</span><span class="s1">literal_eval</span><span class="s3">(</span><span class="s1">header</span><span class="s3">)</span>
+            <span class="s2">except </span><span class="s1">SyntaxError </span><span class="s2">as </span><span class="s1">e2</span><span class="s3">:</span>
+                <span class="s1">msg </span><span class="s3">= </span><span class="s4">&quot;Cannot parse header: {!r}&quot;</span>
+                <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s1">msg</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">header</span><span class="s3">)) </span><span class="s2">from </span><span class="s1">e2</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">warnings</span><span class="s3">.</span><span class="s1">warn</span><span class="s3">(</span>
+                    <span class="s4">&quot;Reading `.npy` or `.npz` file required additional &quot;</span>
+                    <span class="s4">&quot;header parsing as it was created on Python 2. Save the &quot;</span>
+                    <span class="s4">&quot;file again to speed up loading and avoid this warning.&quot;</span><span class="s3">,</span>
+                    <span class="s1">UserWarning</span><span class="s3">, </span><span class="s1">stacklevel</span><span class="s3">=</span><span class="s6">4</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">msg </span><span class="s3">= </span><span class="s4">&quot;Cannot parse header: {!r}&quot;</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s1">msg</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">header</span><span class="s3">)) </span><span class="s2">from </span><span class="s1">e</span>
+    <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">d</span><span class="s3">, </span><span class="s1">dict</span><span class="s3">):</span>
+        <span class="s1">msg </span><span class="s3">= </span><span class="s4">&quot;Header is not a dictionary: {!r}&quot;</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s1">msg</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">d</span><span class="s3">))</span>
+
+    <span class="s2">if </span><span class="s1">EXPECTED_KEYS </span><span class="s3">!= </span><span class="s1">d</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">():</span>
+        <span class="s1">keys </span><span class="s3">= </span><span class="s1">sorted</span><span class="s3">(</span><span class="s1">d</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">())</span>
+        <span class="s1">msg </span><span class="s3">= </span><span class="s4">&quot;Header does not contain the correct keys: {!r}&quot;</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s1">msg</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">keys</span><span class="s3">))</span>
+
+    <span class="s7"># Sanity-check the values.</span>
+    <span class="s2">if </span><span class="s3">(</span><span class="s2">not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">d</span><span class="s3">[</span><span class="s4">'shape'</span><span class="s3">], </span><span class="s1">tuple</span><span class="s3">) </span><span class="s2">or</span>
+            <span class="s2">not </span><span class="s1">all</span><span class="s3">(</span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">x</span><span class="s3">, </span><span class="s1">int</span><span class="s3">) </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">d</span><span class="s3">[</span><span class="s4">'shape'</span><span class="s3">])):</span>
+        <span class="s1">msg </span><span class="s3">= </span><span class="s4">&quot;shape is not valid: {!r}&quot;</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s1">msg</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">d</span><span class="s3">[</span><span class="s4">'shape'</span><span class="s3">]))</span>
+    <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">d</span><span class="s3">[</span><span class="s4">'fortran_order'</span><span class="s3">], </span><span class="s1">bool</span><span class="s3">):</span>
+        <span class="s1">msg </span><span class="s3">= </span><span class="s4">&quot;fortran_order is not a valid bool: {!r}&quot;</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s1">msg</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">d</span><span class="s3">[</span><span class="s4">'fortran_order'</span><span class="s3">]))</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s1">dtype </span><span class="s3">= </span><span class="s1">descr_to_dtype</span><span class="s3">(</span><span class="s1">d</span><span class="s3">[</span><span class="s4">'descr'</span><span class="s3">])</span>
+    <span class="s2">except </span><span class="s1">TypeError </span><span class="s2">as </span><span class="s1">e</span><span class="s3">:</span>
+        <span class="s1">msg </span><span class="s3">= </span><span class="s4">&quot;descr is not a valid dtype descriptor: {!r}&quot;</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s1">msg</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">d</span><span class="s3">[</span><span class="s4">'descr'</span><span class="s3">])) </span><span class="s2">from </span><span class="s1">e</span>
+
+    <span class="s2">return </span><span class="s1">d</span><span class="s3">[</span><span class="s4">'shape'</span><span class="s3">], </span><span class="s1">d</span><span class="s3">[</span><span class="s4">'fortran_order'</span><span class="s3">], </span><span class="s1">dtype</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;numpy.lib.format&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">write_array</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">, </span><span class="s1">array</span><span class="s3">, </span><span class="s1">version</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">allow_pickle</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">pickle_kwargs</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Write an array to an NPY file, including a header. 
+ 
+    If the array is neither C-contiguous nor Fortran-contiguous AND the 
+    file_like object is not a real file object, this function will have to 
+    copy data in memory. 
+ 
+    Parameters 
+    ---------- 
+    fp : file_like object 
+        An open, writable file object, or similar object with a 
+        ``.write()`` method. 
+    array : ndarray 
+        The array to write to disk. 
+    version : (int, int) or None, optional 
+        The version number of the format. None means use the oldest 
+        supported version that is able to store the data.  Default: None 
+    allow_pickle : bool, optional 
+        Whether to allow writing pickled data. Default: True 
+    pickle_kwargs : dict, optional 
+        Additional keyword arguments to pass to pickle.dump, excluding 
+        'protocol'. These are only useful when pickling objects in object 
+        arrays to Python 2 compatible format. 
+ 
+    Raises 
+    ------ 
+    ValueError 
+        If the array cannot be persisted. This includes the case of 
+        allow_pickle=False and array being an object array. 
+    Various other errors 
+        If the array contains Python objects as part of its dtype, the 
+        process of pickling them may raise various errors if the objects 
+        are not picklable. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">_check_version</span><span class="s3">(</span><span class="s1">version</span><span class="s3">)</span>
+    <span class="s1">_write_array_header</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">, </span><span class="s1">header_data_from_array_1_0</span><span class="s3">(</span><span class="s1">array</span><span class="s3">), </span><span class="s1">version</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">array</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">== </span><span class="s6">0</span><span class="s3">:</span>
+        <span class="s1">buffersize </span><span class="s3">= </span><span class="s6">0</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s7"># Set buffer size to 16 MiB to hide the Python loop overhead.</span>
+        <span class="s1">buffersize </span><span class="s3">= </span><span class="s1">max</span><span class="s3">(</span><span class="s6">16 </span><span class="s3">* </span><span class="s6">1024 </span><span class="s3">** </span><span class="s6">2 </span><span class="s3">// </span><span class="s1">array</span><span class="s3">.</span><span class="s1">itemsize</span><span class="s3">, </span><span class="s6">1</span><span class="s3">)</span>
+
+    <span class="s1">dtype_class </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">array</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">array</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">hasobject </span><span class="s2">or not </span><span class="s1">dtype_class</span><span class="s3">.</span><span class="s1">_legacy</span><span class="s3">:</span>
+        <span class="s7"># We contain Python objects so we cannot write out the data</span>
+        <span class="s7"># directly.  Instead, we will pickle it out</span>
+        <span class="s2">if not </span><span class="s1">allow_pickle</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">array</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">hasobject</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;Object arrays cannot be saved when &quot;</span>
+                                 <span class="s4">&quot;allow_pickle=False&quot;</span><span class="s3">)</span>
+            <span class="s2">if not </span><span class="s1">dtype_class</span><span class="s3">.</span><span class="s1">_legacy</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;User-defined dtypes cannot be saved &quot;</span>
+                                 <span class="s4">&quot;when allow_pickle=False&quot;</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">pickle_kwargs </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">pickle_kwargs </span><span class="s3">= {}</span>
+        <span class="s1">pickle</span><span class="s3">.</span><span class="s1">dump</span><span class="s3">(</span><span class="s1">array</span><span class="s3">, </span><span class="s1">fp</span><span class="s3">, </span><span class="s1">protocol</span><span class="s3">=</span><span class="s6">4</span><span class="s3">, **</span><span class="s1">pickle_kwargs</span><span class="s3">)</span>
+    <span class="s2">elif </span><span class="s1">array</span><span class="s3">.</span><span class="s1">flags</span><span class="s3">.</span><span class="s1">f_contiguous </span><span class="s2">and not </span><span class="s1">array</span><span class="s3">.</span><span class="s1">flags</span><span class="s3">.</span><span class="s1">c_contiguous</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">isfileobj</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">):</span>
+            <span class="s1">array</span><span class="s3">.</span><span class="s1">T</span><span class="s3">.</span><span class="s1">tofile</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">for </span><span class="s1">chunk </span><span class="s2">in </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">nditer</span><span class="s3">(</span>
+                    <span class="s1">array</span><span class="s3">, </span><span class="s1">flags</span><span class="s3">=[</span><span class="s4">'external_loop'</span><span class="s3">, </span><span class="s4">'buffered'</span><span class="s3">, </span><span class="s4">'zerosize_ok'</span><span class="s3">],</span>
+                    <span class="s1">buffersize</span><span class="s3">=</span><span class="s1">buffersize</span><span class="s3">, </span><span class="s1">order</span><span class="s3">=</span><span class="s4">'F'</span><span class="s3">):</span>
+                <span class="s1">fp</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">chunk</span><span class="s3">.</span><span class="s1">tobytes</span><span class="s3">(</span><span class="s4">'C'</span><span class="s3">))</span>
+    <span class="s2">elif </span><span class="s1">isfileobj</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">):</span>
+        <span class="s1">array</span><span class="s3">.</span><span class="s1">tofile</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">for </span><span class="s1">chunk </span><span class="s2">in </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">nditer</span><span class="s3">(</span>
+                <span class="s1">array</span><span class="s3">, </span><span class="s1">flags</span><span class="s3">=[</span><span class="s4">'external_loop'</span><span class="s3">, </span><span class="s4">'buffered'</span><span class="s3">, </span><span class="s4">'zerosize_ok'</span><span class="s3">],</span>
+                <span class="s1">buffersize</span><span class="s3">=</span><span class="s1">buffersize</span><span class="s3">, </span><span class="s1">order</span><span class="s3">=</span><span class="s4">'C'</span><span class="s3">):</span>
+            <span class="s1">fp</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">chunk</span><span class="s3">.</span><span class="s1">tobytes</span><span class="s3">(</span><span class="s4">'C'</span><span class="s3">))</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;numpy.lib.format&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">read_array</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">, </span><span class="s1">allow_pickle</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, </span><span class="s1">pickle_kwargs</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, *,</span>
+               <span class="s1">max_header_size</span><span class="s3">=</span><span class="s1">_MAX_HEADER_SIZE</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Read an array from an NPY file. 
+ 
+    Parameters 
+    ---------- 
+    fp : file_like object 
+        If this is not a real file object, then this may take extra memory 
+        and time. 
+    allow_pickle : bool, optional 
+        Whether to allow writing pickled data. Default: False 
+    pickle_kwargs : dict 
+        Additional keyword arguments to pass to pickle.load. These are only 
+        useful when loading object arrays saved on Python 2. 
+    max_header_size : int, optional 
+        Maximum allowed size of the header.  Large headers may not be safe 
+        to load securely and thus require explicitly passing a larger value. 
+        See :py:func:`ast.literal_eval()` for details. 
+        This option is ignored when `allow_pickle` is passed.  In that case 
+        the file is by definition trusted and the limit is unnecessary. 
+ 
+    Returns 
+    ------- 
+    array : ndarray 
+        The array from the data on disk. 
+ 
+    Raises 
+    ------ 
+    ValueError 
+        If the data is invalid, or allow_pickle=False and the file contains 
+        an object array. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">allow_pickle</span><span class="s3">:</span>
+        <span class="s7"># Effectively ignore max_header_size, since `allow_pickle` indicates</span>
+        <span class="s7"># that the input is fully trusted.</span>
+        <span class="s1">max_header_size </span><span class="s3">= </span><span class="s6">2</span><span class="s3">**</span><span class="s6">64</span>
+
+    <span class="s1">version </span><span class="s3">= </span><span class="s1">read_magic</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">)</span>
+    <span class="s1">_check_version</span><span class="s3">(</span><span class="s1">version</span><span class="s3">)</span>
+    <span class="s1">shape</span><span class="s3">, </span><span class="s1">fortran_order</span><span class="s3">, </span><span class="s1">dtype </span><span class="s3">= </span><span class="s1">_read_array_header</span><span class="s3">(</span>
+            <span class="s1">fp</span><span class="s3">, </span><span class="s1">version</span><span class="s3">, </span><span class="s1">max_header_size</span><span class="s3">=</span><span class="s1">max_header_size</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">shape</span><span class="s3">) == </span><span class="s6">0</span><span class="s3">:</span>
+        <span class="s1">count </span><span class="s3">= </span><span class="s6">1</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">count </span><span class="s3">= </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">multiply</span><span class="s3">.</span><span class="s1">reduce</span><span class="s3">(</span><span class="s1">shape</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">)</span>
+
+    <span class="s7"># Now read the actual data.</span>
+    <span class="s2">if </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">hasobject</span><span class="s3">:</span>
+        <span class="s7"># The array contained Python objects. We need to unpickle the data.</span>
+        <span class="s2">if not </span><span class="s1">allow_pickle</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;Object arrays cannot be loaded when &quot;</span>
+                             <span class="s4">&quot;allow_pickle=False&quot;</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">pickle_kwargs </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">pickle_kwargs </span><span class="s3">= {}</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">array </span><span class="s3">= </span><span class="s1">pickle</span><span class="s3">.</span><span class="s1">load</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">, **</span><span class="s1">pickle_kwargs</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s1">UnicodeError </span><span class="s2">as </span><span class="s1">err</span><span class="s3">:</span>
+            <span class="s7"># Friendlier error message</span>
+            <span class="s2">raise </span><span class="s1">UnicodeError</span><span class="s3">(</span>
+                <span class="s4">f&quot;Unpickling a python object failed: </span><span class="s2">{</span><span class="s1">err</span><span class="s2">!r}\n</span><span class="s4">&quot;</span>
+                <span class="s4">&quot;You may need to pass the encoding= option &quot;</span>
+                <span class="s4">&quot;to numpy.load&quot;</span>
+            <span class="s3">) </span><span class="s2">from </span><span class="s1">err</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">isfileobj</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">):</span>
+            <span class="s7"># We can use the fast fromfile() function.</span>
+            <span class="s1">array </span><span class="s3">= </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">fromfile</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">count</span><span class="s3">=</span><span class="s1">count</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s7"># This is not a real file. We have to read it the</span>
+            <span class="s7"># memory-intensive way.</span>
+            <span class="s7"># crc32 module fails on reads greater than 2 ** 32 bytes,</span>
+            <span class="s7"># breaking large reads from gzip streams. Chunk reads to</span>
+            <span class="s7"># BUFFER_SIZE bytes to avoid issue and reduce memory overhead</span>
+            <span class="s7"># of the read. In non-chunked case count &lt; max_read_count, so</span>
+            <span class="s7"># only one read is performed.</span>
+
+            <span class="s7"># Use np.ndarray instead of np.empty since the latter does</span>
+            <span class="s7"># not correctly instantiate zero-width string dtypes; see</span>
+            <span class="s7"># https://github.com/numpy/numpy/pull/6430</span>
+            <span class="s1">array </span><span class="s3">= </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">(</span><span class="s1">count</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+
+            <span class="s2">if </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">&gt; </span><span class="s6">0</span><span class="s3">:</span>
+                <span class="s7"># If dtype.itemsize == 0 then there's nothing more to read</span>
+                <span class="s1">max_read_count </span><span class="s3">= </span><span class="s1">BUFFER_SIZE </span><span class="s3">// </span><span class="s1">min</span><span class="s3">(</span><span class="s1">BUFFER_SIZE</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize</span><span class="s3">)</span>
+
+                <span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s6">0</span><span class="s3">, </span><span class="s1">count</span><span class="s3">, </span><span class="s1">max_read_count</span><span class="s3">):</span>
+                    <span class="s1">read_count </span><span class="s3">= </span><span class="s1">min</span><span class="s3">(</span><span class="s1">max_read_count</span><span class="s3">, </span><span class="s1">count </span><span class="s3">- </span><span class="s1">i</span><span class="s3">)</span>
+                    <span class="s1">read_size </span><span class="s3">= </span><span class="s1">int</span><span class="s3">(</span><span class="s1">read_count </span><span class="s3">* </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize</span><span class="s3">)</span>
+                    <span class="s1">data </span><span class="s3">= </span><span class="s1">_read_bytes</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">, </span><span class="s1">read_size</span><span class="s3">, </span><span class="s4">&quot;array data&quot;</span><span class="s3">)</span>
+                    <span class="s1">array</span><span class="s3">[</span><span class="s1">i</span><span class="s3">:</span><span class="s1">i </span><span class="s3">+ </span><span class="s1">read_count</span><span class="s3">] = </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">frombuffer</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">,</span>
+                                                             <span class="s1">count</span><span class="s3">=</span><span class="s1">read_count</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">array</span><span class="s3">.</span><span class="s1">size </span><span class="s3">!= </span><span class="s1">count</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                <span class="s4">&quot;Failed to read all data for array. &quot;</span>
+                <span class="s4">f&quot;Expected </span><span class="s2">{</span><span class="s1">shape</span><span class="s2">} </span><span class="s4">= </span><span class="s2">{</span><span class="s1">count</span><span class="s2">} </span><span class="s4">elements, &quot;</span>
+                <span class="s4">f&quot;could only read </span><span class="s2">{</span><span class="s1">array</span><span class="s3">.</span><span class="s1">size</span><span class="s2">} </span><span class="s4">elements. &quot;</span>
+                <span class="s4">&quot;(file seems not fully written?)&quot;</span>
+            <span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">fortran_order</span><span class="s3">:</span>
+            <span class="s1">array </span><span class="s3">= </span><span class="s1">array</span><span class="s3">.</span><span class="s1">reshape</span><span class="s3">(</span><span class="s1">shape</span><span class="s3">[::-</span><span class="s6">1</span><span class="s3">])</span>
+            <span class="s1">array </span><span class="s3">= </span><span class="s1">array</span><span class="s3">.</span><span class="s1">transpose</span><span class="s3">()</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">array </span><span class="s3">= </span><span class="s1">array</span><span class="s3">.</span><span class="s1">reshape</span><span class="s3">(</span><span class="s1">shape</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">array</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;numpy.lib.format&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">open_memmap</span><span class="s3">(</span><span class="s1">filename</span><span class="s3">, </span><span class="s1">mode</span><span class="s3">=</span><span class="s4">'r+'</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">shape</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                <span class="s1">fortran_order</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, </span><span class="s1">version</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, *,</span>
+                <span class="s1">max_header_size</span><span class="s3">=</span><span class="s1">_MAX_HEADER_SIZE</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Open a .npy file as a memory-mapped array. 
+ 
+    This may be used to read an existing file or create a new one. 
+ 
+    Parameters 
+    ---------- 
+    filename : str or path-like 
+        The name of the file on disk.  This may *not* be a file-like 
+        object. 
+    mode : str, optional 
+        The mode in which to open the file; the default is 'r+'.  In 
+        addition to the standard file modes, 'c' is also accepted to mean 
+        &quot;copy on write.&quot;  See `memmap` for the available mode strings. 
+    dtype : data-type, optional 
+        The data type of the array if we are creating a new file in &quot;write&quot; 
+        mode, if not, `dtype` is ignored.  The default value is None, which 
+        results in a data-type of `float64`. 
+    shape : tuple of int 
+        The shape of the array if we are creating a new file in &quot;write&quot; 
+        mode, in which case this parameter is required.  Otherwise, this 
+        parameter is ignored and is thus optional. 
+    fortran_order : bool, optional 
+        Whether the array should be Fortran-contiguous (True) or 
+        C-contiguous (False, the default) if we are creating a new file in 
+        &quot;write&quot; mode. 
+    version : tuple of int (major, minor) or None 
+        If the mode is a &quot;write&quot; mode, then this is the version of the file 
+        format used to create the file.  None means use the oldest 
+        supported version that is able to store the data.  Default: None 
+    max_header_size : int, optional 
+        Maximum allowed size of the header.  Large headers may not be safe 
+        to load securely and thus require explicitly passing a larger value. 
+        See :py:func:`ast.literal_eval()` for details. 
+ 
+    Returns 
+    ------- 
+    marray : memmap 
+        The memory-mapped array. 
+ 
+    Raises 
+    ------ 
+    ValueError 
+        If the data or the mode is invalid. 
+    OSError 
+        If the file is not found or cannot be opened correctly. 
+ 
+    See Also 
+    -------- 
+    numpy.memmap 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">isfileobj</span><span class="s3">(</span><span class="s1">filename</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;Filename must be a string or a path-like object.&quot;</span>
+                         <span class="s4">&quot;  Memmap cannot use existing file handles.&quot;</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s4">'w' </span><span class="s2">in </span><span class="s1">mode</span><span class="s3">:</span>
+        <span class="s7"># We are creating the file, not reading it.</span>
+        <span class="s7"># Check if we ought to create the file.</span>
+        <span class="s1">_check_version</span><span class="s3">(</span><span class="s1">version</span><span class="s3">)</span>
+        <span class="s7"># Ensure that the given dtype is an authentic dtype object rather</span>
+        <span class="s7"># than just something that can be interpreted as a dtype object.</span>
+        <span class="s1">dtype </span><span class="s3">= </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">hasobject</span><span class="s3">:</span>
+            <span class="s1">msg </span><span class="s3">= </span><span class="s4">&quot;Array can't be memory-mapped: Python objects in dtype.&quot;</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s1">msg</span><span class="s3">)</span>
+        <span class="s1">d </span><span class="s3">= {</span>
+            <span class="s4">&quot;descr&quot;</span><span class="s3">: </span><span class="s1">dtype_to_descr</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">),</span>
+            <span class="s4">&quot;fortran_order&quot;</span><span class="s3">: </span><span class="s1">fortran_order</span><span class="s3">,</span>
+            <span class="s4">&quot;shape&quot;</span><span class="s3">: </span><span class="s1">shape</span><span class="s3">,</span>
+        <span class="s3">}</span>
+        <span class="s7"># If we got here, then it should be safe to create the file.</span>
+        <span class="s2">with </span><span class="s1">open</span><span class="s3">(</span><span class="s1">os</span><span class="s3">.</span><span class="s1">fspath</span><span class="s3">(</span><span class="s1">filename</span><span class="s3">), </span><span class="s1">mode </span><span class="s3">+ </span><span class="s4">'b'</span><span class="s3">) </span><span class="s2">as </span><span class="s1">fp</span><span class="s3">:</span>
+            <span class="s1">_write_array_header</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">, </span><span class="s1">d</span><span class="s3">, </span><span class="s1">version</span><span class="s3">)</span>
+            <span class="s1">offset </span><span class="s3">= </span><span class="s1">fp</span><span class="s3">.</span><span class="s1">tell</span><span class="s3">()</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s7"># Read the header of the file first.</span>
+        <span class="s2">with </span><span class="s1">open</span><span class="s3">(</span><span class="s1">os</span><span class="s3">.</span><span class="s1">fspath</span><span class="s3">(</span><span class="s1">filename</span><span class="s3">), </span><span class="s4">'rb'</span><span class="s3">) </span><span class="s2">as </span><span class="s1">fp</span><span class="s3">:</span>
+            <span class="s1">version </span><span class="s3">= </span><span class="s1">read_magic</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">)</span>
+            <span class="s1">_check_version</span><span class="s3">(</span><span class="s1">version</span><span class="s3">)</span>
+
+            <span class="s1">shape</span><span class="s3">, </span><span class="s1">fortran_order</span><span class="s3">, </span><span class="s1">dtype </span><span class="s3">= </span><span class="s1">_read_array_header</span><span class="s3">(</span>
+                    <span class="s1">fp</span><span class="s3">, </span><span class="s1">version</span><span class="s3">, </span><span class="s1">max_header_size</span><span class="s3">=</span><span class="s1">max_header_size</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">hasobject</span><span class="s3">:</span>
+                <span class="s1">msg </span><span class="s3">= </span><span class="s4">&quot;Array can't be memory-mapped: Python objects in dtype.&quot;</span>
+                <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s1">msg</span><span class="s3">)</span>
+            <span class="s1">offset </span><span class="s3">= </span><span class="s1">fp</span><span class="s3">.</span><span class="s1">tell</span><span class="s3">()</span>
+
+    <span class="s2">if </span><span class="s1">fortran_order</span><span class="s3">:</span>
+        <span class="s1">order </span><span class="s3">= </span><span class="s4">'F'</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">order </span><span class="s3">= </span><span class="s4">'C'</span>
+
+    <span class="s7"># We need to change a write-only mode to a read-write mode since we've</span>
+    <span class="s7"># already written data to the file.</span>
+    <span class="s2">if </span><span class="s1">mode </span><span class="s3">== </span><span class="s4">'w+'</span><span class="s3">:</span>
+        <span class="s1">mode </span><span class="s3">= </span><span class="s4">'r+'</span>
+
+    <span class="s1">marray </span><span class="s3">= </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">memmap</span><span class="s3">(</span><span class="s1">filename</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">shape</span><span class="s3">=</span><span class="s1">shape</span><span class="s3">, </span><span class="s1">order</span><span class="s3">=</span><span class="s1">order</span><span class="s3">,</span>
+        <span class="s1">mode</span><span class="s3">=</span><span class="s1">mode</span><span class="s3">, </span><span class="s1">offset</span><span class="s3">=</span><span class="s1">offset</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">marray</span>
+
+
+<span class="s2">def </span><span class="s1">_read_bytes</span><span class="s3">(</span><span class="s1">fp</span><span class="s3">, </span><span class="s1">size</span><span class="s3">, </span><span class="s1">error_template</span><span class="s3">=</span><span class="s4">&quot;ran out of data&quot;</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Read from file-like object until size bytes are read. 
+    Raises ValueError if not EOF is encountered before size bytes are read. 
+    Non-blocking objects only supported if they derive from io objects. 
+ 
+    Required as e.g. ZipExtFile in python 2.6 can return less data than 
+    requested. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">data </span><span class="s3">= </span><span class="s5">b&quot;&quot;</span>
+    <span class="s2">while True</span><span class="s3">:</span>
+        <span class="s7"># io files (default in python3) return None or raise on</span>
+        <span class="s7"># would-block, python2 file will truncate, probably nothing can be</span>
+        <span class="s7"># done about that.  note that regular files can't be non-blocking</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">r </span><span class="s3">= </span><span class="s1">fp</span><span class="s3">.</span><span class="s1">read</span><span class="s3">(</span><span class="s1">size </span><span class="s3">- </span><span class="s1">len</span><span class="s3">(</span><span class="s1">data</span><span class="s3">))</span>
+            <span class="s1">data </span><span class="s3">+= </span><span class="s1">r</span>
+            <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">r</span><span class="s3">) == </span><span class="s6">0 </span><span class="s2">or </span><span class="s1">len</span><span class="s3">(</span><span class="s1">data</span><span class="s3">) == </span><span class="s1">size</span><span class="s3">:</span>
+                <span class="s2">break</span>
+        <span class="s2">except </span><span class="s1">BlockingIOError</span><span class="s3">:</span>
+            <span class="s2">pass</span>
+    <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">data</span><span class="s3">) != </span><span class="s1">size</span><span class="s3">:</span>
+        <span class="s1">msg </span><span class="s3">= </span><span class="s4">&quot;EOF: reading %s, expected %d bytes got %d&quot;</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s1">msg </span><span class="s3">% (</span><span class="s1">error_template</span><span class="s3">, </span><span class="s1">size</span><span class="s3">, </span><span class="s1">len</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)))</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">data</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;numpy.lib.format&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">isfileobj</span><span class="s3">(</span><span class="s1">f</span><span class="s3">):</span>
+    <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">f</span><span class="s3">, (</span><span class="s1">io</span><span class="s3">.</span><span class="s1">FileIO</span><span class="s3">, </span><span class="s1">io</span><span class="s3">.</span><span class="s1">BufferedReader</span><span class="s3">, </span><span class="s1">io</span><span class="s3">.</span><span class="s1">BufferedWriter</span><span class="s3">)):</span>
+        <span class="s2">return False</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s7"># BufferedReader/Writer may raise OSError when</span>
+        <span class="s7"># fetching `fileno()` (e.g. when wrapping BytesIO).</span>
+        <span class="s1">f</span><span class="s3">.</span><span class="s1">fileno</span><span class="s3">()</span>
+        <span class="s2">return True</span>
+    <span class="s2">except </span><span class="s1">OSError</span><span class="s3">:</span>
+        <span class="s2">return False</span>
+</pre>
+</body>
+</html>

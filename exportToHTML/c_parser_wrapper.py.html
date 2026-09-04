@@ -1,0 +1,418 @@
+<html>
+<head>
+<title>c_parser_wrapper.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+.s6 { color: #5f826b; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+c_parser_wrapper.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s1">collections </span><span class="s0">import </span><span class="s1">defaultdict</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">TYPE_CHECKING</span>
+<span class="s0">import </span><span class="s1">warnings</span>
+
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_libs </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">lib</span><span class="s2">,</span>
+    <span class="s1">parsers</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">compat</span><span class="s2">.</span><span class="s1">_optional </span><span class="s0">import </span><span class="s1">import_optional_dependency</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">errors </span><span class="s0">import </span><span class="s1">DtypeWarning</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">util</span><span class="s2">.</span><span class="s1">_exceptions </span><span class="s0">import </span><span class="s1">find_stack_level</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">dtypes</span><span class="s2">.</span><span class="s1">common </span><span class="s0">import </span><span class="s1">pandas_dtype</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">dtypes</span><span class="s2">.</span><span class="s1">concat </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">concat_compat</span><span class="s2">,</span>
+    <span class="s1">union_categoricals</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">dtypes</span><span class="s2">.</span><span class="s1">dtypes </span><span class="s0">import </span><span class="s1">CategoricalDtype</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">indexes</span><span class="s2">.</span><span class="s1">api </span><span class="s0">import </span><span class="s1">ensure_index_from_sequences</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">io</span><span class="s2">.</span><span class="s1">common </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">dedup_names</span><span class="s2">,</span>
+    <span class="s1">is_potential_multi_index</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">io</span><span class="s2">.</span><span class="s1">parsers</span><span class="s2">.</span><span class="s1">base_parser </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">ParserBase</span><span class="s2">,</span>
+    <span class="s1">ParserError</span><span class="s2">,</span>
+    <span class="s1">date_converter</span><span class="s2">,</span>
+    <span class="s1">evaluate_callable_usecols</span><span class="s2">,</span>
+    <span class="s1">is_index_col</span><span class="s2">,</span>
+    <span class="s1">validate_parse_dates_presence</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s0">if </span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">collections</span><span class="s2">.</span><span class="s1">abc </span><span class="s0">import </span><span class="s2">(</span>
+        <span class="s1">Hashable</span><span class="s2">,</span>
+        <span class="s1">Mapping</span><span class="s2">,</span>
+        <span class="s1">Sequence</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+    <span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_typing </span><span class="s0">import </span><span class="s2">(</span>
+        <span class="s1">AnyArrayLike</span><span class="s2">,</span>
+        <span class="s1">ArrayLike</span><span class="s2">,</span>
+        <span class="s1">DtypeArg</span><span class="s2">,</span>
+        <span class="s1">DtypeObj</span><span class="s2">,</span>
+        <span class="s1">ReadCsvBuffer</span><span class="s2">,</span>
+        <span class="s1">SequenceT</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+    <span class="s0">from </span><span class="s1">pandas </span><span class="s0">import </span><span class="s2">(</span>
+        <span class="s1">Index</span><span class="s2">,</span>
+        <span class="s1">MultiIndex</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">CParserWrapper</span><span class="s2">(</span><span class="s1">ParserBase</span><span class="s2">):</span>
+    <span class="s1">low_memory</span><span class="s2">: </span><span class="s1">bool</span>
+    <span class="s1">_reader</span><span class="s2">: </span><span class="s1">parsers</span><span class="s2">.</span><span class="s1">TextReader</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">src</span><span class="s2">: </span><span class="s1">ReadCsvBuffer</span><span class="s2">[</span><span class="s1">str</span><span class="s2">], **</span><span class="s1">kwds</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">kwds</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">kwds </span><span class="s2">= </span><span class="s1">kwds</span>
+        <span class="s1">kwds </span><span class="s2">= </span><span class="s1">kwds</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">low_memory </span><span class="s2">= </span><span class="s1">kwds</span><span class="s2">.</span><span class="s1">pop</span><span class="s2">(</span><span class="s3">&quot;low_memory&quot;</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)</span>
+
+        <span class="s4"># #2442</span>
+        <span class="s1">kwds</span><span class="s2">[</span><span class="s3">&quot;allow_leading_cols&quot;</span><span class="s2">] = </span><span class="s1">self</span><span class="s2">.</span><span class="s1">index_col </span><span class="s0">is not False</span>
+
+        <span class="s4"># GH20529, validate usecol arg before TextReader</span>
+        <span class="s1">kwds</span><span class="s2">[</span><span class="s3">&quot;usecols&quot;</span><span class="s2">] = </span><span class="s1">self</span><span class="s2">.</span><span class="s1">usecols</span>
+
+        <span class="s4"># Have to pass int, would break tests using TextReader directly otherwise :(</span>
+        <span class="s1">kwds</span><span class="s2">[</span><span class="s3">&quot;on_bad_lines&quot;</span><span class="s2">] = </span><span class="s1">self</span><span class="s2">.</span><span class="s1">on_bad_lines</span><span class="s2">.</span><span class="s1">value</span>
+
+        <span class="s0">for </span><span class="s1">key </span><span class="s0">in </span><span class="s2">(</span>
+            <span class="s3">&quot;storage_options&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;encoding&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;memory_map&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;compression&quot;</span><span class="s2">,</span>
+        <span class="s2">):</span>
+            <span class="s1">kwds</span><span class="s2">.</span><span class="s1">pop</span><span class="s2">(</span><span class="s1">key</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+
+        <span class="s1">kwds</span><span class="s2">[</span><span class="s3">&quot;dtype&quot;</span><span class="s2">] = </span><span class="s1">ensure_dtype_objs</span><span class="s2">(</span><span class="s1">kwds</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s3">&quot;dtype&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">))</span>
+        <span class="s0">if </span><span class="s3">&quot;dtype_backend&quot; </span><span class="s0">not in </span><span class="s1">kwds </span><span class="s0">or </span><span class="s1">kwds</span><span class="s2">[</span><span class="s3">&quot;dtype_backend&quot;</span><span class="s2">] </span><span class="s0">is </span><span class="s1">lib</span><span class="s2">.</span><span class="s1">no_default</span><span class="s2">:</span>
+            <span class="s1">kwds</span><span class="s2">[</span><span class="s3">&quot;dtype_backend&quot;</span><span class="s2">] = </span><span class="s3">&quot;numpy&quot;</span>
+        <span class="s0">if </span><span class="s1">kwds</span><span class="s2">[</span><span class="s3">&quot;dtype_backend&quot;</span><span class="s2">] == </span><span class="s3">&quot;pyarrow&quot;</span><span class="s2">:</span>
+            <span class="s4"># Fail here loudly instead of in cython after reading</span>
+            <span class="s1">import_optional_dependency</span><span class="s2">(</span><span class="s3">&quot;pyarrow&quot;</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_reader </span><span class="s2">= </span><span class="s1">parsers</span><span class="s2">.</span><span class="s1">TextReader</span><span class="s2">(</span><span class="s1">src</span><span class="s2">, **</span><span class="s1">kwds</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">unnamed_cols </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_reader</span><span class="s2">.</span><span class="s1">unnamed_cols</span>
+
+        <span class="s1">passed_names </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">names </span><span class="s0">is None</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_reader</span><span class="s2">.</span><span class="s1">header </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">names </span><span class="s2">= </span><span class="s0">None</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s2">(</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">names</span><span class="s2">,</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">index_names</span><span class="s2">,</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">col_names</span><span class="s2">,</span>
+                <span class="s1">passed_names</span><span class="s2">,</span>
+            <span class="s2">) = </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_extract_multi_indexer_columns</span><span class="s2">(</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">_reader</span><span class="s2">.</span><span class="s1">header</span><span class="s2">,</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">index_names</span><span class="s2">,</span>
+                <span class="s1">passed_names</span><span class="s2">,</span>
+            <span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">names </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">names </span><span class="s2">= </span><span class="s1">list</span><span class="s2">(</span><span class="s1">range</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_reader</span><span class="s2">.</span><span class="s1">table_width</span><span class="s2">))</span>
+
+        <span class="s4"># gh-9755</span>
+        <span class="s4">#</span>
+        <span class="s4"># need to set orig_names here first</span>
+        <span class="s4"># so that proper indexing can be done</span>
+        <span class="s4"># with _set_noconvert_columns</span>
+        <span class="s4">#</span>
+        <span class="s4"># once names has been filtered, we will</span>
+        <span class="s4"># then set orig_names again to names</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">orig_names </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">names</span><span class="s2">[:]</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">usecols</span><span class="s2">:</span>
+            <span class="s1">usecols </span><span class="s2">= </span><span class="s1">evaluate_callable_usecols</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">usecols</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">orig_names</span><span class="s2">)</span>
+
+            <span class="s4"># GH 14671</span>
+            <span class="s4"># assert for mypy, orig_names is List or None, None would error in issubset</span>
+            <span class="s0">assert </span><span class="s1">self</span><span class="s2">.</span><span class="s1">orig_names </span><span class="s0">is not None</span>
+            <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">usecols_dtype </span><span class="s2">== </span><span class="s3">&quot;string&quot; </span><span class="s0">and not </span><span class="s1">set</span><span class="s2">(</span><span class="s1">usecols</span><span class="s2">).</span><span class="s1">issubset</span><span class="s2">(</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">orig_names</span>
+            <span class="s2">):</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">_validate_usecols_names</span><span class="s2">(</span><span class="s1">usecols</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">orig_names</span><span class="s2">)</span>
+
+            <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">names</span><span class="s2">) &gt; </span><span class="s1">len</span><span class="s2">(</span><span class="s1">usecols</span><span class="s2">):</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">names </span><span class="s2">= [</span>
+                    <span class="s1">n</span>
+                    <span class="s0">for </span><span class="s1">i</span><span class="s2">, </span><span class="s1">n </span><span class="s0">in </span><span class="s1">enumerate</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">names</span><span class="s2">)</span>
+                    <span class="s0">if </span><span class="s2">(</span><span class="s1">i </span><span class="s0">in </span><span class="s1">usecols </span><span class="s0">or </span><span class="s1">n </span><span class="s0">in </span><span class="s1">usecols</span><span class="s2">)</span>
+                <span class="s2">]</span>
+
+            <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">names</span><span class="s2">) &lt; </span><span class="s1">len</span><span class="s2">(</span><span class="s1">usecols</span><span class="s2">):</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">_validate_usecols_names</span><span class="s2">(</span>
+                    <span class="s1">usecols</span><span class="s2">,</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">names</span><span class="s2">,</span>
+                <span class="s2">)</span>
+
+        <span class="s1">validate_parse_dates_presence</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">parse_dates</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">names</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_set_noconvert_columns</span><span class="s2">()</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">orig_names </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">names</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_reader</span><span class="s2">.</span><span class="s1">leading_cols </span><span class="s2">== </span><span class="s5">0 </span><span class="s0">and </span><span class="s1">is_index_col</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">index_col</span><span class="s2">):</span>
+            <span class="s2">(</span>
+                <span class="s1">index_names</span><span class="s2">,</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">names</span><span class="s2">,</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">index_col</span><span class="s2">,</span>
+            <span class="s2">) = </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_clean_index_names</span><span class="s2">(</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">names</span><span class="s2">,</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">index_col</span><span class="s2">,</span>
+            <span class="s2">)</span>
+
+            <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">index_names </span><span class="s0">is None</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">index_names </span><span class="s2">= </span><span class="s1">index_names</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_reader</span><span class="s2">.</span><span class="s1">header </span><span class="s0">is None and not </span><span class="s1">passed_names</span><span class="s2">:</span>
+            <span class="s0">assert </span><span class="s1">self</span><span class="s2">.</span><span class="s1">index_names </span><span class="s0">is not None</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">index_names </span><span class="s2">= [</span><span class="s0">None</span><span class="s2">] * </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">index_names</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_implicit_index </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_reader</span><span class="s2">.</span><span class="s1">leading_cols </span><span class="s2">&gt; </span><span class="s5">0</span>
+
+    <span class="s0">def </span><span class="s1">close</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s4"># close handles opened by C parser</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_reader</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s0">except </span><span class="s1">ValueError</span><span class="s2">:</span>
+            <span class="s0">pass</span>
+
+    <span class="s0">def </span><span class="s1">_set_noconvert_columns</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Set the columns that should not undergo dtype conversions. 
+ 
+        Currently, any column that is involved with date parsing will not 
+        undergo such conversions. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">assert </span><span class="s1">self</span><span class="s2">.</span><span class="s1">orig_names </span><span class="s0">is not None</span>
+        <span class="s4"># error: Cannot determine type of 'names'</span>
+
+        <span class="s4"># much faster than using orig_names.index(x) xref GH#44106</span>
+        <span class="s1">names_dict </span><span class="s2">= {</span><span class="s1">x</span><span class="s2">: </span><span class="s1">i </span><span class="s0">for </span><span class="s1">i</span><span class="s2">, </span><span class="s1">x </span><span class="s0">in </span><span class="s1">enumerate</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">orig_names</span><span class="s2">)}</span>
+        <span class="s1">col_indices </span><span class="s2">= [</span><span class="s1">names_dict</span><span class="s2">[</span><span class="s1">x</span><span class="s2">] </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">names</span><span class="s2">]</span>
+        <span class="s1">noconvert_columns </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_set_noconvert_dtype_columns</span><span class="s2">(</span>
+            <span class="s1">col_indices</span><span class="s2">,</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">names</span><span class="s2">,</span>
+        <span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">col </span><span class="s0">in </span><span class="s1">noconvert_columns</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_reader</span><span class="s2">.</span><span class="s1">set_noconvert</span><span class="s2">(</span><span class="s1">col</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">read</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">nrows</span><span class="s2">: </span><span class="s1">int </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span>
+        <span class="s1">Index </span><span class="s2">| </span><span class="s1">MultiIndex </span><span class="s2">| </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">Sequence</span><span class="s2">[</span><span class="s1">Hashable</span><span class="s2">] | </span><span class="s1">MultiIndex</span><span class="s2">,</span>
+        <span class="s1">Mapping</span><span class="s2">[</span><span class="s1">Hashable</span><span class="s2">, </span><span class="s1">AnyArrayLike</span><span class="s2">],</span>
+    <span class="s2">]:</span>
+        <span class="s1">index</span><span class="s2">: </span><span class="s1">Index </span><span class="s2">| </span><span class="s1">MultiIndex </span><span class="s2">| </span><span class="s0">None</span>
+        <span class="s1">column_names</span><span class="s2">: </span><span class="s1">Sequence</span><span class="s2">[</span><span class="s1">Hashable</span><span class="s2">] | </span><span class="s1">MultiIndex</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">low_memory</span><span class="s2">:</span>
+                <span class="s1">chunks </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_reader</span><span class="s2">.</span><span class="s1">read_low_memory</span><span class="s2">(</span><span class="s1">nrows</span><span class="s2">)</span>
+                <span class="s4"># destructive to chunks</span>
+                <span class="s1">data </span><span class="s2">= </span><span class="s1">_concatenate_chunks</span><span class="s2">(</span><span class="s1">chunks</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">names</span><span class="s2">)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">data </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_reader</span><span class="s2">.</span><span class="s1">read</span><span class="s2">(</span><span class="s1">nrows</span><span class="s2">)</span>
+        <span class="s0">except </span><span class="s1">StopIteration</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_first_chunk</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">_first_chunk </span><span class="s2">= </span><span class="s0">False</span>
+                <span class="s4"># assert for mypy, orig_names is List or None, None would error in</span>
+                <span class="s4"># list(...) in dedup_names</span>
+                <span class="s0">assert </span><span class="s1">self</span><span class="s2">.</span><span class="s1">orig_names </span><span class="s0">is not None</span>
+                <span class="s1">names </span><span class="s2">= </span><span class="s1">dedup_names</span><span class="s2">(</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">orig_names</span><span class="s2">,</span>
+                    <span class="s1">is_potential_multi_index</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">orig_names</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">index_col</span><span class="s2">),</span>
+                <span class="s2">)</span>
+                <span class="s1">index</span><span class="s2">, </span><span class="s1">columns</span><span class="s2">, </span><span class="s1">col_dict </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_empty_meta</span><span class="s2">(</span>
+                    <span class="s1">names</span><span class="s2">,</span>
+                    <span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">,</span>
+                <span class="s2">)</span>
+                <span class="s4"># error: Incompatible types in assignment (expression has type</span>
+                <span class="s4"># &quot;list[Hashable] | MultiIndex&quot;, variable has type &quot;list[Hashable]&quot;)</span>
+                <span class="s1">columns </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_make_multi_index_columns</span><span class="s2">(  </span><span class="s4"># type: ignore[assignment]</span>
+                    <span class="s1">columns</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">col_names</span>
+                <span class="s2">)</span>
+
+                <span class="s1">columns </span><span class="s2">= </span><span class="s1">_filter_usecols</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">usecols</span><span class="s2">, </span><span class="s1">columns</span><span class="s2">)</span>
+                <span class="s1">columns_set </span><span class="s2">= </span><span class="s1">set</span><span class="s2">(</span><span class="s1">columns</span><span class="s2">)</span>
+
+                <span class="s1">col_dict </span><span class="s2">= {</span><span class="s1">k</span><span class="s2">: </span><span class="s1">v </span><span class="s0">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">v </span><span class="s0">in </span><span class="s1">col_dict</span><span class="s2">.</span><span class="s1">items</span><span class="s2">() </span><span class="s0">if </span><span class="s1">k </span><span class="s0">in </span><span class="s1">columns_set</span><span class="s2">}</span>
+
+                <span class="s0">return </span><span class="s1">index</span><span class="s2">, </span><span class="s1">columns</span><span class="s2">, </span><span class="s1">col_dict</span>
+
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+                <span class="s0">raise</span>
+
+        <span class="s4"># Done with first read, next time raise StopIteration</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_first_chunk </span><span class="s2">= </span><span class="s0">False</span>
+
+        <span class="s1">names </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">names</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_reader</span><span class="s2">.</span><span class="s1">leading_cols</span><span class="s2">:</span>
+            <span class="s4"># implicit index, no index names</span>
+            <span class="s1">arrays </span><span class="s2">= []</span>
+
+            <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">index_col </span><span class="s0">and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_reader</span><span class="s2">.</span><span class="s1">leading_cols </span><span class="s2">!= </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">index_col</span><span class="s2">):</span>
+                <span class="s0">raise </span><span class="s1">ParserError</span><span class="s2">(</span>
+                    <span class="s3">&quot;Could not construct index. Requested to use &quot;</span>
+                    <span class="s3">f&quot;</span><span class="s0">{</span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">index_col</span><span class="s2">)</span><span class="s0">} </span><span class="s3">number of columns, but &quot;</span>
+                    <span class="s3">f&quot;</span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_reader</span><span class="s2">.</span><span class="s1">leading_cols</span><span class="s0">} </span><span class="s3">left to parse.&quot;</span>
+                <span class="s2">)</span>
+
+            <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_reader</span><span class="s2">.</span><span class="s1">leading_cols</span><span class="s2">):</span>
+                <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">index_col </span><span class="s0">is None</span><span class="s2">:</span>
+                    <span class="s1">values </span><span class="s2">= </span><span class="s1">data</span><span class="s2">.</span><span class="s1">pop</span><span class="s2">(</span><span class="s1">i</span><span class="s2">)</span>
+                <span class="s0">else</span><span class="s2">:</span>
+                    <span class="s1">values </span><span class="s2">= </span><span class="s1">data</span><span class="s2">.</span><span class="s1">pop</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">index_col</span><span class="s2">[</span><span class="s1">i</span><span class="s2">])</span>
+
+                <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_should_parse_dates</span><span class="s2">(</span><span class="s1">i</span><span class="s2">):</span>
+                    <span class="s1">values </span><span class="s2">= </span><span class="s1">date_converter</span><span class="s2">(</span>
+                        <span class="s1">values</span><span class="s2">,</span>
+                        <span class="s1">col</span><span class="s2">=(</span>
+                            <span class="s1">self</span><span class="s2">.</span><span class="s1">index_names</span><span class="s2">[</span><span class="s1">i</span><span class="s2">]</span>
+                            <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">index_names </span><span class="s0">is not None</span>
+                            <span class="s0">else None</span>
+                        <span class="s2">),</span>
+                        <span class="s1">dayfirst</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dayfirst</span><span class="s2">,</span>
+                        <span class="s1">cache_dates</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">cache_dates</span><span class="s2">,</span>
+                        <span class="s1">date_format</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">date_format</span><span class="s2">,</span>
+                    <span class="s2">)</span>
+                <span class="s1">arrays</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">values</span><span class="s2">)</span>
+
+            <span class="s1">index </span><span class="s2">= </span><span class="s1">ensure_index_from_sequences</span><span class="s2">(</span><span class="s1">arrays</span><span class="s2">)</span>
+
+            <span class="s1">names </span><span class="s2">= </span><span class="s1">_filter_usecols</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">usecols</span><span class="s2">, </span><span class="s1">names</span><span class="s2">)</span>
+
+            <span class="s1">names </span><span class="s2">= </span><span class="s1">dedup_names</span><span class="s2">(</span><span class="s1">names</span><span class="s2">, </span><span class="s1">is_potential_multi_index</span><span class="s2">(</span><span class="s1">names</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">index_col</span><span class="s2">))</span>
+
+            <span class="s4"># rename dict keys</span>
+            <span class="s1">data_tups </span><span class="s2">= </span><span class="s1">sorted</span><span class="s2">(</span><span class="s1">data</span><span class="s2">.</span><span class="s1">items</span><span class="s2">())</span>
+            <span class="s1">data </span><span class="s2">= {</span><span class="s1">k</span><span class="s2">: </span><span class="s1">v </span><span class="s0">for </span><span class="s1">k</span><span class="s2">, (</span><span class="s1">i</span><span class="s2">, </span><span class="s1">v</span><span class="s2">) </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">names</span><span class="s2">, </span><span class="s1">data_tups</span><span class="s2">, </span><span class="s1">strict</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)}</span>
+
+            <span class="s1">date_data </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_do_date_conversions</span><span class="s2">(</span><span class="s1">names</span><span class="s2">, </span><span class="s1">data</span><span class="s2">)</span>
+
+            <span class="s4"># maybe create a mi on the columns</span>
+            <span class="s1">column_names </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_make_multi_index_columns</span><span class="s2">(</span><span class="s1">names</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">col_names</span><span class="s2">)</span>
+
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s4"># rename dict keys</span>
+            <span class="s1">data_tups </span><span class="s2">= </span><span class="s1">sorted</span><span class="s2">(</span><span class="s1">data</span><span class="s2">.</span><span class="s1">items</span><span class="s2">())</span>
+
+            <span class="s4"># ugh, mutation</span>
+
+            <span class="s4"># assert for mypy, orig_names is List or None, None would error in list(...)</span>
+            <span class="s0">assert </span><span class="s1">self</span><span class="s2">.</span><span class="s1">orig_names </span><span class="s0">is not None</span>
+            <span class="s1">names </span><span class="s2">= </span><span class="s1">list</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">orig_names</span><span class="s2">)</span>
+            <span class="s1">names </span><span class="s2">= </span><span class="s1">dedup_names</span><span class="s2">(</span><span class="s1">names</span><span class="s2">, </span><span class="s1">is_potential_multi_index</span><span class="s2">(</span><span class="s1">names</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">index_col</span><span class="s2">))</span>
+
+            <span class="s1">names </span><span class="s2">= </span><span class="s1">_filter_usecols</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">usecols</span><span class="s2">, </span><span class="s1">names</span><span class="s2">)</span>
+
+            <span class="s4"># columns as list</span>
+            <span class="s1">alldata </span><span class="s2">= [</span><span class="s1">x</span><span class="s2">[</span><span class="s5">1</span><span class="s2">] </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">data_tups</span><span class="s2">]</span>
+            <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">usecols </span><span class="s0">is None</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">_check_data_length</span><span class="s2">(</span><span class="s1">names</span><span class="s2">, </span><span class="s1">alldata</span><span class="s2">)</span>
+
+            <span class="s1">data </span><span class="s2">= {</span><span class="s1">k</span><span class="s2">: </span><span class="s1">v </span><span class="s0">for </span><span class="s1">k</span><span class="s2">, (</span><span class="s1">i</span><span class="s2">, </span><span class="s1">v</span><span class="s2">) </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">names</span><span class="s2">, </span><span class="s1">data_tups</span><span class="s2">, </span><span class="s1">strict</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)}</span>
+
+            <span class="s1">date_data </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_do_date_conversions</span><span class="s2">(</span><span class="s1">names</span><span class="s2">, </span><span class="s1">data</span><span class="s2">)</span>
+            <span class="s1">index</span><span class="s2">, </span><span class="s1">column_names </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_make_index</span><span class="s2">(</span><span class="s1">alldata</span><span class="s2">, </span><span class="s1">names</span><span class="s2">)</span>
+
+        <span class="s0">return </span><span class="s1">index</span><span class="s2">, </span><span class="s1">column_names</span><span class="s2">, </span><span class="s1">date_data</span>
+
+
+<span class="s0">def </span><span class="s1">_filter_usecols</span><span class="s2">(</span><span class="s1">usecols</span><span class="s2">, </span><span class="s1">names</span><span class="s2">: </span><span class="s1">SequenceT</span><span class="s2">) </span><span class="s1">-&gt; SequenceT </span><span class="s2">| </span><span class="s1">list</span><span class="s2">[</span><span class="s1">Hashable</span><span class="s2">]:</span>
+    <span class="s4"># hackish</span>
+    <span class="s1">usecols </span><span class="s2">= </span><span class="s1">evaluate_callable_usecols</span><span class="s2">(</span><span class="s1">usecols</span><span class="s2">, </span><span class="s1">names</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">usecols </span><span class="s0">is not None and </span><span class="s1">len</span><span class="s2">(</span><span class="s1">names</span><span class="s2">) != </span><span class="s1">len</span><span class="s2">(</span><span class="s1">usecols</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s2">[</span><span class="s1">name </span><span class="s0">for </span><span class="s1">i</span><span class="s2">, </span><span class="s1">name </span><span class="s0">in </span><span class="s1">enumerate</span><span class="s2">(</span><span class="s1">names</span><span class="s2">) </span><span class="s0">if </span><span class="s1">i </span><span class="s0">in </span><span class="s1">usecols </span><span class="s0">or </span><span class="s1">name </span><span class="s0">in </span><span class="s1">usecols</span><span class="s2">]</span>
+    <span class="s0">return </span><span class="s1">names</span>
+
+
+<span class="s0">def </span><span class="s1">_concatenate_chunks</span><span class="s2">(</span>
+    <span class="s1">chunks</span><span class="s2">: </span><span class="s1">list</span><span class="s2">[</span><span class="s1">dict</span><span class="s2">[</span><span class="s1">int</span><span class="s2">, </span><span class="s1">ArrayLike</span><span class="s2">]], </span><span class="s1">column_names</span><span class="s2">: </span><span class="s1">list</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]</span>
+<span class="s2">) </span><span class="s1">-&gt; dict</span><span class="s2">:</span>
+    <span class="s6">&quot;&quot;&quot; 
+    Concatenate chunks of data read with low_memory=True. 
+ 
+    The tricky part is handling Categoricals, where different chunks 
+    may have different inferred categories. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">names </span><span class="s2">= </span><span class="s1">list</span><span class="s2">(</span><span class="s1">chunks</span><span class="s2">[</span><span class="s5">0</span><span class="s2">].</span><span class="s1">keys</span><span class="s2">())</span>
+    <span class="s1">warning_columns </span><span class="s2">= []</span>
+
+    <span class="s1">result</span><span class="s2">: </span><span class="s1">dict </span><span class="s2">= {}</span>
+    <span class="s0">for </span><span class="s1">name </span><span class="s0">in </span><span class="s1">names</span><span class="s2">:</span>
+        <span class="s1">arrs </span><span class="s2">= [</span><span class="s1">chunk</span><span class="s2">.</span><span class="s1">pop</span><span class="s2">(</span><span class="s1">name</span><span class="s2">) </span><span class="s0">for </span><span class="s1">chunk </span><span class="s0">in </span><span class="s1">chunks</span><span class="s2">]</span>
+        <span class="s4"># Check each arr for consistent types.</span>
+        <span class="s1">dtypes </span><span class="s2">= {</span><span class="s1">a</span><span class="s2">.</span><span class="s1">dtype </span><span class="s0">for </span><span class="s1">a </span><span class="s0">in </span><span class="s1">arrs</span><span class="s2">}</span>
+        <span class="s1">non_cat_dtypes </span><span class="s2">= {</span><span class="s1">x </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">dtypes </span><span class="s0">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">CategoricalDtype</span><span class="s2">)}</span>
+
+        <span class="s1">dtype </span><span class="s2">= </span><span class="s1">dtypes</span><span class="s2">.</span><span class="s1">pop</span><span class="s2">()</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">CategoricalDtype</span><span class="s2">):</span>
+            <span class="s1">result</span><span class="s2">[</span><span class="s1">name</span><span class="s2">] = </span><span class="s1">union_categoricals</span><span class="s2">(</span><span class="s1">arrs</span><span class="s2">, </span><span class="s1">sort_categories</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">result</span><span class="s2">[</span><span class="s1">name</span><span class="s2">] = </span><span class="s1">concat_compat</span><span class="s2">(</span><span class="s1">arrs</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">non_cat_dtypes</span><span class="s2">) &gt; </span><span class="s5">1 </span><span class="s0">and </span><span class="s1">result</span><span class="s2">[</span><span class="s1">name</span><span class="s2">].</span><span class="s1">dtype </span><span class="s2">== </span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s1">object</span><span class="s2">):</span>
+                <span class="s1">warning_columns</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">column_names</span><span class="s2">[</span><span class="s1">name</span><span class="s2">])</span>
+
+    <span class="s0">if </span><span class="s1">warning_columns</span><span class="s2">:</span>
+        <span class="s1">warning_names </span><span class="s2">= </span><span class="s3">&quot;, &quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span>
+            <span class="s2">[</span><span class="s3">f&quot;</span><span class="s0">{</span><span class="s1">index</span><span class="s0">}</span><span class="s3">: </span><span class="s0">{</span><span class="s1">name</span><span class="s0">}</span><span class="s3">&quot; </span><span class="s0">for </span><span class="s1">index</span><span class="s2">, </span><span class="s1">name </span><span class="s0">in </span><span class="s1">enumerate</span><span class="s2">(</span><span class="s1">warning_columns</span><span class="s2">)]</span>
+        <span class="s2">)</span>
+        <span class="s1">warning_message </span><span class="s2">= </span><span class="s3">&quot; &quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span>
+            <span class="s2">[</span>
+                <span class="s3">f&quot;Columns (</span><span class="s0">{</span><span class="s1">warning_names</span><span class="s0">}</span><span class="s3">) have mixed types. &quot;</span>
+                <span class="s3">f&quot;Specify dtype option on import or set low_memory=False.&quot;</span>
+            <span class="s2">]</span>
+        <span class="s2">)</span>
+        <span class="s1">warnings</span><span class="s2">.</span><span class="s1">warn</span><span class="s2">(</span><span class="s1">warning_message</span><span class="s2">, </span><span class="s1">DtypeWarning</span><span class="s2">, </span><span class="s1">stacklevel</span><span class="s2">=</span><span class="s1">find_stack_level</span><span class="s2">())</span>
+    <span class="s0">return </span><span class="s1">result</span>
+
+
+<span class="s0">def </span><span class="s1">ensure_dtype_objs</span><span class="s2">(</span>
+    <span class="s1">dtype</span><span class="s2">: </span><span class="s1">DtypeArg </span><span class="s2">| </span><span class="s1">dict</span><span class="s2">[</span><span class="s1">Hashable</span><span class="s2">, </span><span class="s1">DtypeArg</span><span class="s2">] | </span><span class="s0">None</span><span class="s2">,</span>
+<span class="s2">) </span><span class="s1">-&gt; DtypeObj </span><span class="s2">| </span><span class="s1">dict</span><span class="s2">[</span><span class="s1">Hashable</span><span class="s2">, </span><span class="s1">DtypeObj</span><span class="s2">] | </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s6">&quot;&quot;&quot; 
+    Ensure we have either None, a dtype object, or a dictionary mapping to 
+    dtype objects. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">defaultdict</span><span class="s2">):</span>
+        <span class="s4"># &quot;None&quot; not callable  [misc]</span>
+        <span class="s1">default_dtype </span><span class="s2">= </span><span class="s1">pandas_dtype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">default_factory</span><span class="s2">())  </span><span class="s4"># type: ignore[misc]</span>
+        <span class="s1">dtype_converted</span><span class="s2">: </span><span class="s1">defaultdict </span><span class="s2">= </span><span class="s1">defaultdict</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s1">default_dtype</span><span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">key </span><span class="s0">in </span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">keys</span><span class="s2">():</span>
+            <span class="s1">dtype_converted</span><span class="s2">[</span><span class="s1">key</span><span class="s2">] = </span><span class="s1">pandas_dtype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">[</span><span class="s1">key</span><span class="s2">])</span>
+        <span class="s0">return </span><span class="s1">dtype_converted</span>
+    <span class="s0">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">dict</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s2">{</span><span class="s1">k</span><span class="s2">: </span><span class="s1">pandas_dtype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">[</span><span class="s1">k</span><span class="s2">]) </span><span class="s0">for </span><span class="s1">k </span><span class="s0">in </span><span class="s1">dtype</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">dtype </span><span class="s0">is not None</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">pandas_dtype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">dtype</span>
+</pre>
+</body>
+</html>

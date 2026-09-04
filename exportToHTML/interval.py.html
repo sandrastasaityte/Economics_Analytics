@@ -1,0 +1,1493 @@
+<html>
+<head>
+<title>interval.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #7a7e85;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+interval.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;define the IntervalIndex&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">from </span><span class="s1">operator </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">le</span><span class="s3">,</span>
+    <span class="s1">lt</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s3">,</span>
+    <span class="s1">Any</span><span class="s3">,</span>
+    <span class="s1">Literal</span><span class="s3">,</span>
+    <span class="s1">Self</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs </span><span class="s2">import </span><span class="s1">lib</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs</span><span class="s3">.</span><span class="s1">interval </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">Interval</span><span class="s3">,</span>
+    <span class="s1">IntervalMixin</span><span class="s3">,</span>
+    <span class="s1">IntervalTree</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs</span><span class="s3">.</span><span class="s1">tslibs </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">BaseOffset</span><span class="s3">,</span>
+    <span class="s1">Period</span><span class="s3">,</span>
+    <span class="s1">Timedelta</span><span class="s3">,</span>
+    <span class="s1">Timestamp</span><span class="s3">,</span>
+    <span class="s1">to_offset</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">errors </span><span class="s2">import </span><span class="s1">InvalidIndexError</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">_decorators </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">cache_readonly</span><span class="s3">,</span>
+    <span class="s1">set_module</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">_exceptions </span><span class="s2">import </span><span class="s1">rewrite_exception</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">cast </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">find_common_type</span><span class="s3">,</span>
+    <span class="s1">infer_dtype_from_scalar</span><span class="s3">,</span>
+    <span class="s1">maybe_box_datetimelike</span><span class="s3">,</span>
+    <span class="s1">maybe_downcast_numeric</span><span class="s3">,</span>
+    <span class="s1">maybe_unbox_numpy_scalar</span><span class="s3">,</span>
+    <span class="s1">maybe_upcast_numeric_to_64bit</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">common </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">ensure_platform_int</span><span class="s3">,</span>
+    <span class="s1">is_float_dtype</span><span class="s3">,</span>
+    <span class="s1">is_integer</span><span class="s3">,</span>
+    <span class="s1">is_integer_dtype</span><span class="s3">,</span>
+    <span class="s1">is_list_like</span><span class="s3">,</span>
+    <span class="s1">is_number</span><span class="s3">,</span>
+    <span class="s1">is_object_dtype</span><span class="s3">,</span>
+    <span class="s1">is_scalar</span><span class="s3">,</span>
+    <span class="s1">is_string_dtype</span><span class="s3">,</span>
+    <span class="s1">pandas_dtype</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">dtypes </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">DatetimeTZDtype</span><span class="s3">,</span>
+    <span class="s1">IntervalDtype</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">missing </span><span class="s2">import </span><span class="s1">is_valid_na_for_dtype</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">algorithms </span><span class="s2">import </span><span class="s1">unique</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">arrays</span><span class="s3">.</span><span class="s1">datetimelike </span><span class="s2">import </span><span class="s1">validate_periods</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">arrays</span><span class="s3">.</span><span class="s1">interval </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">IntervalArray</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">import </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">common </span><span class="s2">as </span><span class="s1">com</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">indexers </span><span class="s2">import </span><span class="s1">is_valid_positional_slice</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">indexes</span><span class="s3">.</span><span class="s1">base </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">Index</span><span class="s3">,</span>
+    <span class="s1">ensure_index</span><span class="s3">,</span>
+    <span class="s1">maybe_extract_name</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">indexes</span><span class="s3">.</span><span class="s1">datetimes </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">DatetimeIndex</span><span class="s3">,</span>
+    <span class="s1">date_range</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">indexes</span><span class="s3">.</span><span class="s1">extension </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">ExtensionIndex</span><span class="s3">,</span>
+    <span class="s1">inherit_names</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">indexes</span><span class="s3">.</span><span class="s1">multi </span><span class="s2">import </span><span class="s1">MultiIndex</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">indexes</span><span class="s3">.</span><span class="s1">timedeltas </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">TimedeltaIndex</span><span class="s3">,</span>
+    <span class="s1">timedelta_range</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">collections</span><span class="s3">.</span><span class="s1">abc </span><span class="s2">import </span><span class="s1">Hashable</span>
+
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_typing </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">Dtype</span><span class="s3">,</span>
+        <span class="s1">DtypeObj</span><span class="s3">,</span>
+        <span class="s1">IntervalClosedType</span><span class="s3">,</span>
+        <span class="s1">npt</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_get_next_label</span><span class="s3">(</span><span class="s1">label</span><span class="s3">):</span>
+    <span class="s4"># see test_slice_locs_with_ints_and_floats_succeeds</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">label</span><span class="s3">, </span><span class="s5">&quot;dtype&quot;</span><span class="s3">, </span><span class="s1">type</span><span class="s3">(</span><span class="s1">label</span><span class="s3">))</span>
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">label</span><span class="s3">, (</span><span class="s1">Timestamp</span><span class="s3">, </span><span class="s1">Timedelta</span><span class="s3">)):</span>
+        <span class="s1">dtype </span><span class="s3">= </span><span class="s5">&quot;datetime64[ns]&quot;</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">pandas_dtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">is_np_dtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s5">&quot;mM&quot;</span><span class="s3">) </span><span class="s2">or </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">DatetimeTZDtype</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">label </span><span class="s3">+ </span><span class="s1">np</span><span class="s3">.</span><span class="s1">timedelta64</span><span class="s3">(</span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;ns&quot;</span><span class="s3">)</span>
+    <span class="s2">elif </span><span class="s1">is_integer_dtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">label </span><span class="s3">+ </span><span class="s6">1</span>
+    <span class="s2">elif </span><span class="s1">is_float_dtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">np</span><span class="s3">.</span><span class="s1">nextafter</span><span class="s3">(</span><span class="s1">label</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">inf</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span><span class="s5">f&quot;cannot determine next label for type </span><span class="s2">{</span><span class="s1">type</span><span class="s3">(</span><span class="s1">label</span><span class="s3">)</span><span class="s2">!r}</span><span class="s5">&quot;</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_get_prev_label</span><span class="s3">(</span><span class="s1">label</span><span class="s3">):</span>
+    <span class="s4"># see test_slice_locs_with_ints_and_floats_succeeds</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">label</span><span class="s3">, </span><span class="s5">&quot;dtype&quot;</span><span class="s3">, </span><span class="s1">type</span><span class="s3">(</span><span class="s1">label</span><span class="s3">))</span>
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">label</span><span class="s3">, (</span><span class="s1">Timestamp</span><span class="s3">, </span><span class="s1">Timedelta</span><span class="s3">)):</span>
+        <span class="s1">dtype </span><span class="s3">= </span><span class="s5">&quot;datetime64[ns]&quot;</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">pandas_dtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">is_np_dtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s5">&quot;mM&quot;</span><span class="s3">) </span><span class="s2">or </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">DatetimeTZDtype</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">label </span><span class="s3">- </span><span class="s1">np</span><span class="s3">.</span><span class="s1">timedelta64</span><span class="s3">(</span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;ns&quot;</span><span class="s3">)</span>
+    <span class="s2">elif </span><span class="s1">is_integer_dtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">label </span><span class="s3">- </span><span class="s6">1</span>
+    <span class="s2">elif </span><span class="s1">is_float_dtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">np</span><span class="s3">.</span><span class="s1">nextafter</span><span class="s3">(</span><span class="s1">label</span><span class="s3">, -</span><span class="s1">np</span><span class="s3">.</span><span class="s1">inf</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span><span class="s5">f&quot;cannot determine next label for type </span><span class="s2">{</span><span class="s1">type</span><span class="s3">(</span><span class="s1">label</span><span class="s3">)</span><span class="s2">!r}</span><span class="s5">&quot;</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_new_IntervalIndex</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">d</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    This is called upon unpickling, rather than the default which doesn't have 
+    arguments and breaks __new__. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">return </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">from_arrays</span><span class="s3">(**</span><span class="s1">d</span><span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">inherit_names</span><span class="s3">([</span><span class="s5">&quot;set_closed&quot;</span><span class="s3">, </span><span class="s5">&quot;to_tuples&quot;</span><span class="s3">], </span><span class="s1">IntervalArray</span><span class="s3">, </span><span class="s1">wrap</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+<span class="s3">@</span><span class="s1">inherit_names</span><span class="s3">(</span>
+    <span class="s3">[</span>
+        <span class="s5">&quot;__array__&quot;</span><span class="s3">,</span>
+        <span class="s5">&quot;overlaps&quot;</span><span class="s3">,</span>
+        <span class="s5">&quot;contains&quot;</span><span class="s3">,</span>
+        <span class="s5">&quot;closed_left&quot;</span><span class="s3">,</span>
+        <span class="s5">&quot;closed_right&quot;</span><span class="s3">,</span>
+        <span class="s5">&quot;open_left&quot;</span><span class="s3">,</span>
+        <span class="s5">&quot;open_right&quot;</span><span class="s3">,</span>
+        <span class="s5">&quot;is_empty&quot;</span><span class="s3">,</span>
+    <span class="s3">],</span>
+    <span class="s1">IntervalArray</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s3">@</span><span class="s1">inherit_names</span><span class="s3">([</span><span class="s5">&quot;is_non_overlapping_monotonic&quot;</span><span class="s3">, </span><span class="s5">&quot;closed&quot;</span><span class="s3">], </span><span class="s1">IntervalArray</span><span class="s3">, </span><span class="s1">cache</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s5">&quot;pandas&quot;</span><span class="s3">)</span>
+<span class="s2">class </span><span class="s1">IntervalIndex</span><span class="s3">(</span><span class="s1">ExtensionIndex</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Immutable index of intervals that are closed on the same side. 
+ 
+    Parameters 
+    ---------- 
+    data : array-like (1-dimensional) 
+        Array-like (ndarray, :class:`DateTimeArray`, :class:`TimeDeltaArray`) containing 
+        Interval objects from which to build the IntervalIndex. 
+    closed : {'left', 'right', 'both', 'neither'}, default 'right' 
+        Whether the intervals are closed on the left-side, right-side, both or 
+        neither. 
+    dtype : dtype or None, default None 
+        If None, dtype will be inferred. 
+    copy : bool, default None 
+        Whether to copy input data, only relevant for array, Series, and Index 
+        inputs (for other input, e.g. a list, a new array is created anyway). 
+        Defaults to True for array input and False for Index/Series. 
+        Set to False to avoid copying array input at your own risk (if you 
+        know the input data won't be modified elsewhere). 
+        Set to True to force copying Series/Index input up front. 
+    name : object, optional 
+         Name to be stored in the index. 
+    verify_integrity : bool, default True 
+        Verify that the IntervalIndex is valid. 
+ 
+    Attributes 
+    ---------- 
+    left 
+    right 
+    closed 
+    mid 
+    length 
+    is_empty 
+    is_non_overlapping_monotonic 
+    is_overlapping 
+    values 
+ 
+    Methods 
+    ------- 
+    from_arrays 
+    from_tuples 
+    from_breaks 
+    contains 
+    overlaps 
+    set_closed 
+    to_tuples 
+ 
+    See Also 
+    -------- 
+    Index : The base pandas Index type. 
+    Interval : A bounded slice-like interval; the elements of an IntervalIndex. 
+    interval_range : Function to create a fixed frequency IntervalIndex. 
+    cut : Bin values into discrete Intervals. 
+    qcut : Bin values into equal-sized Intervals based on rank or sample quantiles. 
+ 
+    Notes 
+    ----- 
+    See the `user guide 
+    &lt;https://pandas.pydata.org/pandas-docs/stable/user_guide/advanced.html#intervalindex&gt;`__ 
+    for more. 
+ 
+    Examples 
+    -------- 
+    A new ``IntervalIndex`` is typically constructed using 
+    :func:`interval_range`: 
+ 
+    &gt;&gt;&gt; pd.interval_range(start=0, end=5) 
+    IntervalIndex([(0, 1], (1, 2], (2, 3], (3, 4], (4, 5]], 
+                  dtype='interval[int64, right]') 
+ 
+    It may also be constructed using one of the constructor 
+    methods: :meth:`IntervalIndex.from_arrays`, 
+    :meth:`IntervalIndex.from_breaks`, and :meth:`IntervalIndex.from_tuples`. 
+ 
+    See further examples in the doc strings of ``interval_range`` and the 
+    mentioned constructor methods. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">_typ </span><span class="s3">= </span><span class="s5">&quot;intervalindex&quot;</span>
+
+    <span class="s4"># annotate properties pinned via inherit_names</span>
+    <span class="s1">closed</span><span class="s3">: </span><span class="s1">IntervalClosedType</span>
+    <span class="s1">is_non_overlapping_monotonic</span><span class="s3">: </span><span class="s1">bool</span>
+    <span class="s1">closed_left</span><span class="s3">: </span><span class="s1">bool</span>
+    <span class="s1">closed_right</span><span class="s3">: </span><span class="s1">bool</span>
+    <span class="s1">open_left</span><span class="s3">: </span><span class="s1">bool</span>
+    <span class="s1">open_right</span><span class="s3">: </span><span class="s1">bool</span>
+
+    <span class="s1">_data</span><span class="s3">: </span><span class="s1">IntervalArray</span>
+    <span class="s1">_values</span><span class="s3">: </span><span class="s1">IntervalArray</span>
+    <span class="s1">_can_hold_strings </span><span class="s3">= </span><span class="s2">False</span>
+    <span class="s1">_data_cls </span><span class="s3">= </span><span class="s1">IntervalArray</span>
+
+    <span class="s4"># --------------------------------------------------------------------</span>
+    <span class="s4"># Constructors</span>
+
+    <span class="s2">def </span><span class="s1">__new__</span><span class="s3">(</span>
+        <span class="s1">cls</span><span class="s3">,</span>
+        <span class="s1">data</span><span class="s3">,</span>
+        <span class="s1">closed</span><span class="s3">: </span><span class="s1">IntervalClosedType </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">dtype</span><span class="s3">: </span><span class="s1">Dtype </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">copy</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">name</span><span class="s3">: </span><span class="s1">Hashable </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">verify_integrity</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; Self</span><span class="s3">:</span>
+        <span class="s1">name </span><span class="s3">= </span><span class="s1">maybe_extract_name</span><span class="s3">(</span><span class="s1">name</span><span class="s3">, </span><span class="s1">data</span><span class="s3">, </span><span class="s1">cls</span><span class="s3">)</span>
+
+        <span class="s4"># GH#63388</span>
+        <span class="s1">data</span><span class="s3">, </span><span class="s1">copy </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">_maybe_copy_array_input</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">)</span>
+
+        <span class="s2">with </span><span class="s1">rewrite_exception</span><span class="s3">(</span><span class="s5">&quot;IntervalArray&quot;</span><span class="s3">, </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">__name__</span><span class="s3">):</span>
+            <span class="s1">array </span><span class="s3">= </span><span class="s1">IntervalArray</span><span class="s3">(</span>
+                <span class="s1">data</span><span class="s3">,</span>
+                <span class="s1">closed</span><span class="s3">=</span><span class="s1">closed</span><span class="s3">,</span>
+                <span class="s1">copy</span><span class="s3">=</span><span class="s1">copy</span><span class="s3">,</span>
+                <span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">,</span>
+                <span class="s1">verify_integrity</span><span class="s3">=</span><span class="s1">verify_integrity</span><span class="s3">,</span>
+            <span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">_simple_new</span><span class="s3">(</span><span class="s1">array</span><span class="s3">, </span><span class="s1">name</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">from_breaks</span><span class="s3">(</span>
+        <span class="s1">cls</span><span class="s3">,</span>
+        <span class="s1">breaks</span><span class="s3">,</span>
+        <span class="s1">closed</span><span class="s3">: </span><span class="s1">IntervalClosedType </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s5">&quot;right&quot;</span><span class="s3">,</span>
+        <span class="s1">name</span><span class="s3">: </span><span class="s1">Hashable </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">copy</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s1">dtype</span><span class="s3">: </span><span class="s1">Dtype </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; IntervalIndex</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Construct an IntervalIndex from an array of splits. 
+ 
+        Parameters 
+        ---------- 
+        breaks : array-like (1-dimensional) 
+            Left and right bounds for each interval. 
+        closed : {'left', 'right', 'both', 'neither'}, default 'right' 
+            Whether the intervals are closed on the left-side, right-side, both 
+            or neither. 
+        name : str, optional 
+            Name of the resulting IntervalIndex. 
+        copy : bool, default False 
+            Copy the data. 
+        dtype : dtype or None, default None 
+            If None, dtype will be inferred. 
+ 
+        Returns 
+        ------- 
+        IntervalIndex 
+ 
+        See Also 
+        -------- 
+        interval_range : Function to create a fixed frequency IntervalIndex. 
+        IntervalIndex.from_arrays : Construct from a left and right array. 
+        IntervalIndex.from_tuples : Construct from a sequence of tuples. 
+ 
+        Examples 
+        -------- 
+        &gt;&gt;&gt; pd.IntervalIndex.from_breaks([0, 1, 2, 3]) 
+        IntervalIndex([(0, 1], (1, 2], (2, 3]], 
+                      dtype='interval[int64, right]') 
+        &quot;&quot;&quot;</span>
+        <span class="s2">with </span><span class="s1">rewrite_exception</span><span class="s3">(</span><span class="s5">&quot;IntervalArray&quot;</span><span class="s3">, </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">__name__</span><span class="s3">):</span>
+            <span class="s1">array </span><span class="s3">= </span><span class="s1">IntervalArray</span><span class="s3">.</span><span class="s1">from_breaks</span><span class="s3">(</span>
+                <span class="s1">breaks</span><span class="s3">, </span><span class="s1">closed</span><span class="s3">=</span><span class="s1">closed</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s1">copy</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span>
+            <span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">_simple_new</span><span class="s3">(</span><span class="s1">array</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s1">name</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">from_arrays</span><span class="s3">(</span>
+        <span class="s1">cls</span><span class="s3">,</span>
+        <span class="s1">left</span><span class="s3">,</span>
+        <span class="s1">right</span><span class="s3">,</span>
+        <span class="s1">closed</span><span class="s3">: </span><span class="s1">IntervalClosedType </span><span class="s3">= </span><span class="s5">&quot;right&quot;</span><span class="s3">,</span>
+        <span class="s1">name</span><span class="s3">: </span><span class="s1">Hashable </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">copy</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s1">dtype</span><span class="s3">: </span><span class="s1">Dtype </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; IntervalIndex</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Construct from two arrays defining the left and right bounds. 
+ 
+        Parameters 
+        ---------- 
+        left : array-like (1-dimensional) 
+            Left bounds for each interval. 
+        right : array-like (1-dimensional) 
+            Right bounds for each interval. 
+        closed : {'left', 'right', 'both', 'neither'}, default 'right' 
+            Whether the intervals are closed on the left-side, right-side, both 
+            or neither. 
+        name : str, optional 
+            Name of the resulting IntervalIndex. 
+        copy : bool, default False 
+            Copy the data. 
+        dtype : dtype, optional 
+            If None, dtype will be inferred. 
+ 
+        Returns 
+        ------- 
+        IntervalIndex 
+ 
+        Raises 
+        ------ 
+        ValueError 
+            When a value is missing in only one of `left` or `right`. 
+            When a value in `left` is greater than the corresponding value 
+            in `right`. 
+ 
+        See Also 
+        -------- 
+        interval_range : Function to create a fixed frequency IntervalIndex. 
+        IntervalIndex.from_breaks : Construct an IntervalIndex from an array of 
+            splits. 
+        IntervalIndex.from_tuples : Construct an IntervalIndex from an 
+            array-like of tuples. 
+ 
+        Notes 
+        ----- 
+        Each element of `left` must be less than or equal to the `right` 
+        element at the same position. If an element is missing, it must be 
+        missing in both `left` and `right`. A TypeError is raised when 
+        using an unsupported type for `left` or `right`. At the moment, 
+        'category', 'object', and 'string' subtypes are not supported. 
+ 
+        Examples 
+        -------- 
+        &gt;&gt;&gt; pd.IntervalIndex.from_arrays([0, 1, 2], [1, 2, 3]) 
+        IntervalIndex([(0, 1], (1, 2], (2, 3]], 
+                      dtype='interval[int64, right]') 
+        &quot;&quot;&quot;</span>
+        <span class="s2">with </span><span class="s1">rewrite_exception</span><span class="s3">(</span><span class="s5">&quot;IntervalArray&quot;</span><span class="s3">, </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">__name__</span><span class="s3">):</span>
+            <span class="s1">array </span><span class="s3">= </span><span class="s1">IntervalArray</span><span class="s3">.</span><span class="s1">from_arrays</span><span class="s3">(</span>
+                <span class="s1">left</span><span class="s3">, </span><span class="s1">right</span><span class="s3">, </span><span class="s1">closed</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s1">copy</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span>
+            <span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">_simple_new</span><span class="s3">(</span><span class="s1">array</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s1">name</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">from_tuples</span><span class="s3">(</span>
+        <span class="s1">cls</span><span class="s3">,</span>
+        <span class="s1">data</span><span class="s3">,</span>
+        <span class="s1">closed</span><span class="s3">: </span><span class="s1">IntervalClosedType </span><span class="s3">= </span><span class="s5">&quot;right&quot;</span><span class="s3">,</span>
+        <span class="s1">name</span><span class="s3">: </span><span class="s1">Hashable </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">copy</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s1">dtype</span><span class="s3">: </span><span class="s1">Dtype </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; IntervalIndex</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Construct an IntervalIndex from an array-like of tuples. 
+ 
+        Parameters 
+        ---------- 
+        data : array-like (1-dimensional) 
+            Array of tuples. 
+        closed : {'left', 'right', 'both', 'neither'}, default 'right' 
+            Whether the intervals are closed on the left-side, right-side, both 
+            or neither. 
+        name : str, optional 
+            Name of the resulting IntervalIndex. 
+        copy : bool, default False 
+            By-default copy the data, this is compat only and ignored. 
+        dtype : dtype or None, default None 
+            If None, dtype will be inferred. 
+ 
+        Returns 
+        ------- 
+        IntervalIndex 
+ 
+        See Also 
+        -------- 
+        interval_range : Function to create a fixed frequency IntervalIndex. 
+        IntervalIndex.from_arrays : Construct an IntervalIndex from a left and 
+                                    right array. 
+        IntervalIndex.from_breaks : Construct an IntervalIndex from an array of 
+                                    splits. 
+ 
+        Examples 
+        -------- 
+        &gt;&gt;&gt; pd.IntervalIndex.from_tuples([(0, 1), (1, 2)]) 
+        IntervalIndex([(0, 1], (1, 2]], 
+                       dtype='interval[int64, right]') 
+        &quot;&quot;&quot;</span>
+        <span class="s2">with </span><span class="s1">rewrite_exception</span><span class="s3">(</span><span class="s5">&quot;IntervalArray&quot;</span><span class="s3">, </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">__name__</span><span class="s3">):</span>
+            <span class="s1">arr </span><span class="s3">= </span><span class="s1">IntervalArray</span><span class="s3">.</span><span class="s1">from_tuples</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">closed</span><span class="s3">=</span><span class="s1">closed</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s1">copy</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">_simple_new</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s1">name</span><span class="s3">)</span>
+
+    <span class="s4"># --------------------------------------------------------------------</span>
+    <span class="s4"># error: Return type &quot;IntervalTree&quot; of &quot;_engine&quot; incompatible with return type</span>
+    <span class="s4"># &quot;Union[IndexEngine, ExtensionEngine]&quot; in supertype &quot;Index&quot;</span>
+    <span class="s3">@</span><span class="s1">cache_readonly</span>
+    <span class="s2">def </span><span class="s1">_engine</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; IntervalTree</span><span class="s3">:  </span><span class="s4"># type: ignore[override]</span>
+        <span class="s4"># IntervalTree does not supports numpy array unless they are 64 bit</span>
+        <span class="s1">left </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_maybe_convert_i8</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">left</span><span class="s3">)</span>
+        <span class="s1">left </span><span class="s3">= </span><span class="s1">maybe_upcast_numeric_to_64bit</span><span class="s3">(</span><span class="s1">left</span><span class="s3">)</span>
+        <span class="s1">right </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_maybe_convert_i8</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">right</span><span class="s3">)</span>
+        <span class="s1">right </span><span class="s3">= </span><span class="s1">maybe_upcast_numeric_to_64bit</span><span class="s3">(</span><span class="s1">right</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">IntervalTree</span><span class="s3">(</span><span class="s1">left</span><span class="s3">, </span><span class="s1">right</span><span class="s3">, </span><span class="s1">closed</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">closed</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__contains__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">key</span><span class="s3">: </span><span class="s1">Any</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        return a boolean if this key is IN the index 
+        We *only* accept an Interval 
+ 
+        Parameters 
+        ---------- 
+        key : Interval 
+ 
+        Returns 
+        ------- 
+        bool 
+        &quot;&quot;&quot;</span>
+        <span class="s1">hash</span><span class="s3">(</span><span class="s1">key</span><span class="s3">)</span>
+        <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s1">Interval</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">is_valid_na_for_dtype</span><span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">):</span>
+                <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">hasnans</span>
+            <span class="s2">return False</span>
+
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">get_loc</span><span class="s3">(</span><span class="s1">key</span><span class="s3">)</span>
+            <span class="s2">return True</span>
+        <span class="s2">except </span><span class="s1">KeyError</span><span class="s3">:</span>
+            <span class="s2">return False</span>
+
+    <span class="s2">def </span><span class="s1">_getitem_slice</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">slobj</span><span class="s3">: </span><span class="s1">slice</span><span class="s3">) </span><span class="s1">-&gt; IntervalIndex</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Fastpath for __getitem__ when we know we have a slice. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">res </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">[</span><span class="s1">slobj</span><span class="s3">]</span>
+        <span class="s2">return </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">).</span><span class="s1">_simple_new</span><span class="s3">(</span><span class="s1">res</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_name</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">cache_readonly</span>
+    <span class="s2">def </span><span class="s1">_multiindex</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; MultiIndex</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">MultiIndex</span><span class="s3">.</span><span class="s1">from_arrays</span><span class="s3">([</span><span class="s1">self</span><span class="s3">.</span><span class="s1">left</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">right</span><span class="s3">], </span><span class="s1">names</span><span class="s3">=[</span><span class="s5">&quot;left&quot;</span><span class="s3">, </span><span class="s5">&quot;right&quot;</span><span class="s3">])</span>
+
+    <span class="s2">def </span><span class="s1">__reduce__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">d </span><span class="s3">= {</span>
+            <span class="s5">&quot;left&quot;</span><span class="s3">: </span><span class="s1">self</span><span class="s3">.</span><span class="s1">left</span><span class="s3">,</span>
+            <span class="s5">&quot;right&quot;</span><span class="s3">: </span><span class="s1">self</span><span class="s3">.</span><span class="s1">right</span><span class="s3">,</span>
+            <span class="s5">&quot;closed&quot;</span><span class="s3">: </span><span class="s1">self</span><span class="s3">.</span><span class="s1">closed</span><span class="s3">,</span>
+            <span class="s5">&quot;name&quot;</span><span class="s3">: </span><span class="s1">self</span><span class="s3">.</span><span class="s1">name</span><span class="s3">,</span>
+        <span class="s3">}</span>
+        <span class="s2">return </span><span class="s1">_new_IntervalIndex</span><span class="s3">, (</span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">), </span><span class="s1">d</span><span class="s3">), </span><span class="s2">None</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">inferred_type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot;Return a string of the type inferred from the values&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s5">&quot;interval&quot;</span>
+
+    <span class="s2">def </span><span class="s1">memory_usage</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">deep</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span><span class="s3">) </span><span class="s1">-&gt; int</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Memory usage of the values. 
+ 
+        Parameters 
+        ---------- 
+        deep : bool, default False 
+            Introspect the data deeply, interrogate 
+            `object` dtypes for system-level memory consumption. 
+ 
+        Returns 
+        ------- 
+        bytes used 
+            Returns memory usage of the values in the Index in bytes. 
+ 
+        See Also 
+        -------- 
+        numpy.ndarray.nbytes : Total bytes consumed by the elements of the 
+            array. 
+ 
+        Notes 
+        ----- 
+        Memory usage does not include memory consumed by elements that 
+        are not components of the array if deep=False or if used on PyPy 
+ 
+        Examples 
+        -------- 
+        &gt;&gt;&gt; idx = pd.Index([1, 2, 3]) 
+        &gt;&gt;&gt; idx.memory_usage() 
+        24 
+        &quot;&quot;&quot;</span>
+        <span class="s4"># we don't use an explicit engine</span>
+        <span class="s4"># so return the bytes here</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">left</span><span class="s3">.</span><span class="s1">memory_usage</span><span class="s3">(</span><span class="s1">deep</span><span class="s3">=</span><span class="s1">deep</span><span class="s3">) + </span><span class="s1">self</span><span class="s3">.</span><span class="s1">right</span><span class="s3">.</span><span class="s1">memory_usage</span><span class="s3">(</span><span class="s1">deep</span><span class="s3">=</span><span class="s1">deep</span><span class="s3">)</span>
+
+    <span class="s4"># IntervalTree doesn't have a is_monotonic_decreasing, so have to override</span>
+    <span class="s4">#  the Index implementation</span>
+    <span class="s3">@</span><span class="s1">cache_readonly</span>
+    <span class="s2">def </span><span class="s1">is_monotonic_decreasing</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return True if the IntervalIndex is monotonic decreasing (only equal or 
+        decreasing values), else False 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">[::-</span><span class="s6">1</span><span class="s3">].</span><span class="s1">is_monotonic_increasing</span>
+
+    <span class="s3">@</span><span class="s1">cache_readonly</span>
+    <span class="s2">def </span><span class="s1">is_unique</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return True if the IntervalIndex contains unique elements, else False. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">left </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">left</span>
+        <span class="s1">right </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">right</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">isna</span><span class="s3">().</span><span class="s1">sum</span><span class="s3">() &gt; </span><span class="s6">1</span><span class="s3">:</span>
+            <span class="s2">return False</span>
+
+        <span class="s2">if </span><span class="s1">left</span><span class="s3">.</span><span class="s1">is_unique </span><span class="s2">or </span><span class="s1">right</span><span class="s3">.</span><span class="s1">is_unique</span><span class="s3">:</span>
+            <span class="s2">return True</span>
+
+        <span class="s1">seen_pairs </span><span class="s3">= </span><span class="s1">set</span><span class="s3">()</span>
+        <span class="s1">check_idx </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">left</span><span class="s3">.</span><span class="s1">duplicated</span><span class="s3">(</span><span class="s1">keep</span><span class="s3">=</span><span class="s2">False</span><span class="s3">))[</span><span class="s6">0</span><span class="s3">]</span>
+        <span class="s2">for </span><span class="s1">idx </span><span class="s2">in </span><span class="s1">check_idx</span><span class="s3">:</span>
+            <span class="s1">pair </span><span class="s3">= (</span><span class="s1">left</span><span class="s3">[</span><span class="s1">idx</span><span class="s3">], </span><span class="s1">right</span><span class="s3">[</span><span class="s1">idx</span><span class="s3">])</span>
+            <span class="s2">if </span><span class="s1">pair </span><span class="s2">in </span><span class="s1">seen_pairs</span><span class="s3">:</span>
+                <span class="s2">return False</span>
+            <span class="s1">seen_pairs</span><span class="s3">.</span><span class="s1">add</span><span class="s3">(</span><span class="s1">pair</span><span class="s3">)</span>
+
+        <span class="s2">return True</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">is_overlapping</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return True if the IntervalIndex has overlapping intervals, else False. 
+ 
+        Two intervals overlap if they share a common point, including closed 
+        endpoints. Intervals that only have an open endpoint in common do not 
+        overlap. 
+ 
+        Returns 
+        ------- 
+        bool 
+            Boolean indicating if the IntervalIndex has overlapping intervals. 
+ 
+        See Also 
+        -------- 
+        Interval.overlaps : Check whether two Interval objects overlap. 
+        IntervalIndex.overlaps : Check an IntervalIndex elementwise for 
+            overlaps. 
+ 
+        Examples 
+        -------- 
+        &gt;&gt;&gt; index = pd.IntervalIndex.from_tuples([(0, 2), (1, 3), (4, 5)]) 
+        &gt;&gt;&gt; index 
+        IntervalIndex([(0, 2], (1, 3], (4, 5]], 
+              dtype='interval[int64, right]') 
+        &gt;&gt;&gt; index.is_overlapping 
+        True 
+ 
+        Intervals that share closed endpoints overlap: 
+ 
+        &gt;&gt;&gt; index = pd.interval_range(0, 3, closed=&quot;both&quot;) 
+        &gt;&gt;&gt; index 
+        IntervalIndex([[0, 1], [1, 2], [2, 3]], 
+              dtype='interval[int64, both]') 
+        &gt;&gt;&gt; index.is_overlapping 
+        True 
+ 
+        Intervals that only have an open endpoint in common do not overlap: 
+ 
+        &gt;&gt;&gt; index = pd.interval_range(0, 3, closed=&quot;left&quot;) 
+        &gt;&gt;&gt; index 
+        IntervalIndex([[0, 1), [1, 2), [2, 3)], 
+              dtype='interval[int64, left]') 
+        &gt;&gt;&gt; index.is_overlapping 
+        False 
+        &quot;&quot;&quot;</span>
+        <span class="s4"># GH 23309</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_engine</span><span class="s3">.</span><span class="s1">is_overlapping</span>
+
+    <span class="s2">def </span><span class="s1">_needs_i8_conversion</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">key</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Check if a given key needs i8 conversion. Conversion is necessary for 
+        Timestamp, Timedelta, DatetimeIndex, and TimedeltaIndex keys. An 
+        Interval-like requires conversion if its endpoints are one of the 
+        aforementioned types. 
+ 
+        Assumes that any list-like data has already been cast to an Index. 
+ 
+        Parameters 
+        ---------- 
+        key : scalar or Index-like 
+            The key that should be checked for i8 conversion 
+ 
+        Returns 
+        ------- 
+        bool 
+        &quot;&quot;&quot;</span>
+        <span class="s1">key_dtype </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s5">&quot;dtype&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">key_dtype</span><span class="s3">, </span><span class="s1">IntervalDtype</span><span class="s3">) </span><span class="s2">or </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s1">Interval</span><span class="s3">):</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_needs_i8_conversion</span><span class="s3">(</span><span class="s1">key</span><span class="s3">.</span><span class="s1">left</span><span class="s3">)</span>
+
+        <span class="s1">i8_types </span><span class="s3">= (</span><span class="s1">Timestamp</span><span class="s3">, </span><span class="s1">Timedelta</span><span class="s3">, </span><span class="s1">DatetimeIndex</span><span class="s3">, </span><span class="s1">TimedeltaIndex</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s1">i8_types</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_maybe_convert_i8</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">key</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Maybe convert a given key to its equivalent i8 value(s). Used as a 
+        preprocessing step prior to IntervalTree queries (self._engine), which 
+        expects numeric data. 
+ 
+        Parameters 
+        ---------- 
+        key : scalar or list-like 
+            The key that should maybe be converted to i8. 
+ 
+        Returns 
+        ------- 
+        scalar or list-like 
+            The original key if no conversion occurred, int if converted scalar, 
+            Index with an int64 dtype if converted list-like. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">is_list_like</span><span class="s3">(</span><span class="s1">key</span><span class="s3">):</span>
+            <span class="s1">key </span><span class="s3">= </span><span class="s1">ensure_index</span><span class="s3">(</span><span class="s1">key</span><span class="s3">)</span>
+            <span class="s1">key </span><span class="s3">= </span><span class="s1">maybe_upcast_numeric_to_64bit</span><span class="s3">(</span><span class="s1">key</span><span class="s3">)</span>
+
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_needs_i8_conversion</span><span class="s3">(</span><span class="s1">key</span><span class="s3">):</span>
+            <span class="s2">return </span><span class="s1">key</span>
+
+        <span class="s1">scalar </span><span class="s3">= </span><span class="s1">is_scalar</span><span class="s3">(</span><span class="s1">key</span><span class="s3">)</span>
+        <span class="s1">key_dtype </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s5">&quot;dtype&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">key_dtype</span><span class="s3">, </span><span class="s1">IntervalDtype</span><span class="s3">) </span><span class="s2">or </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s1">Interval</span><span class="s3">):</span>
+            <span class="s4"># convert left/right and reconstruct</span>
+            <span class="s1">left </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_maybe_convert_i8</span><span class="s3">(</span><span class="s1">key</span><span class="s3">.</span><span class="s1">left</span><span class="s3">)</span>
+            <span class="s1">right </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_maybe_convert_i8</span><span class="s3">(</span><span class="s1">key</span><span class="s3">.</span><span class="s1">right</span><span class="s3">)</span>
+            <span class="s1">constructor </span><span class="s3">= </span><span class="s1">Interval </span><span class="s2">if </span><span class="s1">scalar </span><span class="s2">else </span><span class="s1">IntervalIndex</span><span class="s3">.</span><span class="s1">from_arrays</span>
+            <span class="s2">return </span><span class="s1">constructor</span><span class="s3">(</span><span class="s1">left</span><span class="s3">, </span><span class="s1">right</span><span class="s3">, </span><span class="s1">closed</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">closed</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">scalar</span><span class="s3">:</span>
+            <span class="s4"># Timestamp/Timedelta</span>
+            <span class="s1">key_dtype</span><span class="s3">, </span><span class="s1">key_i8 </span><span class="s3">= </span><span class="s1">infer_dtype_from_scalar</span><span class="s3">(</span><span class="s1">key</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s1">Period</span><span class="s3">):</span>
+                <span class="s1">key_i8 </span><span class="s3">= </span><span class="s1">key</span><span class="s3">.</span><span class="s1">ordinal</span>
+            <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">key_i8</span><span class="s3">, </span><span class="s1">Timestamp</span><span class="s3">):</span>
+                <span class="s1">key_i8 </span><span class="s3">= </span><span class="s1">key_i8</span><span class="s3">.</span><span class="s1">_value</span>
+            <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">key_i8</span><span class="s3">, (</span><span class="s1">np</span><span class="s3">.</span><span class="s1">datetime64</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">timedelta64</span><span class="s3">)):</span>
+                <span class="s1">key_i8 </span><span class="s3">= </span><span class="s1">key_i8</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s5">&quot;i8&quot;</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s4"># DatetimeIndex/TimedeltaIndex</span>
+            <span class="s1">key_dtype</span><span class="s3">, </span><span class="s1">key_i8 </span><span class="s3">= </span><span class="s1">key</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">Index</span><span class="s3">(</span><span class="s1">key</span><span class="s3">.</span><span class="s1">asi8</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">key</span><span class="s3">.</span><span class="s1">hasnans</span><span class="s3">:</span>
+                <span class="s4"># convert NaT from its i8 value to np.nan so it's not viewed</span>
+                <span class="s4"># as a valid value, maybe causing errors (e.g. is_overlapping)</span>
+                <span class="s1">key_i8 </span><span class="s3">= </span><span class="s1">key_i8</span><span class="s3">.</span><span class="s1">where</span><span class="s3">(~</span><span class="s1">key</span><span class="s3">.</span><span class="s1">_isnan</span><span class="s3">)</span>
+
+        <span class="s4"># ensure consistency with IntervalIndex subtype</span>
+        <span class="s4"># error: Item &quot;ExtensionDtype&quot;/&quot;dtype[Any]&quot; of &quot;Union[dtype[Any],</span>
+        <span class="s4"># ExtensionDtype]&quot; has no attribute &quot;subtype&quot;</span>
+        <span class="s1">subtype </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">subtype  </span><span class="s4"># type: ignore[union-attr]</span>
+
+        <span class="s2">if </span><span class="s1">subtype </span><span class="s3">!= </span><span class="s1">key_dtype</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                <span class="s5">f&quot;Cannot index an IntervalIndex of subtype </span><span class="s2">{</span><span class="s1">subtype</span><span class="s2">} </span><span class="s5">with &quot;</span>
+                <span class="s5">f&quot;values of dtype </span><span class="s2">{</span><span class="s1">key_dtype</span><span class="s2">}</span><span class="s5">&quot;</span>
+            <span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">key_i8</span>
+
+    <span class="s2">def </span><span class="s1">_searchsorted_monotonic</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">label</span><span class="s3">, </span><span class="s1">side</span><span class="s3">: </span><span class="s1">Literal</span><span class="s3">[</span><span class="s5">&quot;left&quot;</span><span class="s3">, </span><span class="s5">&quot;right&quot;</span><span class="s3">] = </span><span class="s5">&quot;left&quot;</span><span class="s3">):</span>
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">is_non_overlapping_monotonic</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">KeyError</span><span class="s3">(</span>
+                <span class="s5">&quot;can only get slices from an IntervalIndex if bounds are &quot;</span>
+                <span class="s5">&quot;non-overlapping and all monotonic increasing or decreasing&quot;</span>
+            <span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">label</span><span class="s3">, (</span><span class="s1">IntervalMixin</span><span class="s3">, </span><span class="s1">IntervalIndex</span><span class="s3">)):</span>
+            <span class="s2">raise </span><span class="s1">NotImplementedError</span><span class="s3">(</span><span class="s5">&quot;Interval objects are not currently supported&quot;</span><span class="s3">)</span>
+
+        <span class="s4"># GH 20921: &quot;not is_monotonic_increasing&quot; for the second condition</span>
+        <span class="s4"># instead of &quot;is_monotonic_decreasing&quot; to account for single element</span>
+        <span class="s4"># indexes being both increasing and decreasing</span>
+        <span class="s2">if </span><span class="s3">(</span><span class="s1">side </span><span class="s3">== </span><span class="s5">&quot;left&quot; </span><span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">left</span><span class="s3">.</span><span class="s1">is_monotonic_increasing</span><span class="s3">) </span><span class="s2">or </span><span class="s3">(</span>
+            <span class="s1">side </span><span class="s3">== </span><span class="s5">&quot;right&quot; </span><span class="s2">and not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">left</span><span class="s3">.</span><span class="s1">is_monotonic_increasing</span>
+        <span class="s3">):</span>
+            <span class="s1">sub_idx </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">right</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">open_right</span><span class="s3">:</span>
+                <span class="s1">label </span><span class="s3">= </span><span class="s1">_get_next_label</span><span class="s3">(</span><span class="s1">label</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">sub_idx </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">left</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">open_left</span><span class="s3">:</span>
+                <span class="s1">label </span><span class="s3">= </span><span class="s1">_get_prev_label</span><span class="s3">(</span><span class="s1">label</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">sub_idx</span><span class="s3">.</span><span class="s1">_searchsorted_monotonic</span><span class="s3">(</span><span class="s1">label</span><span class="s3">, </span><span class="s1">side</span><span class="s3">)</span>
+
+    <span class="s4"># --------------------------------------------------------------------</span>
+    <span class="s4"># Indexing Methods</span>
+
+    <span class="s2">def </span><span class="s1">get_loc</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">key</span><span class="s3">) </span><span class="s1">-&gt; int </span><span class="s3">| </span><span class="s1">slice </span><span class="s3">| </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Get integer location, slice or boolean mask for requested label. 
+ 
+        The `get_loc` method is used to retrieve the integer index, a slice for 
+        slicing objects, or a boolean mask indicating the presence of the label 
+        in the `IntervalIndex`. 
+ 
+        Parameters 
+        ---------- 
+        key : label 
+            The value or range to find in the IntervalIndex. 
+ 
+        Returns 
+        ------- 
+        int if unique index, slice if monotonic index, else mask 
+            The position or positions found. This could be a single 
+            number, a range, or an array of true/false values 
+            indicating the position(s) of the label. 
+ 
+        See Also 
+        -------- 
+        IntervalIndex.get_indexer_non_unique : Compute indexer and 
+            mask for new index given the current index. 
+        Index.get_loc : Similar method in the base Index class. 
+ 
+        Examples 
+        -------- 
+        &gt;&gt;&gt; i1, i2 = pd.Interval(0, 1), pd.Interval(1, 2) 
+        &gt;&gt;&gt; index = pd.IntervalIndex([i1, i2]) 
+        &gt;&gt;&gt; index.get_loc(1) 
+        0 
+ 
+        You can also supply a point inside an interval. 
+ 
+        &gt;&gt;&gt; index.get_loc(1.5) 
+        1 
+ 
+        If a label is in several intervals, you get the locations of all the 
+        relevant intervals. 
+ 
+        &gt;&gt;&gt; i3 = pd.Interval(0, 2) 
+        &gt;&gt;&gt; overlapping_index = pd.IntervalIndex([i1, i2, i3]) 
+        &gt;&gt;&gt; overlapping_index.get_loc(0.5) 
+        array([ True, False,  True]) 
+ 
+        Only exact matches will be returned if an interval is provided. 
+ 
+        &gt;&gt;&gt; index.get_loc(pd.Interval(0, 1)) 
+        0 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_check_indexing_error</span><span class="s3">(</span><span class="s1">key</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s1">Interval</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">closed </span><span class="s3">!= </span><span class="s1">key</span><span class="s3">.</span><span class="s1">closed</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">KeyError</span><span class="s3">(</span><span class="s1">key</span><span class="s3">)</span>
+            <span class="s1">mask </span><span class="s3">= (</span><span class="s1">self</span><span class="s3">.</span><span class="s1">left </span><span class="s3">== </span><span class="s1">key</span><span class="s3">.</span><span class="s1">left</span><span class="s3">) &amp; (</span><span class="s1">self</span><span class="s3">.</span><span class="s1">right </span><span class="s3">== </span><span class="s1">key</span><span class="s3">.</span><span class="s1">right</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">is_valid_na_for_dtype</span><span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">):</span>
+            <span class="s1">mask </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">isna</span><span class="s3">()</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s4"># assume scalar</span>
+            <span class="s1">op_left </span><span class="s3">= </span><span class="s1">le </span><span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">closed_left </span><span class="s2">else </span><span class="s1">lt</span>
+            <span class="s1">op_right </span><span class="s3">= </span><span class="s1">le </span><span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">closed_right </span><span class="s2">else </span><span class="s1">lt</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">mask </span><span class="s3">= </span><span class="s1">op_left</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">left</span><span class="s3">, </span><span class="s1">key</span><span class="s3">) &amp; </span><span class="s1">op_right</span><span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">right</span><span class="s3">)</span>
+            <span class="s2">except </span><span class="s1">TypeError </span><span class="s2">as </span><span class="s1">err</span><span class="s3">:</span>
+                <span class="s4"># scalar is not comparable to II subtype --&gt; invalid label</span>
+                <span class="s2">raise </span><span class="s1">KeyError</span><span class="s3">(</span><span class="s1">key</span><span class="s3">) </span><span class="s2">from </span><span class="s1">err</span>
+
+        <span class="s1">matches </span><span class="s3">= </span><span class="s1">mask</span><span class="s3">.</span><span class="s1">sum</span><span class="s3">()</span>
+        <span class="s2">if </span><span class="s1">matches </span><span class="s3">== </span><span class="s6">0</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">KeyError</span><span class="s3">(</span><span class="s1">key</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">matches </span><span class="s3">== </span><span class="s6">1</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">maybe_unbox_numpy_scalar</span><span class="s3">(</span><span class="s1">mask</span><span class="s3">.</span><span class="s1">argmax</span><span class="s3">())</span>
+
+        <span class="s1">res </span><span class="s3">= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">maybe_booleans_to_slice</span><span class="s3">(</span><span class="s1">mask</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s5">&quot;u1&quot;</span><span class="s3">))</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">res</span><span class="s3">, </span><span class="s1">slice</span><span class="s3">) </span><span class="s2">and </span><span class="s1">res</span><span class="s3">.</span><span class="s1">stop </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s4"># TODO: DO this in maybe_booleans_to_slice?</span>
+            <span class="s1">res </span><span class="s3">= </span><span class="s1">slice</span><span class="s3">(</span><span class="s1">res</span><span class="s3">.</span><span class="s1">start</span><span class="s3">, </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">), </span><span class="s1">res</span><span class="s3">.</span><span class="s1">step</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">res</span>
+
+    <span class="s2">def </span><span class="s1">_get_indexer</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">target</span><span class="s3">: </span><span class="s1">Index</span><span class="s3">,</span>
+        <span class="s1">method</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">limit</span><span class="s3">: </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">tolerance</span><span class="s3">: </span><span class="s1">Any </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">]:</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">target</span><span class="s3">, </span><span class="s1">IntervalIndex</span><span class="s3">):</span>
+            <span class="s4"># We only get here with not self.is_overlapping</span>
+            <span class="s4"># -&gt; at most one match per interval in target</span>
+            <span class="s4"># want exact matches -&gt; need both left/right to match, so defer to</span>
+            <span class="s4"># left/right get_indexer, compare elementwise, equality -&gt; match</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">left</span><span class="s3">.</span><span class="s1">is_unique </span><span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">right</span><span class="s3">.</span><span class="s1">is_unique</span><span class="s3">:</span>
+                <span class="s1">indexer </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_indexer_unique_sides</span><span class="s3">(</span><span class="s1">target</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">indexer </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_indexer_pointwise</span><span class="s3">(</span><span class="s1">target</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]</span>
+
+        <span class="s2">elif not </span><span class="s3">(</span><span class="s1">is_object_dtype</span><span class="s3">(</span><span class="s1">target</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">) </span><span class="s2">or </span><span class="s1">is_string_dtype</span><span class="s3">(</span><span class="s1">target</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">)):</span>
+            <span class="s4"># homogeneous scalar index: use IntervalTree</span>
+            <span class="s4"># we should always have self._should_partial_index(target) here</span>
+            <span class="s1">target </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_maybe_convert_i8</span><span class="s3">(</span><span class="s1">target</span><span class="s3">)</span>
+            <span class="s1">indexer </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_engine</span><span class="s3">.</span><span class="s1">get_indexer</span><span class="s3">(</span><span class="s1">target</span><span class="s3">.</span><span class="s1">values</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s4"># heterogeneous scalar index: defer elementwise to get_loc</span>
+            <span class="s4"># we should always have self._should_partial_index(target) here</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_indexer_pointwise</span><span class="s3">(</span><span class="s1">target</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]</span>
+
+        <span class="s2">return </span><span class="s1">ensure_platform_int</span><span class="s3">(</span><span class="s1">indexer</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">get_indexer_non_unique</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">target</span><span class="s3">: </span><span class="s1">Index</span>
+    <span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">], </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">]]:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Compute indexer and mask for new index given the current index. 
+ 
+        The indexer should be then used as an input to ndarray.take to align the 
+        current data to the new index. 
+ 
+        Parameters 
+        ---------- 
+        target : IntervalIndex or list of Intervals 
+            An iterable containing the values to be used for computing indexer. 
+ 
+        Returns 
+        ------- 
+        indexer : np.ndarray[np.intp] 
+            Integers from 0 to n - 1 indicating that the index at these 
+            positions matches the corresponding target values. Missing values 
+            in the target are marked by -1. 
+        missing : np.ndarray[np.intp] 
+            An indexer into the target of the values not found. 
+            These correspond to the -1 in the indexer array. 
+ 
+        See Also 
+        -------- 
+        Index.get_indexer : Computes indexer and mask for new index given 
+            the current index. 
+        Index.get_indexer_for : Returns an indexer even when non-unique. 
+ 
+        Examples 
+        -------- 
+        &gt;&gt;&gt; index = pd.Index([&quot;c&quot;, &quot;b&quot;, &quot;a&quot;, &quot;b&quot;, &quot;b&quot;]) 
+        &gt;&gt;&gt; index.get_indexer_non_unique([&quot;b&quot;, &quot;b&quot;]) 
+        (array([1, 3, 4, 1, 3, 4]), array([], dtype=int64)) 
+ 
+        In the example below there are no matched values. 
+ 
+        &gt;&gt;&gt; index = pd.Index([&quot;c&quot;, &quot;b&quot;, &quot;a&quot;, &quot;b&quot;, &quot;b&quot;]) 
+        &gt;&gt;&gt; index.get_indexer_non_unique([&quot;q&quot;, &quot;r&quot;, &quot;t&quot;]) 
+        (array([-1, -1, -1]), array([0, 1, 2])) 
+ 
+        For this reason, the returned ``indexer`` contains only integers equal to -1. 
+        It demonstrates that there's no match between the index and the ``target`` 
+        values at these positions. The mask [0, 1, 2] in the return value shows that 
+        the first, second, and third elements are missing. 
+ 
+        Notice that the return value is a tuple contains two items. In the example 
+        below the first item is an array of locations in ``index``. The second 
+        item is a mask shows that the first and third elements are missing. 
+ 
+        &gt;&gt;&gt; index = pd.Index([&quot;c&quot;, &quot;b&quot;, &quot;a&quot;, &quot;b&quot;, &quot;b&quot;]) 
+        &gt;&gt;&gt; index.get_indexer_non_unique([&quot;f&quot;, &quot;b&quot;, &quot;s&quot;]) 
+        (array([-1,  1,  3,  4, -1]), array([0, 2])) 
+        &quot;&quot;&quot;</span>
+        <span class="s1">target </span><span class="s3">= </span><span class="s1">ensure_index</span><span class="s3">(</span><span class="s1">target</span><span class="s3">)</span>
+
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_should_compare</span><span class="s3">(</span><span class="s1">target</span><span class="s3">) </span><span class="s2">and not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_should_partial_index</span><span class="s3">(</span><span class="s1">target</span><span class="s3">):</span>
+            <span class="s4"># e.g. IntervalIndex with different closed or incompatible subtype</span>
+            <span class="s4">#  -&gt; no matches</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_indexer_non_comparable</span><span class="s3">(</span><span class="s1">target</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s1">unique</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+
+        <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">target</span><span class="s3">, </span><span class="s1">IntervalIndex</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">left</span><span class="s3">.</span><span class="s1">is_unique </span><span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">right</span><span class="s3">.</span><span class="s1">is_unique</span><span class="s3">:</span>
+                <span class="s4"># fastpath available even if we don't have self._index_as_unique</span>
+                <span class="s1">indexer </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_indexer_unique_sides</span><span class="s3">(</span><span class="s1">target</span><span class="s3">)</span>
+                <span class="s1">missing </span><span class="s3">= (</span><span class="s1">indexer </span><span class="s3">== -</span><span class="s6">1</span><span class="s3">).</span><span class="s1">nonzero</span><span class="s3">()[</span><span class="s6">0</span><span class="s3">]</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_indexer_pointwise</span><span class="s3">(</span><span class="s1">target</span><span class="s3">)</span>
+
+        <span class="s2">elif </span><span class="s1">is_object_dtype</span><span class="s3">(</span><span class="s1">target</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">) </span><span class="s2">or not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_should_partial_index</span><span class="s3">(</span><span class="s1">target</span><span class="s3">):</span>
+            <span class="s4"># target might contain intervals: defer elementwise to get_loc</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_indexer_pointwise</span><span class="s3">(</span><span class="s1">target</span><span class="s3">)</span>
+
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s4"># Note: this case behaves differently from other Index subclasses</span>
+            <span class="s4">#  because IntervalIndex does partial-int indexing</span>
+            <span class="s1">target </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_maybe_convert_i8</span><span class="s3">(</span><span class="s1">target</span><span class="s3">)</span>
+            <span class="s1">indexer</span><span class="s3">, </span><span class="s1">missing </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_engine</span><span class="s3">.</span><span class="s1">get_indexer_non_unique</span><span class="s3">(</span><span class="s1">target</span><span class="s3">.</span><span class="s1">values</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">ensure_platform_int</span><span class="s3">(</span><span class="s1">indexer</span><span class="s3">), </span><span class="s1">ensure_platform_int</span><span class="s3">(</span><span class="s1">missing</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_get_indexer_unique_sides</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">target</span><span class="s3">: </span><span class="s1">IntervalIndex</span><span class="s3">) </span><span class="s1">-&gt; npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">]:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        _get_indexer specialized to the case where both of our sides are unique. 
+        &quot;&quot;&quot;</span>
+        <span class="s4"># Caller is responsible for checking</span>
+        <span class="s4">#  `self.left.is_unique and self.right.is_unique`</span>
+
+        <span class="s1">left_indexer </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">left</span><span class="s3">.</span><span class="s1">get_indexer</span><span class="s3">(</span><span class="s1">target</span><span class="s3">.</span><span class="s1">left</span><span class="s3">)</span>
+        <span class="s1">right_indexer </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">right</span><span class="s3">.</span><span class="s1">get_indexer</span><span class="s3">(</span><span class="s1">target</span><span class="s3">.</span><span class="s1">right</span><span class="s3">)</span>
+        <span class="s1">indexer </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">left_indexer </span><span class="s3">== </span><span class="s1">right_indexer</span><span class="s3">, </span><span class="s1">left_indexer</span><span class="s3">, -</span><span class="s6">1</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">indexer</span>
+
+    <span class="s2">def </span><span class="s1">_get_indexer_pointwise</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">target</span><span class="s3">: </span><span class="s1">Index</span>
+    <span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">], </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">]]:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        pointwise implementation for get_indexer and get_indexer_non_unique. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">indexer</span><span class="s3">, </span><span class="s1">missing </span><span class="s3">= [], []</span>
+        <span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">key </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">target</span><span class="s3">):</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">locs </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">get_loc</span><span class="s3">(</span><span class="s1">key</span><span class="s3">)</span>
+                <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">locs</span><span class="s3">, </span><span class="s1">slice</span><span class="s3">):</span>
+                    <span class="s4"># Only needed for get_indexer_non_unique</span>
+                    <span class="s1">locs </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">arange</span><span class="s3">(</span><span class="s1">locs</span><span class="s3">.</span><span class="s1">start</span><span class="s3">, </span><span class="s1">locs</span><span class="s3">.</span><span class="s1">stop</span><span class="s3">, </span><span class="s1">locs</span><span class="s3">.</span><span class="s1">step</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;intp&quot;</span><span class="s3">)</span>
+                <span class="s2">elif </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">is_integer</span><span class="s3">(</span><span class="s1">locs</span><span class="s3">):</span>
+                    <span class="s1">locs </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">locs</span><span class="s3">, </span><span class="s1">ndmin</span><span class="s3">=</span><span class="s6">1</span><span class="s3">)</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s4"># otherwise we have ndarray[bool]</span>
+                    <span class="s1">locs </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">locs</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]</span>
+            <span class="s2">except </span><span class="s1">KeyError</span><span class="s3">:</span>
+                <span class="s1">missing</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">i</span><span class="s3">)</span>
+                <span class="s1">locs </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([-</span><span class="s6">1</span><span class="s3">])</span>
+            <span class="s2">except </span><span class="s1">InvalidIndexError</span><span class="s3">:</span>
+                <span class="s4"># i.e. non-scalar key e.g. a tuple.</span>
+                <span class="s4"># see test_append_different_columns_types_raises</span>
+                <span class="s1">missing</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">i</span><span class="s3">)</span>
+                <span class="s1">locs </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([-</span><span class="s6">1</span><span class="s3">])</span>
+
+            <span class="s1">indexer</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">locs</span><span class="s3">)</span>
+
+        <span class="s1">concatenated_indexer </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">concatenate</span><span class="s3">(</span><span class="s1">indexer</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">ensure_platform_int</span><span class="s3">(</span><span class="s1">concatenated_indexer</span><span class="s3">), </span><span class="s1">ensure_platform_int</span><span class="s3">(</span><span class="s1">missing</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">cache_readonly</span>
+    <span class="s2">def </span><span class="s1">_index_as_unique</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s2">return not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">is_overlapping </span><span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_engine</span><span class="s3">.</span><span class="s1">_na_count </span><span class="s3">&lt; </span><span class="s6">2</span>
+
+    <span class="s1">_requires_unique_msg </span><span class="s3">= (</span>
+        <span class="s5">&quot;cannot handle overlapping indices; use IntervalIndex.get_indexer_non_unique&quot;</span>
+    <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_convert_slice_indexer</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">key</span><span class="s3">: </span><span class="s1">slice</span><span class="s3">, </span><span class="s1">kind</span><span class="s3">: </span><span class="s1">Literal</span><span class="s3">[</span><span class="s5">&quot;loc&quot;</span><span class="s3">, </span><span class="s5">&quot;getitem&quot;</span><span class="s3">]):</span>
+        <span class="s2">if not </span><span class="s3">(</span><span class="s1">key</span><span class="s3">.</span><span class="s1">step </span><span class="s2">is None or </span><span class="s1">key</span><span class="s3">.</span><span class="s1">step </span><span class="s3">== </span><span class="s6">1</span><span class="s3">):</span>
+            <span class="s4"># GH#31658 if label-based, we require step == 1,</span>
+            <span class="s4">#  if positional, we disallow float start/stop</span>
+            <span class="s1">msg </span><span class="s3">= </span><span class="s5">&quot;label-based slicing with step!=1 is not supported for IntervalIndex&quot;</span>
+            <span class="s2">if </span><span class="s1">kind </span><span class="s3">== </span><span class="s5">&quot;loc&quot;</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s1">msg</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">kind </span><span class="s3">== </span><span class="s5">&quot;getitem&quot;</span><span class="s3">:</span>
+                <span class="s2">if not </span><span class="s1">is_valid_positional_slice</span><span class="s3">(</span><span class="s1">key</span><span class="s3">):</span>
+                    <span class="s4"># i.e. this cannot be interpreted as a positional slice</span>
+                    <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s1">msg</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">super</span><span class="s3">().</span><span class="s1">_convert_slice_indexer</span><span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s1">kind</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">cache_readonly</span>
+    <span class="s2">def </span><span class="s1">_should_fallback_to_positional</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s4"># integer lookups in Series.__getitem__ are unambiguously</span>
+        <span class="s4">#  positional in this case</span>
+        <span class="s4"># error: Item &quot;ExtensionDtype&quot;/&quot;dtype[Any]&quot; of &quot;Union[dtype[Any],</span>
+        <span class="s4"># ExtensionDtype]&quot; has no attribute &quot;subtype&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">subtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s2">in </span><span class="s5">&quot;mM&quot;  </span><span class="s4"># type: ignore[union-attr]</span>
+
+    <span class="s2">def </span><span class="s1">_maybe_cast_slice_bound</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">label</span><span class="s3">, </span><span class="s1">side</span><span class="s3">: </span><span class="s1">str</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">side</span><span class="s3">).</span><span class="s1">_maybe_cast_slice_bound</span><span class="s3">(</span><span class="s1">label</span><span class="s3">, </span><span class="s1">side</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_is_comparable_dtype</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">: </span><span class="s1">DtypeObj</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">IntervalDtype</span><span class="s3">):</span>
+            <span class="s2">return False</span>
+        <span class="s1">common_subtype </span><span class="s3">= </span><span class="s1">find_common_type</span><span class="s3">([</span><span class="s1">self</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">])</span>
+        <span class="s2">return not </span><span class="s1">is_object_dtype</span><span class="s3">(</span><span class="s1">common_subtype</span><span class="s3">)</span>
+
+    <span class="s4"># --------------------------------------------------------------------</span>
+
+    <span class="s3">@</span><span class="s1">cache_readonly</span>
+    <span class="s2">def </span><span class="s1">left</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; Index</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return left bounds of the intervals in the IntervalIndex. 
+ 
+        The left bounds of each interval in the IntervalIndex are 
+        returned as an Index. The datatype of the left bounds is the 
+        same as the datatype of the endpoints of the intervals. 
+ 
+        Returns 
+        ------- 
+        Index 
+            An Index containing the left bounds of the intervals. 
+ 
+        See Also 
+        -------- 
+        IntervalIndex.right : Return the right bounds of the intervals 
+            in the IntervalIndex. 
+        IntervalIndex.mid : Return the mid-point of the intervals in 
+            the IntervalIndex. 
+        IntervalIndex.length : Return the length of the intervals in 
+            the IntervalIndex. 
+ 
+        Examples 
+        -------- 
+        &gt;&gt;&gt; iv_idx = pd.IntervalIndex.from_arrays([1, 2, 3], [4, 5, 6], closed=&quot;right&quot;) 
+        &gt;&gt;&gt; iv_idx.left 
+        Index([1, 2, 3], dtype='int64') 
+ 
+        &gt;&gt;&gt; iv_idx = pd.IntervalIndex.from_tuples( 
+        ...     [(1, 4), (2, 5), (3, 6)], closed=&quot;left&quot; 
+        ... ) 
+        &gt;&gt;&gt; iv_idx.left 
+        Index([1, 2, 3], dtype='int64') 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">Index</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">left</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">cache_readonly</span>
+    <span class="s2">def </span><span class="s1">right</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; Index</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return right bounds of the intervals in the IntervalIndex. 
+ 
+        The right bounds of each interval in the IntervalIndex are 
+        returned as an Index. The datatype of the right bounds is the 
+        same as the datatype of the endpoints of the intervals. 
+ 
+        Returns 
+        ------- 
+        Index 
+            An Index containing the right bounds of the intervals. 
+ 
+        See Also 
+        -------- 
+        IntervalIndex.left : Return the left bounds of the intervals 
+            in the IntervalIndex. 
+        IntervalIndex.mid : Return the mid-point of the intervals in 
+            the IntervalIndex. 
+        IntervalIndex.length : Return the length of the intervals in 
+            the IntervalIndex. 
+ 
+        Examples 
+        -------- 
+        &gt;&gt;&gt; iv_idx = pd.IntervalIndex.from_arrays([1, 2, 3], [4, 5, 6], closed=&quot;right&quot;) 
+        &gt;&gt;&gt; iv_idx.right 
+        Index([4, 5, 6], dtype='int64') 
+ 
+        &gt;&gt;&gt; iv_idx = pd.IntervalIndex.from_tuples( 
+        ...     [(1, 4), (2, 5), (3, 6)], closed=&quot;left&quot; 
+        ... ) 
+        &gt;&gt;&gt; iv_idx.right 
+        Index([4, 5, 6], dtype='int64') 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">Index</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">right</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">cache_readonly</span>
+    <span class="s2">def </span><span class="s1">mid</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; Index</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return the midpoint of each interval in the IntervalIndex as an Index. 
+ 
+        Each midpoint is calculated as the average of the left and right bounds 
+        of each interval. The midpoints are returned as a pandas Index object. 
+ 
+        Returns 
+        ------- 
+        pandas.Index 
+            An Index containing the midpoints of each interval. 
+ 
+        See Also 
+        -------- 
+        IntervalIndex.left : Return the left bounds of the intervals 
+            in the IntervalIndex. 
+        IntervalIndex.right : Return the right bounds of the intervals 
+            in the IntervalIndex. 
+        IntervalIndex.length : Return the length of the intervals in 
+            the IntervalIndex. 
+ 
+        Notes 
+        ----- 
+        The midpoint is the average of the interval bounds, potentially resulting 
+        in a floating-point number even if bounds are integers. The returned Index 
+        will have a dtype that accurately holds the midpoints. This computation is 
+        the same regardless of whether intervals are open or closed. 
+ 
+        Examples 
+        -------- 
+        &gt;&gt;&gt; iv_idx = pd.IntervalIndex.from_arrays([1, 2, 3], [4, 5, 6]) 
+        &gt;&gt;&gt; iv_idx.mid 
+        Index([2.5, 3.5, 4.5], dtype='float64') 
+ 
+        &gt;&gt;&gt; iv_idx = pd.IntervalIndex.from_tuples([(1, 4), (2, 5), (3, 6)]) 
+        &gt;&gt;&gt; iv_idx.mid 
+        Index([2.5, 3.5, 4.5], dtype='float64') 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">Index</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">mid</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">length</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; Index</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Calculate the length of each interval in the IntervalIndex. 
+ 
+        This method returns a new Index containing the lengths of each interval 
+        in the IntervalIndex. The length of an interval is defined as the difference 
+        between its end and its start. 
+ 
+        Returns 
+        ------- 
+        Index 
+            An Index containing the lengths of each interval. 
+ 
+        See Also 
+        -------- 
+        Interval.length : Return the length of the Interval. 
+ 
+        Examples 
+        -------- 
+        &gt;&gt;&gt; intervals = pd.IntervalIndex.from_arrays( 
+        ...     [1, 2, 3], [4, 5, 6], closed=&quot;right&quot; 
+        ... ) 
+        &gt;&gt;&gt; intervals.length 
+        Index([3, 3, 3], dtype='int64') 
+ 
+        &gt;&gt;&gt; intervals = pd.IntervalIndex.from_tuples([(1, 5), (6, 10), (11, 15)]) 
+        &gt;&gt;&gt; intervals.length 
+        Index([4, 4, 4], dtype='int64') 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">Index</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">length</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+
+    <span class="s4"># --------------------------------------------------------------------</span>
+    <span class="s4"># Set Operations</span>
+
+    <span class="s2">def </span><span class="s1">_intersection</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        intersection specialized to the case with matching dtypes. 
+        &quot;&quot;&quot;</span>
+        <span class="s4"># For IntervalIndex we also know other.closed == self.closed</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">left</span><span class="s3">.</span><span class="s1">is_unique </span><span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">right</span><span class="s3">.</span><span class="s1">is_unique</span><span class="s3">:</span>
+            <span class="s1">taken </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_intersection_unique</span><span class="s3">(</span><span class="s1">other</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">other</span><span class="s3">.</span><span class="s1">left</span><span class="s3">.</span><span class="s1">is_unique </span><span class="s2">and </span><span class="s1">other</span><span class="s3">.</span><span class="s1">right</span><span class="s3">.</span><span class="s1">is_unique </span><span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">isna</span><span class="s3">().</span><span class="s1">sum</span><span class="s3">() &lt;= </span><span class="s6">1</span><span class="s3">:</span>
+            <span class="s4"># Swap other/self if other is unique and self does not have</span>
+            <span class="s4"># multiple NaNs</span>
+            <span class="s1">taken </span><span class="s3">= </span><span class="s1">other</span><span class="s3">.</span><span class="s1">_intersection_unique</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s4"># duplicates</span>
+            <span class="s1">taken </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_intersection_non_unique</span><span class="s3">(</span><span class="s1">other</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">sort</span><span class="s3">:</span>
+            <span class="s1">taken </span><span class="s3">= </span><span class="s1">taken</span><span class="s3">.</span><span class="s1">sort_values</span><span class="s3">()</span>
+
+        <span class="s2">return </span><span class="s1">taken</span>
+
+    <span class="s2">def </span><span class="s1">_intersection_unique</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">: </span><span class="s1">IntervalIndex</span><span class="s3">) </span><span class="s1">-&gt; IntervalIndex</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Used when the IntervalIndex does not have any common endpoint, 
+        no matter left or right. 
+        Return the intersection with another IntervalIndex. 
+        Parameters 
+        ---------- 
+        other : IntervalIndex 
+        Returns 
+        ------- 
+        IntervalIndex 
+        &quot;&quot;&quot;</span>
+        <span class="s4"># Note: this is much more performant than super()._intersection(other)</span>
+        <span class="s1">lindexer </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">left</span><span class="s3">.</span><span class="s1">get_indexer</span><span class="s3">(</span><span class="s1">other</span><span class="s3">.</span><span class="s1">left</span><span class="s3">)</span>
+        <span class="s1">rindexer </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">right</span><span class="s3">.</span><span class="s1">get_indexer</span><span class="s3">(</span><span class="s1">other</span><span class="s3">.</span><span class="s1">right</span><span class="s3">)</span>
+
+        <span class="s1">match </span><span class="s3">= (</span><span class="s1">lindexer </span><span class="s3">== </span><span class="s1">rindexer</span><span class="s3">) &amp; (</span><span class="s1">lindexer </span><span class="s3">!= -</span><span class="s6">1</span><span class="s3">)</span>
+        <span class="s1">indexer </span><span class="s3">= </span><span class="s1">lindexer</span><span class="s3">.</span><span class="s1">take</span><span class="s3">(</span><span class="s1">match</span><span class="s3">.</span><span class="s1">nonzero</span><span class="s3">()[</span><span class="s6">0</span><span class="s3">])</span>
+        <span class="s1">indexer </span><span class="s3">= </span><span class="s1">unique</span><span class="s3">(</span><span class="s1">indexer</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">take</span><span class="s3">(</span><span class="s1">indexer</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_intersection_non_unique</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">: </span><span class="s1">IntervalIndex</span><span class="s3">) </span><span class="s1">-&gt; IntervalIndex</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Used when the IntervalIndex does have some common endpoints, 
+        on either sides. 
+        Return the intersection with another IntervalIndex. 
+ 
+        Parameters 
+        ---------- 
+        other : IntervalIndex 
+ 
+        Returns 
+        ------- 
+        IntervalIndex 
+        &quot;&quot;&quot;</span>
+        <span class="s4"># Note: this is about 3.25x faster than super()._intersection(other)</span>
+        <span class="s4">#  in IntervalIndexMethod.time_intersection_both_duplicate(1000)</span>
+        <span class="s1">mask </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">zeros</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">bool</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">hasnans </span><span class="s2">and </span><span class="s1">other</span><span class="s3">.</span><span class="s1">hasnans</span><span class="s3">:</span>
+            <span class="s1">first_nan_loc </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">arange</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">))[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">isna</span><span class="s3">()][</span><span class="s6">0</span><span class="s3">]</span>
+            <span class="s1">mask</span><span class="s3">[</span><span class="s1">first_nan_loc</span><span class="s3">] = </span><span class="s2">True</span>
+
+        <span class="s1">other_tups </span><span class="s3">= </span><span class="s1">set</span><span class="s3">(</span><span class="s1">zip</span><span class="s3">(</span><span class="s1">other</span><span class="s3">.</span><span class="s1">left</span><span class="s3">, </span><span class="s1">other</span><span class="s3">.</span><span class="s1">right</span><span class="s3">, </span><span class="s1">strict</span><span class="s3">=</span><span class="s2">True</span><span class="s3">))</span>
+        <span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">tup </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">zip</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">left</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">right</span><span class="s3">, </span><span class="s1">strict</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)):</span>
+            <span class="s2">if </span><span class="s1">tup </span><span class="s2">in </span><span class="s1">other_tups</span><span class="s3">:</span>
+                <span class="s1">mask</span><span class="s3">[</span><span class="s1">i</span><span class="s3">] = </span><span class="s2">True</span>
+
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">[</span><span class="s1">mask</span><span class="s3">]</span>
+
+    <span class="s4"># --------------------------------------------------------------------</span>
+
+    <span class="s2">def </span><span class="s1">_get_engine_target</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">:</span>
+        <span class="s4"># Note: we _could_ use libjoin functions by either casting to object</span>
+        <span class="s4">#  dtype or constructing tuples (faster than constructing Intervals)</span>
+        <span class="s4">#  but the libjoin fastpaths are no longer fast in these cases.</span>
+        <span class="s2">raise </span><span class="s1">NotImplementedError</span><span class="s3">(</span>
+            <span class="s5">&quot;IntervalIndex does not use libjoin fastpaths or pass values to &quot;</span>
+            <span class="s5">&quot;IndexEngine objects&quot;</span>
+        <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_from_join_target</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">result</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">NotImplementedError</span><span class="s3">(</span><span class="s5">&quot;IntervalIndex does not use libjoin fastpaths&quot;</span><span class="s3">)</span>
+
+    <span class="s4"># TODO: arithmetic operations</span>
+
+
+<span class="s2">def </span><span class="s1">_is_valid_endpoint</span><span class="s3">(</span><span class="s1">endpoint</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Helper for interval_range to check if start/end are valid types. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">return </span><span class="s1">any</span><span class="s3">(</span>
+        <span class="s3">[</span>
+            <span class="s1">is_number</span><span class="s3">(</span><span class="s1">endpoint</span><span class="s3">),</span>
+            <span class="s1">isinstance</span><span class="s3">(</span><span class="s1">endpoint</span><span class="s3">, </span><span class="s1">Timestamp</span><span class="s3">),</span>
+            <span class="s1">isinstance</span><span class="s3">(</span><span class="s1">endpoint</span><span class="s3">, </span><span class="s1">Timedelta</span><span class="s3">),</span>
+            <span class="s1">endpoint </span><span class="s2">is None</span><span class="s3">,</span>
+        <span class="s3">]</span>
+    <span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_is_type_compatible</span><span class="s3">(</span><span class="s1">a</span><span class="s3">, </span><span class="s1">b</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Helper for interval_range to check type compat of start/end/freq. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">is_ts_compat </span><span class="s3">= </span><span class="s2">lambda </span><span class="s1">x</span><span class="s3">: </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">x</span><span class="s3">, (</span><span class="s1">Timestamp</span><span class="s3">, </span><span class="s1">BaseOffset</span><span class="s3">))</span>
+    <span class="s1">is_td_compat </span><span class="s3">= </span><span class="s2">lambda </span><span class="s1">x</span><span class="s3">: </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">x</span><span class="s3">, (</span><span class="s1">Timedelta</span><span class="s3">, </span><span class="s1">BaseOffset</span><span class="s3">))</span>
+    <span class="s2">return </span><span class="s3">(</span>
+        <span class="s3">(</span><span class="s1">is_number</span><span class="s3">(</span><span class="s1">a</span><span class="s3">) </span><span class="s2">and </span><span class="s1">is_number</span><span class="s3">(</span><span class="s1">b</span><span class="s3">))</span>
+        <span class="s2">or </span><span class="s3">(</span><span class="s1">is_ts_compat</span><span class="s3">(</span><span class="s1">a</span><span class="s3">) </span><span class="s2">and </span><span class="s1">is_ts_compat</span><span class="s3">(</span><span class="s1">b</span><span class="s3">))</span>
+        <span class="s2">or </span><span class="s3">(</span><span class="s1">is_td_compat</span><span class="s3">(</span><span class="s1">a</span><span class="s3">) </span><span class="s2">and </span><span class="s1">is_td_compat</span><span class="s3">(</span><span class="s1">b</span><span class="s3">))</span>
+        <span class="s2">or </span><span class="s1">com</span><span class="s3">.</span><span class="s1">any_none</span><span class="s3">(</span><span class="s1">a</span><span class="s3">, </span><span class="s1">b</span><span class="s3">)</span>
+    <span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s5">&quot;pandas&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">interval_range</span><span class="s3">(</span>
+    <span class="s1">start</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">end</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">periods</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">freq</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">name</span><span class="s3">: </span><span class="s1">Hashable </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">closed</span><span class="s3">: </span><span class="s1">IntervalClosedType </span><span class="s3">= </span><span class="s5">&quot;right&quot;</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; IntervalIndex</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Return a fixed frequency IntervalIndex. 
+ 
+    Parameters 
+    ---------- 
+    start : numeric or datetime-like, default None 
+        Left bound for generating intervals. 
+    end : numeric or datetime-like, default None 
+        Right bound for generating intervals. 
+    periods : int, default None 
+        Number of periods to generate. 
+    freq : numeric, str, Timedelta, datetime.timedelta, or DateOffset, default None 
+        The length of each interval. Must be consistent with the type of start 
+        and end, e.g. 2 for numeric, or '5H' for datetime-like.  Default is 1 
+        for numeric and 'D' for datetime-like. 
+    name : str, default None 
+        Name of the resulting IntervalIndex. 
+    closed : {'left', 'right', 'both', 'neither'}, default 'right' 
+        Whether the intervals are closed on the left-side, right-side, both 
+        or neither. 
+ 
+    Returns 
+    ------- 
+    IntervalIndex 
+        Object with a fixed frequency. 
+ 
+    See Also 
+    -------- 
+    IntervalIndex : An Index of intervals that are all closed on the same side. 
+ 
+    Notes 
+    ----- 
+    Of the four parameters ``start``, ``end``, ``periods``, and ``freq``, 
+    exactly three must be specified. If ``freq`` is omitted, the resulting 
+    ``IntervalIndex`` will have ``periods`` linearly spaced elements between 
+    ``start`` and ``end``, inclusively. 
+ 
+    To learn more about datetime-like frequency strings, please see 
+    :ref:`this link&lt;timeseries.offset_aliases&gt;`. 
+ 
+    Examples 
+    -------- 
+    Numeric ``start`` and  ``end`` is supported. 
+ 
+    &gt;&gt;&gt; pd.interval_range(start=0, end=5) 
+    IntervalIndex([(0, 1], (1, 2], (2, 3], (3, 4], (4, 5]], 
+                  dtype='interval[int64, right]') 
+ 
+    Additionally, datetime-like input is also supported. 
+ 
+    &gt;&gt;&gt; pd.interval_range( 
+    ...     start=pd.Timestamp(&quot;2017-01-01&quot;), end=pd.Timestamp(&quot;2017-01-04&quot;) 
+    ... ) 
+    IntervalIndex([(2017-01-01 00:00:00, 2017-01-02 00:00:00], 
+                   (2017-01-02 00:00:00, 2017-01-03 00:00:00], 
+                   (2017-01-03 00:00:00, 2017-01-04 00:00:00]], 
+                  dtype='interval[datetime64[us], right]') 
+ 
+    The ``freq`` parameter specifies the frequency between the left and right. 
+    endpoints of the individual intervals within the ``IntervalIndex``.  For 
+    numeric ``start`` and ``end``, the frequency must also be numeric. 
+ 
+    &gt;&gt;&gt; pd.interval_range(start=0, periods=4, freq=1.5) 
+    IntervalIndex([(0.0, 1.5], (1.5, 3.0], (3.0, 4.5], (4.5, 6.0]], 
+                  dtype='interval[float64, right]') 
+ 
+    Similarly, for datetime-like ``start`` and ``end``, the frequency must be 
+    convertible to a DateOffset. 
+ 
+    &gt;&gt;&gt; pd.interval_range(start=pd.Timestamp(&quot;2017-01-01&quot;), periods=3, freq=&quot;MS&quot;) 
+    IntervalIndex([(2017-01-01 00:00:00, 2017-02-01 00:00:00], 
+                   (2017-02-01 00:00:00, 2017-03-01 00:00:00], 
+                   (2017-03-01 00:00:00, 2017-04-01 00:00:00]], 
+                  dtype='interval[datetime64[us], right]') 
+ 
+    Specify ``start``, ``end``, and ``periods``; the frequency is generated 
+    automatically (linearly spaced). 
+ 
+    &gt;&gt;&gt; pd.interval_range(start=0, end=6, periods=4) 
+    IntervalIndex([(0.0, 1.5], (1.5, 3.0], (3.0, 4.5], (4.5, 6.0]], 
+              dtype='interval[float64, right]') 
+ 
+    The ``closed`` parameter specifies which endpoints of the individual 
+    intervals within the ``IntervalIndex`` are closed. 
+ 
+    &gt;&gt;&gt; pd.interval_range(end=5, periods=4, closed=&quot;both&quot;) 
+    IntervalIndex([[1, 2], [2, 3], [3, 4], [4, 5]], 
+                  dtype='interval[int64, both]') 
+    &quot;&quot;&quot;</span>
+    <span class="s1">start </span><span class="s3">= </span><span class="s1">maybe_box_datetimelike</span><span class="s3">(</span><span class="s1">start</span><span class="s3">)</span>
+    <span class="s1">end </span><span class="s3">= </span><span class="s1">maybe_box_datetimelike</span><span class="s3">(</span><span class="s1">end</span><span class="s3">)</span>
+    <span class="s1">endpoint </span><span class="s3">= </span><span class="s1">start </span><span class="s2">if </span><span class="s1">start </span><span class="s2">is not None else </span><span class="s1">end</span>
+
+    <span class="s2">if </span><span class="s1">freq </span><span class="s2">is None and </span><span class="s1">com</span><span class="s3">.</span><span class="s1">any_none</span><span class="s3">(</span><span class="s1">periods</span><span class="s3">, </span><span class="s1">start</span><span class="s3">, </span><span class="s1">end</span><span class="s3">):</span>
+        <span class="s1">freq </span><span class="s3">= </span><span class="s6">1 </span><span class="s2">if </span><span class="s1">is_number</span><span class="s3">(</span><span class="s1">endpoint</span><span class="s3">) </span><span class="s2">else </span><span class="s5">&quot;D&quot;</span>
+
+    <span class="s2">if </span><span class="s1">com</span><span class="s3">.</span><span class="s1">count_not_none</span><span class="s3">(</span><span class="s1">start</span><span class="s3">, </span><span class="s1">end</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">) != </span><span class="s6">3</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+            <span class="s5">&quot;Of the four parameters: start, end, periods, and &quot;</span>
+            <span class="s5">&quot;freq, exactly three must be specified&quot;</span>
+        <span class="s3">)</span>
+
+    <span class="s2">if not </span><span class="s1">_is_valid_endpoint</span><span class="s3">(</span><span class="s1">start</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s5">f&quot;start must be numeric or datetime-like, got </span><span class="s2">{</span><span class="s1">start</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s3">)</span>
+    <span class="s2">if not </span><span class="s1">_is_valid_endpoint</span><span class="s3">(</span><span class="s1">end</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s5">f&quot;end must be numeric or datetime-like, got </span><span class="s2">{</span><span class="s1">end</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s3">)</span>
+
+    <span class="s1">periods </span><span class="s3">= </span><span class="s1">validate_periods</span><span class="s3">(</span><span class="s1">periods</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">freq </span><span class="s2">is not None and not </span><span class="s1">is_number</span><span class="s3">(</span><span class="s1">freq</span><span class="s3">):</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">freq </span><span class="s3">= </span><span class="s1">to_offset</span><span class="s3">(</span><span class="s1">freq</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s1">ValueError </span><span class="s2">as </span><span class="s1">err</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                <span class="s5">f&quot;freq must be numeric or convertible to DateOffset, got </span><span class="s2">{</span><span class="s1">freq</span><span class="s2">}</span><span class="s5">&quot;</span>
+            <span class="s3">) </span><span class="s2">from </span><span class="s1">err</span>
+
+    <span class="s4"># verify type compatibility</span>
+    <span class="s2">if not </span><span class="s1">all</span><span class="s3">(</span>
+        <span class="s3">[</span>
+            <span class="s1">_is_type_compatible</span><span class="s3">(</span><span class="s1">start</span><span class="s3">, </span><span class="s1">end</span><span class="s3">),</span>
+            <span class="s1">_is_type_compatible</span><span class="s3">(</span><span class="s1">start</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">),</span>
+            <span class="s1">_is_type_compatible</span><span class="s3">(</span><span class="s1">end</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">),</span>
+        <span class="s3">]</span>
+    <span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span><span class="s5">&quot;start, end, freq need to be type compatible&quot;</span><span class="s3">)</span>
+
+    <span class="s4"># +1 to convert interval count to breaks count (n breaks = n-1 intervals)</span>
+    <span class="s2">if </span><span class="s1">periods </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s1">periods </span><span class="s3">+= </span><span class="s6">1</span>
+
+    <span class="s1">breaks</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray </span><span class="s3">| </span><span class="s1">TimedeltaIndex </span><span class="s3">| </span><span class="s1">DatetimeIndex</span>
+
+    <span class="s2">if </span><span class="s1">is_number</span><span class="s3">(</span><span class="s1">endpoint</span><span class="s3">):</span>
+        <span class="s1">dtype</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">com</span><span class="s3">.</span><span class="s1">all_not_none</span><span class="s3">(</span><span class="s1">start</span><span class="s3">, </span><span class="s1">end</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s3">(</span>
+                <span class="s1">isinstance</span><span class="s3">(</span><span class="s1">start</span><span class="s3">, (</span><span class="s1">np</span><span class="s3">.</span><span class="s1">integer</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">floating</span><span class="s3">))</span>
+                <span class="s2">and </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">end</span><span class="s3">, (</span><span class="s1">np</span><span class="s3">.</span><span class="s1">integer</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">floating</span><span class="s3">))</span>
+                <span class="s2">and </span><span class="s1">start</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">end</span><span class="s3">.</span><span class="s1">dtype</span>
+            <span class="s3">):</span>
+                <span class="s1">dtype </span><span class="s3">= </span><span class="s1">start</span><span class="s3">.</span><span class="s1">dtype</span>
+            <span class="s2">elif </span><span class="s3">(</span>
+                <span class="s1">isinstance</span><span class="s3">(</span><span class="s1">start</span><span class="s3">, (</span><span class="s1">float</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">floating</span><span class="s3">))</span>
+                <span class="s2">or </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">end</span><span class="s3">, (</span><span class="s1">float</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">floating</span><span class="s3">))</span>
+                <span class="s2">or </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">freq</span><span class="s3">, (</span><span class="s1">float</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">floating</span><span class="s3">))</span>
+            <span class="s3">):</span>
+                <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;float64&quot;</span><span class="s3">)</span>
+            <span class="s4"># 0.1 ensures we capture end</span>
+            <span class="s1">breaks </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">arange</span><span class="s3">(</span><span class="s1">start</span><span class="s3">, </span><span class="s1">end </span><span class="s3">+ (</span><span class="s1">freq </span><span class="s3">* </span><span class="s6">0.1</span><span class="s3">), </span><span class="s1">freq</span><span class="s3">)</span>
+            <span class="s1">breaks </span><span class="s3">= </span><span class="s1">maybe_downcast_numeric</span><span class="s3">(</span><span class="s1">breaks</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s4"># compute the period/start/end if unspecified (at most one)</span>
+            <span class="s2">if </span><span class="s1">periods </span><span class="s2">is None</span><span class="s3">:</span>
+                <span class="s1">periods </span><span class="s3">= </span><span class="s1">int</span><span class="s3">((</span><span class="s1">end </span><span class="s3">- </span><span class="s1">start</span><span class="s3">) // </span><span class="s1">freq</span><span class="s3">) + </span><span class="s6">1</span>
+            <span class="s2">elif </span><span class="s1">start </span><span class="s2">is None</span><span class="s3">:</span>
+                <span class="s1">start </span><span class="s3">= </span><span class="s1">end </span><span class="s3">- (</span><span class="s1">periods </span><span class="s3">- </span><span class="s6">1</span><span class="s3">) * </span><span class="s1">freq</span>
+            <span class="s2">elif </span><span class="s1">end </span><span class="s2">is None</span><span class="s3">:</span>
+                <span class="s1">end </span><span class="s3">= </span><span class="s1">start </span><span class="s3">+ (</span><span class="s1">periods </span><span class="s3">- </span><span class="s6">1</span><span class="s3">) * </span><span class="s1">freq</span>
+
+            <span class="s1">breaks </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">linspace</span><span class="s3">(</span><span class="s1">start</span><span class="s3">, </span><span class="s1">end</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">all</span><span class="s3">(</span><span class="s1">is_integer</span><span class="s3">(</span><span class="s1">x</span><span class="s3">) </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">com</span><span class="s3">.</span><span class="s1">not_none</span><span class="s3">(</span><span class="s1">start</span><span class="s3">, </span><span class="s1">end</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">)):</span>
+            <span class="s4"># np.linspace always produces float output</span>
+            <span class="s1">breaks </span><span class="s3">= </span><span class="s1">maybe_downcast_numeric</span><span class="s3">(</span><span class="s1">breaks</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">)</span>
+    <span class="s4"># delegate to the appropriate range function</span>
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">endpoint</span><span class="s3">, </span><span class="s1">Timestamp</span><span class="s3">):</span>
+        <span class="s1">breaks </span><span class="s3">= </span><span class="s1">date_range</span><span class="s3">(</span><span class="s1">start</span><span class="s3">=</span><span class="s1">start</span><span class="s3">, </span><span class="s1">end</span><span class="s3">=</span><span class="s1">end</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s1">periods</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s1">freq</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">breaks </span><span class="s3">= </span><span class="s1">timedelta_range</span><span class="s3">(</span><span class="s1">start</span><span class="s3">=</span><span class="s1">start</span><span class="s3">, </span><span class="s1">end</span><span class="s3">=</span><span class="s1">end</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s1">periods</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s1">freq</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">IntervalIndex</span><span class="s3">.</span><span class="s1">from_breaks</span><span class="s3">(</span>
+        <span class="s1">breaks</span><span class="s3">,</span>
+        <span class="s1">name</span><span class="s3">=</span><span class="s1">name</span><span class="s3">,</span>
+        <span class="s1">closed</span><span class="s3">=</span><span class="s1">closed</span><span class="s3">,</span>
+        <span class="s1">dtype</span><span class="s3">=</span><span class="s1">IntervalDtype</span><span class="s3">(</span><span class="s1">subtype</span><span class="s3">=</span><span class="s1">breaks</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">closed</span><span class="s3">=</span><span class="s1">closed</span><span class="s3">),</span>
+    <span class="s3">)</span>
+</pre>
+</body>
+</html>

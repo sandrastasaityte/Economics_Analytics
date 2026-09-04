@@ -1,0 +1,557 @@
+<html>
+<head>
+<title>test_cpu_features.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+.s6 { color: #a5c261;}
+.s7 { color: #5f826b; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_cpu_features.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">pathlib</span>
+<span class="s0">import </span><span class="s1">platform</span>
+<span class="s0">import </span><span class="s1">re</span>
+<span class="s0">import </span><span class="s1">subprocess</span>
+<span class="s0">import </span><span class="s1">sys</span>
+
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">_core</span><span class="s2">.</span><span class="s1">_multiarray_umath </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">__cpu_baseline__</span><span class="s2">,</span>
+    <span class="s1">__cpu_dispatch__</span><span class="s2">,</span>
+    <span class="s1">__cpu_features__</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">assert_features_equal</span><span class="s2">(</span><span class="s1">actual</span><span class="s2">, </span><span class="s1">desired</span><span class="s2">, </span><span class="s1">fname</span><span class="s2">):</span>
+    <span class="s1">__tracebackhide__ </span><span class="s2">= </span><span class="s0">True  </span><span class="s3"># Hide traceback for py.test</span>
+    <span class="s1">actual</span><span class="s2">, </span><span class="s1">desired </span><span class="s2">= </span><span class="s1">str</span><span class="s2">(</span><span class="s1">actual</span><span class="s2">), </span><span class="s1">str</span><span class="s2">(</span><span class="s1">desired</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">actual </span><span class="s2">== </span><span class="s1">desired</span><span class="s2">:</span>
+        <span class="s0">return</span>
+    <span class="s1">detected </span><span class="s2">= </span><span class="s1">str</span><span class="s2">(</span><span class="s1">__cpu_features__</span><span class="s2">).</span><span class="s1">replace</span><span class="s2">(</span><span class="s4">&quot;'&quot;</span><span class="s2">, </span><span class="s4">&quot;&quot;</span><span class="s2">)</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s0">with </span><span class="s1">open</span><span class="s2">(</span><span class="s4">&quot;/proc/cpuinfo&quot;</span><span class="s2">) </span><span class="s0">as </span><span class="s1">fd</span><span class="s2">:</span>
+            <span class="s1">cpuinfo </span><span class="s2">= </span><span class="s1">fd</span><span class="s2">.</span><span class="s1">read</span><span class="s2">(</span><span class="s5">2048</span><span class="s2">)</span>
+    <span class="s0">except </span><span class="s1">Exception </span><span class="s0">as </span><span class="s1">err</span><span class="s2">:</span>
+        <span class="s1">cpuinfo </span><span class="s2">= </span><span class="s1">str</span><span class="s2">(</span><span class="s1">err</span><span class="s2">)</span>
+
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s0">import </span><span class="s1">subprocess</span>
+        <span class="s1">auxv </span><span class="s2">= </span><span class="s1">subprocess</span><span class="s2">.</span><span class="s1">check_output</span><span class="s2">([</span><span class="s4">'/bin/true'</span><span class="s2">], </span><span class="s1">env</span><span class="s2">={</span><span class="s4">&quot;LD_SHOW_AUXV&quot;</span><span class="s2">: </span><span class="s4">&quot;1&quot;</span><span class="s2">})</span>
+        <span class="s1">auxv </span><span class="s2">= </span><span class="s1">auxv</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">()</span>
+    <span class="s0">except </span><span class="s1">Exception </span><span class="s0">as </span><span class="s1">err</span><span class="s2">:</span>
+        <span class="s1">auxv </span><span class="s2">= </span><span class="s1">str</span><span class="s2">(</span><span class="s1">err</span><span class="s2">)</span>
+
+    <span class="s0">import </span><span class="s1">textwrap</span>
+    <span class="s1">error_report </span><span class="s2">= </span><span class="s1">textwrap</span><span class="s2">.</span><span class="s1">indent</span><span class="s2">(</span>
+<span class="s4">f&quot;&quot;&quot;</span>
+<span class="s4">###########################################</span>
+<span class="s4">### Extra debugging information</span>
+<span class="s4">###########################################</span>
+<span class="s4">-------------------------------------------</span>
+<span class="s4">--- NumPy Detections</span>
+<span class="s4">-------------------------------------------</span>
+<span class="s0">{</span><span class="s1">detected</span><span class="s0">}</span>
+<span class="s4">-------------------------------------------</span>
+<span class="s4">--- SYS / CPUINFO</span>
+<span class="s4">-------------------------------------------</span>
+<span class="s0">{</span><span class="s1">cpuinfo</span><span class="s0">}</span><span class="s4">....</span>
+<span class="s4">-------------------------------------------</span>
+<span class="s4">--- SYS / AUXV</span>
+<span class="s4">-------------------------------------------</span>
+<span class="s0">{</span><span class="s1">auxv</span><span class="s0">}</span>
+<span class="s4">&quot;&quot;&quot;</span><span class="s2">, </span><span class="s1">prefix</span><span class="s2">=</span><span class="s4">'</span><span class="s0">\r</span><span class="s4">'</span><span class="s2">)</span>
+
+    <span class="s0">raise </span><span class="s1">AssertionError</span><span class="s2">(</span>
+        <span class="s4">&quot;Failure Detection</span><span class="s0">\n</span><span class="s4">&quot;</span>
+        <span class="s4">f&quot; NAME: '</span><span class="s0">{</span><span class="s1">fname</span><span class="s0">}</span><span class="s4">'</span><span class="s0">\n</span><span class="s4">&quot;</span>
+        <span class="s4">f&quot; ACTUAL: </span><span class="s0">{</span><span class="s1">actual</span><span class="s0">}\n</span><span class="s4">&quot;</span>
+        <span class="s4">f&quot; DESIRED: </span><span class="s0">{</span><span class="s1">desired</span><span class="s0">}\n</span><span class="s4">&quot;</span>
+        <span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">error_report</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+<span class="s0">def </span><span class="s1">_text_to_list</span><span class="s2">(</span><span class="s1">txt</span><span class="s2">):</span>
+    <span class="s1">out </span><span class="s2">= </span><span class="s1">txt</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">(</span><span class="s4">&quot;][</span><span class="s0">\n</span><span class="s4">&quot;</span><span class="s2">).</span><span class="s1">replace</span><span class="s2">(</span><span class="s4">&quot;'&quot;</span><span class="s2">, </span><span class="s4">&quot;&quot;</span><span class="s2">).</span><span class="s1">split</span><span class="s2">(</span><span class="s4">', '</span><span class="s2">)</span>
+    <span class="s0">return None if </span><span class="s1">out</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] == </span><span class="s4">&quot;&quot; </span><span class="s0">else </span><span class="s1">out</span>
+
+<span class="s0">class </span><span class="s1">AbstractTest</span><span class="s2">:</span>
+    <span class="s1">features </span><span class="s2">= []</span>
+    <span class="s1">features_groups </span><span class="s2">= {}</span>
+    <span class="s1">features_map </span><span class="s2">= {}</span>
+    <span class="s1">features_flags </span><span class="s2">= </span><span class="s1">set</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">load_flags</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># a hook</span>
+        <span class="s0">pass</span>
+
+    <span class="s0">def </span><span class="s1">test_features</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">load_flags</span><span class="s2">()</span>
+        <span class="s0">for </span><span class="s1">gname</span><span class="s2">, </span><span class="s1">features </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">features_groups</span><span class="s2">.</span><span class="s1">items</span><span class="s2">():</span>
+            <span class="s1">test_features </span><span class="s2">= [</span><span class="s1">self</span><span class="s2">.</span><span class="s1">cpu_have</span><span class="s2">(</span><span class="s1">f</span><span class="s2">) </span><span class="s0">for </span><span class="s1">f </span><span class="s0">in </span><span class="s1">features</span><span class="s2">]</span>
+            <span class="s1">assert_features_equal</span><span class="s2">(</span>
+                <span class="s1">__cpu_features__</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">gname</span><span class="s2">),</span>
+                <span class="s1">all</span><span class="s2">(</span><span class="s1">test_features</span><span class="s2">),</span>
+                <span class="s1">gname</span><span class="s2">,</span>
+            <span class="s2">)</span>
+
+        <span class="s0">for </span><span class="s1">feature_name </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">features</span><span class="s2">:</span>
+            <span class="s1">cpu_have </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">cpu_have</span><span class="s2">(</span><span class="s1">feature_name</span><span class="s2">)</span>
+            <span class="s1">npy_have </span><span class="s2">= </span><span class="s1">__cpu_features__</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">feature_name</span><span class="s2">)</span>
+            <span class="s1">assert_features_equal</span><span class="s2">(</span><span class="s1">npy_have</span><span class="s2">, </span><span class="s1">cpu_have</span><span class="s2">, </span><span class="s1">feature_name</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">cpu_have</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">feature_name</span><span class="s2">):</span>
+        <span class="s1">map_names </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">features_map</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">feature_name</span><span class="s2">, </span><span class="s1">feature_name</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">map_names</span><span class="s2">, </span><span class="s1">str</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">map_names </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">features_flags</span>
+        <span class="s0">return </span><span class="s1">any</span><span class="s2">(</span><span class="s1">f </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">features_flags </span><span class="s0">for </span><span class="s1">f </span><span class="s0">in </span><span class="s1">map_names</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">load_flags_cpuinfo</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">magic_key</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">features_flags </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">get_cpuinfo_item</span><span class="s2">(</span><span class="s1">magic_key</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">get_cpuinfo_item</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">magic_key</span><span class="s2">):</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">set</span><span class="s2">()</span>
+        <span class="s0">with </span><span class="s1">open</span><span class="s2">(</span><span class="s4">'/proc/cpuinfo'</span><span class="s2">) </span><span class="s0">as </span><span class="s1">fd</span><span class="s2">:</span>
+            <span class="s0">for </span><span class="s1">line </span><span class="s0">in </span><span class="s1">fd</span><span class="s2">:</span>
+                <span class="s0">if not </span><span class="s1">line</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s1">magic_key</span><span class="s2">):</span>
+                    <span class="s0">continue</span>
+                <span class="s1">flags_value </span><span class="s2">= [</span><span class="s1">s</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">() </span><span class="s0">for </span><span class="s1">s </span><span class="s0">in </span><span class="s1">line</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s4">':'</span><span class="s2">, </span><span class="s5">1</span><span class="s2">)]</span>
+                <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">flags_value</span><span class="s2">) == </span><span class="s5">2</span><span class="s2">:</span>
+                    <span class="s1">values </span><span class="s2">= </span><span class="s1">values</span><span class="s2">.</span><span class="s1">union</span><span class="s2">(</span><span class="s1">flags_value</span><span class="s2">[</span><span class="s5">1</span><span class="s2">].</span><span class="s1">upper</span><span class="s2">().</span><span class="s1">split</span><span class="s2">())</span>
+        <span class="s0">return </span><span class="s1">values</span>
+
+    <span class="s0">def </span><span class="s1">load_flags_auxv</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">auxv </span><span class="s2">= </span><span class="s1">subprocess</span><span class="s2">.</span><span class="s1">check_output</span><span class="s2">([</span><span class="s4">'/bin/true'</span><span class="s2">], </span><span class="s1">env</span><span class="s2">={</span><span class="s4">&quot;LD_SHOW_AUXV&quot;</span><span class="s2">: </span><span class="s4">&quot;1&quot;</span><span class="s2">})</span>
+        <span class="s0">for </span><span class="s1">at </span><span class="s0">in </span><span class="s1">auxv</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s6">b'</span><span class="s0">\n</span><span class="s6">'</span><span class="s2">):</span>
+            <span class="s0">if not </span><span class="s1">at</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s6">b&quot;AT_HWCAP&quot;</span><span class="s2">):</span>
+                <span class="s0">continue</span>
+            <span class="s1">hwcap_value </span><span class="s2">= [</span><span class="s1">s</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">() </span><span class="s0">for </span><span class="s1">s </span><span class="s0">in </span><span class="s1">at</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s6">b':'</span><span class="s2">, </span><span class="s5">1</span><span class="s2">)]</span>
+            <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">hwcap_value</span><span class="s2">) == </span><span class="s5">2</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">features_flags </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">features_flags</span><span class="s2">.</span><span class="s1">union</span><span class="s2">(</span>
+                    <span class="s1">hwcap_value</span><span class="s2">[</span><span class="s5">1</span><span class="s2">].</span><span class="s1">upper</span><span class="s2">().</span><span class="s1">decode</span><span class="s2">().</span><span class="s1">split</span><span class="s2">()</span>
+                <span class="s2">)</span>
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span>
+    <span class="s1">sys</span><span class="s2">.</span><span class="s1">platform </span><span class="s2">== </span><span class="s4">'emscripten'</span><span class="s2">,</span>
+    <span class="s1">reason</span><span class="s2">=(</span>
+        <span class="s4">&quot;The subprocess module is not available on WASM platforms and&quot;</span>
+        <span class="s4">&quot; therefore this test class cannot be properly executed.&quot;</span>
+    <span class="s2">),</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">thread_unsafe</span><span class="s2">(</span>
+    <span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;setup &amp; tmp_path_factory threads-unsafe, modifies environment variables&quot;</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">class </span><span class="s1">TestEnvPrivation</span><span class="s2">:</span>
+    <span class="s1">cwd </span><span class="s2">= </span><span class="s1">pathlib</span><span class="s2">.</span><span class="s1">Path</span><span class="s2">(</span><span class="s1">__file__</span><span class="s2">).</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">resolve</span><span class="s2">()</span>
+    <span class="s1">env </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">environ</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+    <span class="s1">_enable </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">environ</span><span class="s2">.</span><span class="s1">pop</span><span class="s2">(</span><span class="s4">'NPY_ENABLE_CPU_FEATURES'</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+    <span class="s1">_disable </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">environ</span><span class="s2">.</span><span class="s1">pop</span><span class="s2">(</span><span class="s4">'NPY_DISABLE_CPU_FEATURES'</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+    <span class="s1">SUBPROCESS_ARGS </span><span class="s2">= {</span><span class="s4">&quot;cwd&quot;</span><span class="s2">: </span><span class="s1">cwd</span><span class="s2">, </span><span class="s4">&quot;capture_output&quot;</span><span class="s2">: </span><span class="s0">True</span><span class="s2">, </span><span class="s4">&quot;text&quot;</span><span class="s2">: </span><span class="s0">True</span><span class="s2">, </span><span class="s4">&quot;check&quot;</span><span class="s2">: </span><span class="s0">True</span><span class="s2">}</span>
+    <span class="s1">unavailable_feats </span><span class="s2">= [</span>
+        <span class="s1">feat </span><span class="s0">for </span><span class="s1">feat </span><span class="s0">in </span><span class="s1">__cpu_dispatch__ </span><span class="s0">if not </span><span class="s1">__cpu_features__</span><span class="s2">[</span><span class="s1">feat</span><span class="s2">]</span>
+    <span class="s2">]</span>
+    <span class="s1">UNAVAILABLE_FEAT </span><span class="s2">= (</span>
+        <span class="s0">None if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">unavailable_feats</span><span class="s2">) == </span><span class="s5">0</span>
+        <span class="s0">else </span><span class="s1">unavailable_feats</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]</span>
+    <span class="s2">)</span>
+    <span class="s1">BASELINE_FEAT </span><span class="s2">= </span><span class="s0">None if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">__cpu_baseline__</span><span class="s2">) == </span><span class="s5">0 </span><span class="s0">else </span><span class="s1">__cpu_baseline__</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]</span>
+    <span class="s1">SCRIPT </span><span class="s2">= </span><span class="s4">&quot;&quot;&quot; 
+def main(): 
+    from numpy._core._multiarray_umath import ( 
+        __cpu_features__, 
+        __cpu_dispatch__ 
+    ) 
+ 
+    detected = [feat for feat in __cpu_dispatch__ if __cpu_features__[feat]] 
+    print(detected) 
+ 
+if __name__ == &quot;__main__&quot;: 
+    main() 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">fixture</span><span class="s2">(</span><span class="s1">autouse</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">setup_class</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path_factory</span><span class="s2">):</span>
+        <span class="s1">file </span><span class="s2">= </span><span class="s1">tmp_path_factory</span><span class="s2">.</span><span class="s1">mktemp</span><span class="s2">(</span><span class="s4">&quot;runtime_test_script&quot;</span><span class="s2">)</span>
+        <span class="s1">file </span><span class="s2">/= </span><span class="s4">&quot;_runtime_detect.py&quot;</span>
+        <span class="s1">file</span><span class="s2">.</span><span class="s1">write_text</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">SCRIPT</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">file </span><span class="s2">= </span><span class="s1">file</span>
+
+    <span class="s0">def </span><span class="s1">_run</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">subprocess</span><span class="s2">.</span><span class="s1">run</span><span class="s2">(</span>
+            <span class="s2">[</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">executable</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">file</span><span class="s2">],</span>
+            <span class="s1">env</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">env</span><span class="s2">,</span>
+            <span class="s2">**</span><span class="s1">self</span><span class="s2">.</span><span class="s1">SUBPROCESS_ARGS</span><span class="s2">,</span>
+            <span class="s2">)</span>
+
+    <span class="s3"># Helper function mimicking pytest.raises for subprocess call</span>
+    <span class="s0">def </span><span class="s1">_expect_error</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">msg</span><span class="s2">,</span>
+        <span class="s1">err_type</span><span class="s2">,</span>
+        <span class="s1">no_error_msg</span><span class="s2">=</span><span class="s4">&quot;Failed to generate error&quot;</span>
+    <span class="s2">):</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_run</span><span class="s2">()</span>
+        <span class="s0">except </span><span class="s1">subprocess</span><span class="s2">.</span><span class="s1">CalledProcessError </span><span class="s0">as </span><span class="s1">e</span><span class="s2">:</span>
+            <span class="s1">assertion_message </span><span class="s2">= </span><span class="s4">f&quot;Expected: </span><span class="s0">{</span><span class="s1">msg</span><span class="s0">}\n</span><span class="s4">Got: </span><span class="s0">{</span><span class="s1">e</span><span class="s2">.</span><span class="s1">stderr</span><span class="s0">}</span><span class="s4">&quot;</span>
+            <span class="s0">assert </span><span class="s1">re</span><span class="s2">.</span><span class="s1">search</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">, </span><span class="s1">e</span><span class="s2">.</span><span class="s1">stderr</span><span class="s2">), </span><span class="s1">assertion_message</span>
+
+            <span class="s1">assertion_message </span><span class="s2">= (</span>
+                <span class="s4">f&quot;Expected error of type: </span><span class="s0">{</span><span class="s1">err_type</span><span class="s0">}</span><span class="s4">; see full &quot;</span>
+                <span class="s4">f&quot;error:</span><span class="s0">\n{</span><span class="s1">e</span><span class="s2">.</span><span class="s1">stderr</span><span class="s0">}</span><span class="s4">&quot;</span>
+            <span class="s2">)</span>
+            <span class="s0">assert </span><span class="s1">re</span><span class="s2">.</span><span class="s1">search</span><span class="s2">(</span><span class="s1">err_type</span><span class="s2">, </span><span class="s1">e</span><span class="s2">.</span><span class="s1">stderr</span><span class="s2">), </span><span class="s1">assertion_message</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">assert False</span><span class="s2">, </span><span class="s1">no_error_msg</span>
+
+    <span class="s0">def </span><span class="s1">setup_method</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s7">&quot;&quot;&quot;Ensure that the environment is reset&quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">env </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">environ</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">test_runtime_feature_selection</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s7">&quot;&quot;&quot; 
+        Ensure that when selecting `NPY_ENABLE_CPU_FEATURES`, only the 
+        features exactly specified are dispatched. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s3"># Capture runtime-enabled features</span>
+        <span class="s1">out </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_run</span><span class="s2">()</span>
+        <span class="s1">non_baseline_features </span><span class="s2">= </span><span class="s1">_text_to_list</span><span class="s2">(</span><span class="s1">out</span><span class="s2">.</span><span class="s1">stdout</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">non_baseline_features </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span>
+                <span class="s4">&quot;No dispatchable features outside of baseline detected.&quot;</span>
+            <span class="s2">)</span>
+        <span class="s1">feature </span><span class="s2">= </span><span class="s1">non_baseline_features</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]</span>
+
+        <span class="s3"># Capture runtime-enabled features when `NPY_ENABLE_CPU_FEATURES` is</span>
+        <span class="s3"># specified</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">env</span><span class="s2">[</span><span class="s4">'NPY_ENABLE_CPU_FEATURES'</span><span class="s2">] = </span><span class="s1">feature</span>
+        <span class="s1">out </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_run</span><span class="s2">()</span>
+        <span class="s1">enabled_features </span><span class="s2">= </span><span class="s1">_text_to_list</span><span class="s2">(</span><span class="s1">out</span><span class="s2">.</span><span class="s1">stdout</span><span class="s2">)</span>
+
+        <span class="s3"># Ensure that only one feature is enabled, and it is exactly the one</span>
+        <span class="s3"># specified by `NPY_ENABLE_CPU_FEATURES`</span>
+        <span class="s0">assert </span><span class="s1">set</span><span class="s2">(</span><span class="s1">enabled_features</span><span class="s2">) == {</span><span class="s1">feature</span><span class="s2">}</span>
+
+        <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">non_baseline_features</span><span class="s2">) &lt; </span><span class="s5">2</span><span class="s2">:</span>
+            <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span><span class="s4">&quot;Only one non-baseline feature detected.&quot;</span><span class="s2">)</span>
+        <span class="s3"># Capture runtime-enabled features when `NPY_ENABLE_CPU_FEATURES` is</span>
+        <span class="s3"># specified</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">env</span><span class="s2">[</span><span class="s4">'NPY_ENABLE_CPU_FEATURES'</span><span class="s2">] = </span><span class="s4">&quot;,&quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">non_baseline_features</span><span class="s2">)</span>
+        <span class="s1">out </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_run</span><span class="s2">()</span>
+        <span class="s1">enabled_features </span><span class="s2">= </span><span class="s1">_text_to_list</span><span class="s2">(</span><span class="s1">out</span><span class="s2">.</span><span class="s1">stdout</span><span class="s2">)</span>
+
+        <span class="s3"># Ensure that both features are enabled, and they are exactly the ones</span>
+        <span class="s3"># specified by `NPY_ENABLE_CPU_FEATURES`</span>
+        <span class="s0">assert </span><span class="s1">set</span><span class="s2">(</span><span class="s1">enabled_features</span><span class="s2">) == </span><span class="s1">set</span><span class="s2">(</span><span class="s1">non_baseline_features</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;enabled, disabled&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s2">(</span><span class="s4">&quot;feature&quot;</span><span class="s2">, </span><span class="s4">&quot;feature&quot;</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">&quot;feature&quot;</span><span class="s2">, </span><span class="s4">&quot;same&quot;</span><span class="s2">),</span>
+    <span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_both_enable_disable_set</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">enabled</span><span class="s2">, </span><span class="s1">disabled</span><span class="s2">):</span>
+        <span class="s7">&quot;&quot;&quot; 
+        Ensure that when both environment variables are set then an 
+        ImportError is thrown 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">env</span><span class="s2">[</span><span class="s4">'NPY_ENABLE_CPU_FEATURES'</span><span class="s2">] = </span><span class="s1">enabled</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">env</span><span class="s2">[</span><span class="s4">'NPY_DISABLE_CPU_FEATURES'</span><span class="s2">] = </span><span class="s1">disabled</span>
+        <span class="s1">msg </span><span class="s2">= </span><span class="s4">&quot;Both NPY_DISABLE_CPU_FEATURES and NPY_ENABLE_CPU_FEATURES&quot;</span>
+        <span class="s1">err_type </span><span class="s2">= </span><span class="s4">&quot;ImportError&quot;</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_expect_error</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">, </span><span class="s1">err_type</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span>
+        <span class="s0">not </span><span class="s1">__cpu_dispatch__</span><span class="s2">,</span>
+        <span class="s1">reason</span><span class="s2">=(</span>
+            <span class="s4">&quot;NPY_*_CPU_FEATURES only parsed if &quot;</span>
+            <span class="s4">&quot;`__cpu_dispatch__` is non-empty&quot;</span>
+        <span class="s2">)</span>
+    <span class="s2">)</span>
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;action&quot;</span><span class="s2">, [</span><span class="s4">&quot;ENABLE&quot;</span><span class="s2">, </span><span class="s4">&quot;DISABLE&quot;</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_variable_too_long</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">action</span><span class="s2">):</span>
+        <span class="s7">&quot;&quot;&quot; 
+        Test that an error is thrown if the environment variables are too long 
+        to be processed. Current limit is 1024, but this may change later. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">MAX_VAR_LENGTH </span><span class="s2">= </span><span class="s5">1024</span>
+        <span class="s3"># Actual length is MAX_VAR_LENGTH + 1 due to null-termination</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">env</span><span class="s2">[</span><span class="s4">f'NPY_</span><span class="s0">{</span><span class="s1">action</span><span class="s0">}</span><span class="s4">_CPU_FEATURES'</span><span class="s2">] = </span><span class="s4">&quot;t&quot; </span><span class="s2">* </span><span class="s1">MAX_VAR_LENGTH</span>
+        <span class="s1">msg </span><span class="s2">= (</span>
+            <span class="s4">f&quot;Length of environment variable 'NPY_</span><span class="s0">{</span><span class="s1">action</span><span class="s0">}</span><span class="s4">_CPU_FEATURES' is &quot;</span>
+            <span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">MAX_VAR_LENGTH </span><span class="s2">+ </span><span class="s5">1</span><span class="s0">}</span><span class="s4">, only </span><span class="s0">{</span><span class="s1">MAX_VAR_LENGTH</span><span class="s0">} </span><span class="s4">accepted&quot;</span>
+        <span class="s2">)</span>
+        <span class="s1">err_type </span><span class="s2">= </span><span class="s4">&quot;RuntimeError&quot;</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_expect_error</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">, </span><span class="s1">err_type</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span>
+        <span class="s0">not </span><span class="s1">__cpu_dispatch__</span><span class="s2">,</span>
+        <span class="s1">reason</span><span class="s2">=(</span>
+            <span class="s4">&quot;NPY_*_CPU_FEATURES only parsed if &quot;</span>
+            <span class="s4">&quot;`__cpu_dispatch__` is non-empty&quot;</span>
+        <span class="s2">)</span>
+    <span class="s2">)</span>
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;action&quot;</span><span class="s2">, [</span><span class="s4">&quot;ENABLE&quot;</span><span class="s2">, </span><span class="s4">&quot;DISABLE&quot;</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_max_length_nonexistent_feature</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">action</span><span class="s2">):</span>
+        <span class="s7">&quot;&quot;&quot; 
+        Test that the maximum accepted environment variable length can be 
+        processed even if the whole value is an invalid feature name. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">MAX_VAR_LENGTH </span><span class="s2">= </span><span class="s5">1024</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">env</span><span class="s2">[</span><span class="s4">f'NPY_</span><span class="s0">{</span><span class="s1">action</span><span class="s0">}</span><span class="s4">_CPU_FEATURES'</span><span class="s2">] = </span><span class="s4">&quot;t&quot; </span><span class="s2">* (</span><span class="s1">MAX_VAR_LENGTH </span><span class="s2">- </span><span class="s5">1</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_run</span><span class="s2">()</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span>
+        <span class="s0">not </span><span class="s1">__cpu_dispatch__</span><span class="s2">,</span>
+        <span class="s1">reason</span><span class="s2">=(</span>
+            <span class="s4">&quot;NPY_*_CPU_FEATURES only parsed if &quot;</span>
+            <span class="s4">&quot;`__cpu_dispatch__` is non-empty&quot;</span>
+        <span class="s2">)</span>
+    <span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_impossible_feature_disable</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s7">&quot;&quot;&quot; 
+        Test that a RuntimeError is thrown if an impossible feature-disabling 
+        request is made. This includes disabling a baseline feature. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">BASELINE_FEAT </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span><span class="s4">&quot;There are no unavailable features to test with&quot;</span><span class="s2">)</span>
+        <span class="s1">bad_feature </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">BASELINE_FEAT</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">env</span><span class="s2">[</span><span class="s4">'NPY_DISABLE_CPU_FEATURES'</span><span class="s2">] = </span><span class="s1">bad_feature</span>
+        <span class="s1">msg </span><span class="s2">= (</span>
+            <span class="s4">f&quot;You cannot disable CPU feature '</span><span class="s0">{</span><span class="s1">bad_feature</span><span class="s0">}</span><span class="s4">', since it is &quot;</span>
+            <span class="s4">&quot;part of the baseline optimizations&quot;</span>
+        <span class="s2">)</span>
+        <span class="s1">err_type </span><span class="s2">= </span><span class="s4">&quot;RuntimeError&quot;</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_expect_error</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">, </span><span class="s1">err_type</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_impossible_feature_enable</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s7">&quot;&quot;&quot; 
+        Test that a RuntimeError is thrown if an impossible feature-enabling 
+        request is made. This includes enabling a feature not supported by the 
+        machine, or disabling a baseline optimization. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">UNAVAILABLE_FEAT </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span><span class="s4">&quot;There are no unavailable features to test with&quot;</span><span class="s2">)</span>
+        <span class="s1">bad_feature </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">UNAVAILABLE_FEAT</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">env</span><span class="s2">[</span><span class="s4">'NPY_ENABLE_CPU_FEATURES'</span><span class="s2">] = </span><span class="s1">bad_feature</span>
+        <span class="s1">msg </span><span class="s2">= (</span>
+            <span class="s4">f&quot;You cannot enable CPU features </span><span class="s0">\\</span><span class="s4">(</span><span class="s0">{</span><span class="s1">bad_feature</span><span class="s0">}\\</span><span class="s4">), since &quot;</span>
+            <span class="s4">&quot;they are not supported by your machine.&quot;</span>
+        <span class="s2">)</span>
+        <span class="s1">err_type </span><span class="s2">= </span><span class="s4">&quot;RuntimeError&quot;</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_expect_error</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">, </span><span class="s1">err_type</span><span class="s2">)</span>
+
+        <span class="s3"># Ensure that it fails even when providing garbage in addition</span>
+        <span class="s1">feats </span><span class="s2">= </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">bad_feature</span><span class="s0">}</span><span class="s4">, Foobar&quot;</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">env</span><span class="s2">[</span><span class="s4">'NPY_ENABLE_CPU_FEATURES'</span><span class="s2">] = </span><span class="s1">feats</span>
+        <span class="s1">msg </span><span class="s2">= (</span>
+            <span class="s4">f&quot;You cannot enable CPU features </span><span class="s0">\\</span><span class="s4">(</span><span class="s0">{</span><span class="s1">bad_feature</span><span class="s0">}\\</span><span class="s4">), since they &quot;</span>
+            <span class="s4">&quot;are not supported by your machine.&quot;</span>
+        <span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_expect_error</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">, </span><span class="s1">err_type</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">BASELINE_FEAT </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s3"># Ensure that only the bad feature gets reported</span>
+            <span class="s1">feats </span><span class="s2">= </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">bad_feature</span><span class="s0">}</span><span class="s4">, </span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">BASELINE_FEAT</span><span class="s0">}</span><span class="s4">&quot;</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">env</span><span class="s2">[</span><span class="s4">'NPY_ENABLE_CPU_FEATURES'</span><span class="s2">] = </span><span class="s1">feats</span>
+            <span class="s1">msg </span><span class="s2">= (</span>
+                <span class="s4">f&quot;You cannot enable CPU features </span><span class="s0">\\</span><span class="s4">(</span><span class="s0">{</span><span class="s1">bad_feature</span><span class="s0">}\\</span><span class="s4">), since &quot;</span>
+                <span class="s4">&quot;they are not supported by your machine.&quot;</span>
+            <span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_expect_error</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">, </span><span class="s1">err_type</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;action&quot;</span><span class="s2">, [</span><span class="s4">&quot;ENABLE&quot;</span><span class="s2">, </span><span class="s4">&quot;DISABLE&quot;</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_repeated_unavailable_feature</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">action</span><span class="s2">):</span>
+        <span class="s7">&quot;&quot;&quot; 
+        Test that repeated unavailable features can be processed without 
+        overflowing the diagnostic buffer. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">UNAVAILABLE_FEAT </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span><span class="s4">&quot;There are no unavailable features to test with&quot;</span><span class="s2">)</span>
+
+        <span class="s1">bad_feature </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">UNAVAILABLE_FEAT</span>
+        <span class="s1">feature_repeats </span><span class="s2">= </span><span class="s5">1024 </span><span class="s2">// (</span><span class="s1">len</span><span class="s2">(</span><span class="s1">bad_feature</span><span class="s2">) + </span><span class="s5">1</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">env</span><span class="s2">[</span><span class="s4">f'NPY_</span><span class="s0">{</span><span class="s1">action</span><span class="s0">}</span><span class="s4">_CPU_FEATURES'</span><span class="s2">] = </span><span class="s4">&quot;,&quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span>
+            <span class="s2">[</span><span class="s1">bad_feature</span><span class="s2">] * </span><span class="s1">feature_repeats</span>
+        <span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">action </span><span class="s2">== </span><span class="s4">&quot;ENABLE&quot;</span><span class="s2">:</span>
+            <span class="s1">msg </span><span class="s2">= </span><span class="s4">&quot;You cannot enable CPU features&quot;</span>
+            <span class="s1">err_type </span><span class="s2">= </span><span class="s4">&quot;RuntimeError&quot;</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_expect_error</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">, </span><span class="s1">err_type</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_run</span><span class="s2">()</span>
+
+
+<span class="s1">is_linux </span><span class="s2">= </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">platform</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s4">'linux'</span><span class="s2">)</span>
+<span class="s1">is_cygwin </span><span class="s2">= </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">platform</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s4">'cygwin'</span><span class="s2">)</span>
+<span class="s1">machine </span><span class="s2">= </span><span class="s1">platform</span><span class="s2">.</span><span class="s1">machine</span><span class="s2">()</span>
+<span class="s1">is_x86 </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">match</span><span class="s2">(</span><span class="s4">r&quot;^(amd64|x86|i386|i686)&quot;</span><span class="s2">, </span><span class="s1">machine</span><span class="s2">, </span><span class="s1">re</span><span class="s2">.</span><span class="s1">IGNORECASE</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span>
+    <span class="s0">not </span><span class="s2">(</span><span class="s1">is_linux </span><span class="s0">or </span><span class="s1">is_cygwin</span><span class="s2">) </span><span class="s0">or not </span><span class="s1">is_x86</span><span class="s2">,</span>
+    <span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;Only for Linux and x86&quot;</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">class </span><span class="s1">Test_X86_Features</span><span class="s2">(</span><span class="s1">AbstractTest</span><span class="s2">):</span>
+    <span class="s1">features </span><span class="s2">= []</span>
+
+    <span class="s1">features_groups </span><span class="s2">= {</span>
+        <span class="s4">&quot;X86_V2&quot;</span><span class="s2">: [</span>
+            <span class="s4">&quot;SSE&quot;</span><span class="s2">, </span><span class="s4">&quot;SSE2&quot;</span><span class="s2">, </span><span class="s4">&quot;SSE3&quot;</span><span class="s2">, </span><span class="s4">&quot;SSSE3&quot;</span><span class="s2">, </span><span class="s4">&quot;SSE41&quot;</span><span class="s2">, </span><span class="s4">&quot;SSE42&quot;</span><span class="s2">,</span>
+            <span class="s4">&quot;POPCNT&quot;</span><span class="s2">, </span><span class="s4">&quot;LAHF&quot;</span><span class="s2">, </span><span class="s4">&quot;CX16&quot;</span>
+        <span class="s2">],</span>
+    <span class="s2">}</span>
+    <span class="s1">features_groups</span><span class="s2">[</span><span class="s4">&quot;X86_V3&quot;</span><span class="s2">] = </span><span class="s1">features_groups</span><span class="s2">[</span><span class="s4">&quot;X86_V2&quot;</span><span class="s2">] + [</span>
+        <span class="s4">&quot;AVX&quot;</span><span class="s2">, </span><span class="s4">&quot;AVX2&quot;</span><span class="s2">, </span><span class="s4">&quot;FMA3&quot;</span><span class="s2">, </span><span class="s4">&quot;BMI&quot;</span><span class="s2">, </span><span class="s4">&quot;BMI2&quot;</span><span class="s2">,</span>
+        <span class="s4">&quot;LZCNT&quot;</span><span class="s2">, </span><span class="s4">&quot;F16C&quot;</span><span class="s2">, </span><span class="s4">&quot;MOVBE&quot;</span>
+    <span class="s2">]</span>
+    <span class="s1">features_groups</span><span class="s2">[</span><span class="s4">&quot;X86_V4&quot;</span><span class="s2">] = </span><span class="s1">features_groups</span><span class="s2">[</span><span class="s4">&quot;X86_V3&quot;</span><span class="s2">] + [</span>
+        <span class="s4">&quot;AVX512F&quot;</span><span class="s2">, </span><span class="s4">&quot;AVX512CD&quot;</span><span class="s2">, </span><span class="s4">&quot;AVX512BW&quot;</span><span class="s2">, </span><span class="s4">&quot;AVX512DQ&quot;</span><span class="s2">, </span><span class="s4">&quot;AVX512VL&quot;</span>
+    <span class="s2">]</span>
+    <span class="s1">features_groups</span><span class="s2">[</span><span class="s4">&quot;AVX512_ICL&quot;</span><span class="s2">] = </span><span class="s1">features_groups</span><span class="s2">[</span><span class="s4">&quot;X86_V4&quot;</span><span class="s2">] + [</span>
+        <span class="s4">&quot;AVX512IFMA&quot;</span><span class="s2">, </span><span class="s4">&quot;AVX512VBMI&quot;</span><span class="s2">, </span><span class="s4">&quot;AVX512VNNI&quot;</span><span class="s2">,</span>
+        <span class="s4">&quot;AVX512VBMI2&quot;</span><span class="s2">, </span><span class="s4">&quot;AVX512BITALG&quot;</span><span class="s2">, </span><span class="s4">&quot;AVX512VPOPCNTDQ&quot;</span><span class="s2">,</span>
+        <span class="s4">&quot;VAES&quot;</span><span class="s2">, </span><span class="s4">&quot;VPCLMULQDQ&quot;</span><span class="s2">, </span><span class="s4">&quot;GFNI&quot;</span>
+    <span class="s2">]</span>
+    <span class="s1">features_groups</span><span class="s2">[</span><span class="s4">&quot;AVX512_SPR&quot;</span><span class="s2">] = (</span>
+        <span class="s1">features_groups</span><span class="s2">[</span><span class="s4">&quot;AVX512_ICL&quot;</span><span class="s2">] + [</span><span class="s4">&quot;AVX512FP16&quot;</span><span class="s2">, </span><span class="s4">&quot;AVX512BF16&quot;</span><span class="s2">]</span>
+    <span class="s2">)</span>
+
+    <span class="s1">features_map </span><span class="s2">= {</span>
+        <span class="s4">&quot;SSE3&quot;</span><span class="s2">: </span><span class="s4">&quot;PNI&quot;</span><span class="s2">, </span><span class="s4">&quot;SSE41&quot;</span><span class="s2">: </span><span class="s4">&quot;SSE4_1&quot;</span><span class="s2">, </span><span class="s4">&quot;SSE42&quot;</span><span class="s2">: </span><span class="s4">&quot;SSE4_2&quot;</span><span class="s2">, </span><span class="s4">&quot;FMA3&quot;</span><span class="s2">: </span><span class="s4">&quot;FMA&quot;</span><span class="s2">,</span>
+        <span class="s4">&quot;BMI&quot;</span><span class="s2">: </span><span class="s4">&quot;BMI1&quot;</span><span class="s2">, </span><span class="s4">&quot;LZCNT&quot;</span><span class="s2">: </span><span class="s4">&quot;ABM&quot;</span><span class="s2">, </span><span class="s4">&quot;LAHF&quot;</span><span class="s2">: </span><span class="s4">&quot;LAHF_LM&quot;</span><span class="s2">,</span>
+        <span class="s4">&quot;AVX512VNNI&quot;</span><span class="s2">: </span><span class="s4">&quot;AVX512_VNNI&quot;</span><span class="s2">, </span><span class="s4">&quot;AVX512BITALG&quot;</span><span class="s2">: </span><span class="s4">&quot;AVX512_BITALG&quot;</span><span class="s2">,</span>
+        <span class="s4">&quot;AVX512VBMI2&quot;</span><span class="s2">: </span><span class="s4">&quot;AVX512_VBMI2&quot;</span><span class="s2">, </span><span class="s4">&quot;AVX5124FMAPS&quot;</span><span class="s2">: </span><span class="s4">&quot;AVX512_4FMAPS&quot;</span><span class="s2">,</span>
+        <span class="s4">&quot;AVX5124VNNIW&quot;</span><span class="s2">: </span><span class="s4">&quot;AVX512_4VNNIW&quot;</span><span class="s2">, </span><span class="s4">&quot;AVX512VPOPCNTDQ&quot;</span><span class="s2">: </span><span class="s4">&quot;AVX512_VPOPCNTDQ&quot;</span><span class="s2">,</span>
+        <span class="s4">&quot;AVX512FP16&quot;</span><span class="s2">: </span><span class="s4">&quot;AVX512_FP16&quot;</span><span class="s2">, </span><span class="s4">&quot;AVX512BF16&quot;</span><span class="s2">: </span><span class="s4">&quot;AVX512_BF16&quot;</span>
+    <span class="s2">}</span>
+
+    <span class="s0">def </span><span class="s1">load_flags</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">load_flags_cpuinfo</span><span class="s2">(</span><span class="s4">&quot;flags&quot;</span><span class="s2">)</span>
+
+
+<span class="s1">is_power </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">match</span><span class="s2">(</span><span class="s4">r&quot;^(powerpc|ppc)64&quot;</span><span class="s2">, </span><span class="s1">machine</span><span class="s2">, </span><span class="s1">re</span><span class="s2">.</span><span class="s1">IGNORECASE</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span><span class="s0">not </span><span class="s1">is_linux </span><span class="s0">or not </span><span class="s1">is_power</span><span class="s2">, </span><span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;Only for Linux and Power&quot;</span><span class="s2">)</span>
+<span class="s0">class </span><span class="s1">Test_POWER_Features</span><span class="s2">(</span><span class="s1">AbstractTest</span><span class="s2">):</span>
+    <span class="s1">features </span><span class="s2">= [</span><span class="s4">&quot;VSX&quot;</span><span class="s2">, </span><span class="s4">&quot;VSX2&quot;</span><span class="s2">, </span><span class="s4">&quot;VSX3&quot;</span><span class="s2">, </span><span class="s4">&quot;VSX4&quot;</span><span class="s2">]</span>
+    <span class="s1">features_map </span><span class="s2">= {</span>
+        <span class="s4">&quot;VSX&quot;</span><span class="s2">:  </span><span class="s4">&quot;ARCH_2_06&quot;</span><span class="s2">,</span>
+        <span class="s4">&quot;VSX2&quot;</span><span class="s2">: </span><span class="s4">&quot;ARCH_2_07&quot;</span><span class="s2">,</span>
+        <span class="s4">&quot;VSX3&quot;</span><span class="s2">: </span><span class="s4">&quot;ARCH_3_00&quot;</span><span class="s2">,</span>
+        <span class="s4">&quot;VSX4&quot;</span><span class="s2">: </span><span class="s4">&quot;ARCH_3_1B&quot;</span>
+    <span class="s2">}</span>
+
+    <span class="s0">def </span><span class="s1">load_flags</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">load_flags_auxv</span><span class="s2">()</span>
+        <span class="s1">platform </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_platform</span><span class="s2">()</span>
+
+        <span class="s0">if </span><span class="s1">platform</span><span class="s2">:</span>
+            <span class="s1">power_match </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">search</span><span class="s2">(</span><span class="s4">r'power(\d+)'</span><span class="s2">, </span><span class="s1">platform</span><span class="s2">, </span><span class="s1">re</span><span class="s2">.</span><span class="s1">IGNORECASE</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">power_match</span><span class="s2">:</span>
+                <span class="s1">power_gen </span><span class="s2">= </span><span class="s1">int</span><span class="s2">(</span><span class="s1">power_match</span><span class="s2">.</span><span class="s1">group</span><span class="s2">(</span><span class="s5">1</span><span class="s2">))</span>
+                <span class="s0">if </span><span class="s1">power_gen </span><span class="s2">&gt;= </span><span class="s5">7</span><span class="s2">:</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">features_flags</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s4">&quot;ARCH_2_06&quot;</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s1">power_gen </span><span class="s2">&gt;= </span><span class="s5">8</span><span class="s2">:</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">features_flags</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s4">&quot;ARCH_2_07&quot;</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s1">power_gen </span><span class="s2">&gt;= </span><span class="s5">9</span><span class="s2">:</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">features_flags</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s4">&quot;ARCH_3_00&quot;</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s1">power_gen </span><span class="s2">&gt;= </span><span class="s5">10</span><span class="s2">:</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">features_flags</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s4">&quot;ARCH_3_1B&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_get_platform</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s7">&quot;&quot;&quot;Get the AT_PLATFORM value from AUXV&quot;&quot;&quot;</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">auxv </span><span class="s2">= </span><span class="s1">subprocess</span><span class="s2">.</span><span class="s1">check_output</span><span class="s2">([</span><span class="s4">'/bin/true'</span><span class="s2">], </span><span class="s1">env</span><span class="s2">={</span><span class="s4">&quot;LD_SHOW_AUXV&quot;</span><span class="s2">: </span><span class="s4">&quot;1&quot;</span><span class="s2">})</span>
+            <span class="s0">for </span><span class="s1">line </span><span class="s0">in </span><span class="s1">auxv</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s6">b'</span><span class="s0">\n</span><span class="s6">'</span><span class="s2">):</span>
+                <span class="s0">if </span><span class="s1">line</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s6">b'AT_PLATFORM'</span><span class="s2">):</span>
+                    <span class="s1">parts </span><span class="s2">= </span><span class="s1">line</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s6">b':'</span><span class="s2">, </span><span class="s5">1</span><span class="s2">)</span>
+                    <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">parts</span><span class="s2">) == </span><span class="s5">2</span><span class="s2">:</span>
+                        <span class="s0">return </span><span class="s1">parts</span><span class="s2">[</span><span class="s5">1</span><span class="s2">].</span><span class="s1">strip</span><span class="s2">().</span><span class="s1">decode</span><span class="s2">().</span><span class="s1">lower</span><span class="s2">()</span>
+        <span class="s0">except </span><span class="s1">Exception</span><span class="s2">:</span>
+            <span class="s0">pass</span>
+        <span class="s0">return None</span>
+
+
+<span class="s1">is_zarch </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">match</span><span class="s2">(</span><span class="s4">r&quot;^(s390x)&quot;</span><span class="s2">, </span><span class="s1">machine</span><span class="s2">, </span><span class="s1">re</span><span class="s2">.</span><span class="s1">IGNORECASE</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span><span class="s0">not </span><span class="s1">is_linux </span><span class="s0">or not </span><span class="s1">is_zarch</span><span class="s2">,</span>
+                    <span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;Only for Linux and IBM Z&quot;</span><span class="s2">)</span>
+<span class="s0">class </span><span class="s1">Test_ZARCH_Features</span><span class="s2">(</span><span class="s1">AbstractTest</span><span class="s2">):</span>
+    <span class="s1">features </span><span class="s2">= [</span><span class="s4">&quot;VX&quot;</span><span class="s2">, </span><span class="s4">&quot;VXE&quot;</span><span class="s2">, </span><span class="s4">&quot;VXE2&quot;</span><span class="s2">]</span>
+
+    <span class="s0">def </span><span class="s1">load_flags</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">load_flags_cpuinfo</span><span class="s2">(</span><span class="s4">&quot;features&quot;</span><span class="s2">)</span>
+
+
+<span class="s1">is_arm </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">match</span><span class="s2">(</span><span class="s4">r&quot;^(arm|aarch64)&quot;</span><span class="s2">, </span><span class="s1">machine</span><span class="s2">, </span><span class="s1">re</span><span class="s2">.</span><span class="s1">IGNORECASE</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span><span class="s0">not </span><span class="s1">is_linux </span><span class="s0">or not </span><span class="s1">is_arm</span><span class="s2">, </span><span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;Only for Linux and ARM&quot;</span><span class="s2">)</span>
+<span class="s0">class </span><span class="s1">Test_ARM_Features</span><span class="s2">(</span><span class="s1">AbstractTest</span><span class="s2">):</span>
+    <span class="s1">features </span><span class="s2">= [</span>
+        <span class="s4">&quot;SVE&quot;</span><span class="s2">, </span><span class="s4">&quot;NEON&quot;</span><span class="s2">, </span><span class="s4">&quot;ASIMD&quot;</span><span class="s2">, </span><span class="s4">&quot;FPHP&quot;</span><span class="s2">, </span><span class="s4">&quot;ASIMDHP&quot;</span><span class="s2">, </span><span class="s4">&quot;ASIMDDP&quot;</span><span class="s2">, </span><span class="s4">&quot;ASIMDFHM&quot;</span>
+    <span class="s2">]</span>
+    <span class="s1">features_groups </span><span class="s2">= {</span>
+        <span class="s4">&quot;NEON_FP16&quot;</span><span class="s2">:  [</span><span class="s4">&quot;NEON&quot;</span><span class="s2">, </span><span class="s4">&quot;HALF&quot;</span><span class="s2">],</span>
+        <span class="s4">&quot;NEON_VFPV4&quot;</span><span class="s2">: [</span><span class="s4">&quot;NEON&quot;</span><span class="s2">, </span><span class="s4">&quot;VFPV4&quot;</span><span class="s2">],</span>
+    <span class="s2">}</span>
+
+    <span class="s0">def </span><span class="s1">load_flags</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">load_flags_cpuinfo</span><span class="s2">(</span><span class="s4">&quot;Features&quot;</span><span class="s2">)</span>
+        <span class="s1">arch </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">get_cpuinfo_item</span><span class="s2">(</span><span class="s4">&quot;CPU architecture&quot;</span><span class="s2">)</span>
+        <span class="s3"># in case of mounting virtual filesystem of aarch64 kernel without linux32</span>
+        <span class="s1">is_rootfs_v8 </span><span class="s2">= (</span>
+            <span class="s0">not </span><span class="s1">re</span><span class="s2">.</span><span class="s1">match</span><span class="s2">(</span><span class="s4">r&quot;^armv[0-9]+l$&quot;</span><span class="s2">, </span><span class="s1">machine</span><span class="s2">) </span><span class="s0">and</span>
+            <span class="s2">(</span><span class="s1">int</span><span class="s2">(</span><span class="s4">'0' </span><span class="s2">+ </span><span class="s1">next</span><span class="s2">(</span><span class="s1">iter</span><span class="s2">(</span><span class="s1">arch</span><span class="s2">))) &gt; </span><span class="s5">7 </span><span class="s0">if </span><span class="s1">arch </span><span class="s0">else </span><span class="s5">0</span><span class="s2">)</span>
+        <span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">re</span><span class="s2">.</span><span class="s1">match</span><span class="s2">(</span><span class="s4">r&quot;^(aarch64|AARCH64)&quot;</span><span class="s2">, </span><span class="s1">machine</span><span class="s2">) </span><span class="s0">or </span><span class="s1">is_rootfs_v8</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">features_map </span><span class="s2">= {</span>
+                <span class="s4">&quot;NEON&quot;</span><span class="s2">: </span><span class="s4">&quot;ASIMD&quot;</span><span class="s2">, </span><span class="s4">&quot;HALF&quot;</span><span class="s2">: </span><span class="s4">&quot;ASIMD&quot;</span><span class="s2">, </span><span class="s4">&quot;VFPV4&quot;</span><span class="s2">: </span><span class="s4">&quot;ASIMD&quot;</span>
+            <span class="s2">}</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">features_map </span><span class="s2">= {</span>
+                <span class="s3"># ELF auxiliary vector and /proc/cpuinfo on Linux kernel(armv8 aarch32)</span>
+                <span class="s3"># doesn't provide information about ASIMD</span>
+                <span class="s3"># so we assume that ASIMD is supported</span>
+                <span class="s3"># if the kernel reports any one of the following ARM8 features.</span>
+                <span class="s4">&quot;ASIMD&quot;</span><span class="s2">: (</span><span class="s4">&quot;AES&quot;</span><span class="s2">, </span><span class="s4">&quot;SHA1&quot;</span><span class="s2">, </span><span class="s4">&quot;SHA2&quot;</span><span class="s2">, </span><span class="s4">&quot;PMULL&quot;</span><span class="s2">, </span><span class="s4">&quot;CRC32&quot;</span><span class="s2">)</span>
+            <span class="s2">}</span>
+
+
+<span class="s1">is_loongarch </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">match</span><span class="s2">(</span><span class="s4">r&quot;^(loongarch)&quot;</span><span class="s2">, </span><span class="s1">machine</span><span class="s2">, </span><span class="s1">re</span><span class="s2">.</span><span class="s1">IGNORECASE</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span>
+    <span class="s0">not </span><span class="s1">is_linux </span><span class="s0">or not </span><span class="s1">is_loongarch</span><span class="s2">,</span>
+    <span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;Only for Linux and LoongArch&quot;</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">class </span><span class="s1">Test_LOONGARCH_Features</span><span class="s2">(</span><span class="s1">AbstractTest</span><span class="s2">):</span>
+    <span class="s1">features </span><span class="s2">= [</span><span class="s4">&quot;LSX&quot;</span><span class="s2">]</span>
+
+    <span class="s0">def </span><span class="s1">load_flags</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">load_flags_cpuinfo</span><span class="s2">(</span><span class="s4">&quot;Features&quot;</span><span class="s2">)</span>
+
+
+<span class="s1">is_riscv </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">match</span><span class="s2">(</span><span class="s4">r&quot;^(riscv)&quot;</span><span class="s2">, </span><span class="s1">machine</span><span class="s2">, </span><span class="s1">re</span><span class="s2">.</span><span class="s1">IGNORECASE</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span><span class="s0">not </span><span class="s1">is_linux </span><span class="s0">or not </span><span class="s1">is_riscv</span><span class="s2">, </span><span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;Only for Linux and RISC-V&quot;</span><span class="s2">)</span>
+<span class="s0">class </span><span class="s1">Test_RISCV_Features</span><span class="s2">(</span><span class="s1">AbstractTest</span><span class="s2">):</span>
+    <span class="s1">features </span><span class="s2">= [</span><span class="s4">&quot;RVV&quot;</span><span class="s2">]</span>
+
+    <span class="s0">def </span><span class="s1">load_flags</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">load_flags_auxv</span><span class="s2">()</span>
+        <span class="s0">if not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">features_flags</span><span class="s2">:</span>
+            <span class="s3"># Let the test fail and dump if we cannot read HWCAP.</span>
+            <span class="s0">return</span>
+        <span class="s1">hwcap </span><span class="s2">= </span><span class="s1">int</span><span class="s2">(</span><span class="s1">next</span><span class="s2">(</span><span class="s1">iter</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">features_flags</span><span class="s2">)), </span><span class="s5">16</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">hwcap </span><span class="s2">&amp; (</span><span class="s5">1 </span><span class="s2">&lt;&lt; </span><span class="s5">21</span><span class="s2">):  </span><span class="s3"># HWCAP_RISCV_V</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">features_flags</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s4">&quot;RVV&quot;</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,275 @@
+<html>
+<head>
+<title>parsing.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+parsing.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+:func:`~pandas.eval` source string parsing functions 
+&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">from </span><span class="s1">enum </span><span class="s2">import </span><span class="s1">Enum</span>
+<span class="s2">from </span><span class="s1">io </span><span class="s2">import </span><span class="s1">StringIO</span>
+<span class="s2">from </span><span class="s1">keyword </span><span class="s2">import </span><span class="s1">iskeyword</span>
+<span class="s2">import </span><span class="s1">token</span>
+<span class="s2">import </span><span class="s1">tokenize</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">TYPE_CHECKING</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">collections</span><span class="s3">.</span><span class="s1">abc </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">Hashable</span><span class="s3">,</span>
+        <span class="s1">Iterator</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+<span class="s4"># A token value Python's tokenizer probably will never use.</span>
+<span class="s1">BACKTICK_QUOTED_STRING </span><span class="s3">= </span><span class="s5">100</span>
+
+
+<span class="s2">def </span><span class="s1">create_valid_python_identifier</span><span class="s3">(</span><span class="s1">name</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Create valid Python identifiers from any string. 
+ 
+    Check if name contains any special characters. If it contains any 
+    special characters, the special characters will be replaced by 
+    a special string and a prefix is added. 
+ 
+    Raises 
+    ------ 
+    SyntaxError 
+        If the returned name is not a Python valid identifier, raise an exception. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">name</span><span class="s3">.</span><span class="s1">isidentifier</span><span class="s3">() </span><span class="s2">and not </span><span class="s1">iskeyword</span><span class="s3">(</span><span class="s1">name</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">name</span>
+
+    <span class="s4"># Escape characters that fall outside the ASCII range (U+0001..U+007F).</span>
+    <span class="s4"># GH 49633</span>
+    <span class="s1">gen </span><span class="s3">= (</span>
+        <span class="s3">(</span><span class="s1">c</span><span class="s3">, </span><span class="s6">&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">chr</span><span class="s3">(</span><span class="s1">b</span><span class="s3">) </span><span class="s2">for </span><span class="s1">b </span><span class="s2">in </span><span class="s1">c</span><span class="s3">.</span><span class="s1">encode</span><span class="s3">(</span><span class="s6">&quot;ascii&quot;</span><span class="s3">, </span><span class="s6">&quot;backslashreplace&quot;</span><span class="s3">)))</span>
+        <span class="s2">for </span><span class="s1">c </span><span class="s2">in </span><span class="s1">name</span>
+    <span class="s3">)</span>
+    <span class="s1">name </span><span class="s3">= </span><span class="s6">&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span>
+        <span class="s1">c_escaped</span><span class="s3">.</span><span class="s1">replace</span><span class="s3">(</span><span class="s6">&quot;</span><span class="s2">\\</span><span class="s6">&quot;</span><span class="s3">, </span><span class="s6">&quot;_UNICODE_&quot; </span><span class="s2">if </span><span class="s1">c </span><span class="s3">!= </span><span class="s1">c_escaped </span><span class="s2">else </span><span class="s6">&quot;_BACKSLASH_&quot;</span><span class="s3">)</span>
+        <span class="s2">for </span><span class="s1">c</span><span class="s3">, </span><span class="s1">c_escaped </span><span class="s2">in </span><span class="s1">gen</span>
+    <span class="s3">)</span>
+
+    <span class="s4"># Create a dict with the special characters and their replacement string.</span>
+    <span class="s4"># EXACT_TOKEN_TYPES contains these special characters</span>
+    <span class="s4"># token.tok_name contains a readable description of the replacement string.</span>
+    <span class="s1">special_characters_replacements </span><span class="s3">= {</span>
+        <span class="s1">char</span><span class="s3">: </span><span class="s6">f&quot;_</span><span class="s2">{</span><span class="s1">token</span><span class="s3">.</span><span class="s1">tok_name</span><span class="s3">[</span><span class="s1">tokval</span><span class="s3">]</span><span class="s2">}</span><span class="s6">_&quot;</span>
+        <span class="s2">for </span><span class="s1">char</span><span class="s3">, </span><span class="s1">tokval </span><span class="s2">in </span><span class="s3">(</span><span class="s1">tokenize</span><span class="s3">.</span><span class="s1">EXACT_TOKEN_TYPES</span><span class="s3">.</span><span class="s1">items</span><span class="s3">())</span>
+    <span class="s3">}</span>
+    <span class="s1">special_characters_replacements</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span>
+        <span class="s3">{</span>
+            <span class="s6">&quot; &quot;</span><span class="s3">: </span><span class="s6">&quot;_&quot;</span><span class="s3">,</span>
+            <span class="s6">&quot;?&quot;</span><span class="s3">: </span><span class="s6">&quot;_QUESTIONMARK_&quot;</span><span class="s3">,</span>
+            <span class="s6">&quot;!&quot;</span><span class="s3">: </span><span class="s6">&quot;_EXCLAMATIONMARK_&quot;</span><span class="s3">,</span>
+            <span class="s6">&quot;$&quot;</span><span class="s3">: </span><span class="s6">&quot;_DOLLARSIGN_&quot;</span><span class="s3">,</span>
+            <span class="s6">&quot;€&quot;</span><span class="s3">: </span><span class="s6">&quot;_EUROSIGN_&quot;</span><span class="s3">,</span>
+            <span class="s6">&quot;°&quot;</span><span class="s3">: </span><span class="s6">&quot;_DEGREESIGN_&quot;</span><span class="s3">,</span>
+            <span class="s6">&quot;'&quot;</span><span class="s3">: </span><span class="s6">&quot;_SINGLEQUOTE_&quot;</span><span class="s3">,</span>
+            <span class="s6">'&quot;'</span><span class="s3">: </span><span class="s6">&quot;_DOUBLEQUOTE_&quot;</span><span class="s3">,</span>
+            <span class="s6">&quot;#&quot;</span><span class="s3">: </span><span class="s6">&quot;_HASH_&quot;</span><span class="s3">,</span>
+            <span class="s6">&quot;`&quot;</span><span class="s3">: </span><span class="s6">&quot;_BACKTICK_&quot;</span><span class="s3">,</span>
+        <span class="s3">}</span>
+    <span class="s3">)</span>
+
+    <span class="s1">name </span><span class="s3">= </span><span class="s6">&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">([</span><span class="s1">special_characters_replacements</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">char</span><span class="s3">, </span><span class="s1">char</span><span class="s3">) </span><span class="s2">for </span><span class="s1">char </span><span class="s2">in </span><span class="s1">name</span><span class="s3">])</span>
+    <span class="s1">name </span><span class="s3">= </span><span class="s6">f&quot;BACKTICK_QUOTED_STRING_</span><span class="s2">{</span><span class="s1">name</span><span class="s2">}</span><span class="s6">&quot;</span>
+
+    <span class="s2">if not </span><span class="s1">name</span><span class="s3">.</span><span class="s1">isidentifier</span><span class="s3">():</span>
+        <span class="s2">raise </span><span class="s1">SyntaxError</span><span class="s3">(</span><span class="s6">f&quot;Could not convert '</span><span class="s2">{</span><span class="s1">name</span><span class="s2">}</span><span class="s6">' to a valid Python identifier.&quot;</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">name</span>
+
+
+<span class="s2">def </span><span class="s1">clean_backtick_quoted_toks</span><span class="s3">(</span><span class="s1">tok</span><span class="s3">: </span><span class="s1">tuple</span><span class="s3">[</span><span class="s1">int</span><span class="s3">, </span><span class="s1">str</span><span class="s3">]) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">int</span><span class="s3">, </span><span class="s1">str</span><span class="s3">]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Clean up a column name if surrounded by backticks. 
+ 
+    Backtick quoted string are indicated by a certain tokval value. If a string 
+    is a backtick quoted token it will processed by 
+    :func:`_create_valid_python_identifier` so that the parser can find this 
+    string when the query is executed. 
+    In this case the tok will get the NAME tokval. 
+ 
+    Parameters 
+    ---------- 
+    tok : tuple of int, str 
+        ints correspond to the all caps constants in the tokenize module 
+ 
+    Returns 
+    ------- 
+    tok : Tuple[int, str] 
+        Either the input or token or the replacement values 
+    &quot;&quot;&quot;</span>
+    <span class="s1">toknum</span><span class="s3">, </span><span class="s1">tokval </span><span class="s3">= </span><span class="s1">tok</span>
+    <span class="s2">if </span><span class="s1">toknum </span><span class="s3">== </span><span class="s1">BACKTICK_QUOTED_STRING</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">tokenize</span><span class="s3">.</span><span class="s1">NAME</span><span class="s3">, </span><span class="s1">create_valid_python_identifier</span><span class="s3">(</span><span class="s1">tokval</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">toknum</span><span class="s3">, </span><span class="s1">tokval</span>
+
+
+<span class="s2">def </span><span class="s1">clean_column_name</span><span class="s3">(</span><span class="s1">name</span><span class="s3">: </span><span class="s1">Hashable</span><span class="s3">) </span><span class="s1">-&gt; Hashable</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Function to emulate the cleaning of a backtick quoted name. 
+ 
+    The purpose for this function is to see what happens to the name of 
+    identifier if it goes to the process of being parsed a Python code 
+    inside a backtick quoted string and than being cleaned 
+    (removed of any special characters). 
+ 
+    Parameters 
+    ---------- 
+    name : hashable 
+        Name to be cleaned. 
+ 
+    Returns 
+    ------- 
+    name : hashable 
+        Returns the name after tokenizing and cleaning. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s4"># Escape backticks</span>
+        <span class="s1">name </span><span class="s3">= </span><span class="s1">name</span><span class="s3">.</span><span class="s1">replace</span><span class="s3">(</span><span class="s6">&quot;`&quot;</span><span class="s3">, </span><span class="s6">&quot;``&quot;</span><span class="s3">) </span><span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">name</span><span class="s3">, </span><span class="s1">str</span><span class="s3">) </span><span class="s2">else </span><span class="s1">name</span>
+
+        <span class="s1">tokenized </span><span class="s3">= </span><span class="s1">tokenize_string</span><span class="s3">(</span><span class="s6">f&quot;`</span><span class="s2">{</span><span class="s1">name</span><span class="s2">}</span><span class="s6">`&quot;</span><span class="s3">)</span>
+        <span class="s1">tokval </span><span class="s3">= </span><span class="s1">next</span><span class="s3">(</span><span class="s1">tokenized</span><span class="s3">)[</span><span class="s5">1</span><span class="s3">]</span>
+        <span class="s2">return </span><span class="s1">create_valid_python_identifier</span><span class="s3">(</span><span class="s1">tokval</span><span class="s3">)</span>
+    <span class="s2">except </span><span class="s1">SyntaxError</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">name</span>
+
+
+<span class="s2">class </span><span class="s1">ParseState</span><span class="s3">(</span><span class="s1">Enum</span><span class="s3">):</span>
+    <span class="s1">DEFAULT </span><span class="s3">= </span><span class="s5">0</span>
+    <span class="s1">IN_BACKTICK </span><span class="s3">= </span><span class="s5">1</span>
+    <span class="s1">IN_SINGLE_QUOTE </span><span class="s3">= </span><span class="s5">2</span>
+    <span class="s1">IN_DOUBLE_QUOTE </span><span class="s3">= </span><span class="s5">3</span>
+
+
+<span class="s2">def </span><span class="s1">_split_by_backtick</span><span class="s3">(</span><span class="s1">s</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; list</span><span class="s3">[</span><span class="s1">tuple</span><span class="s3">[</span><span class="s1">bool</span><span class="s3">, </span><span class="s1">str</span><span class="s3">]]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Splits a str into substrings along backtick characters (`). 
+ 
+    Disregards backticks inside quotes. 
+ 
+    Parameters 
+    ---------- 
+    s : str 
+        The Python source code string. 
+ 
+    Returns 
+    ------- 
+    substrings: list[tuple[bool, str]] 
+        List of tuples, where each tuple has two elements: 
+        The first is a boolean indicating if the substring is backtick-quoted. 
+        The second is the actual substring. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">substrings </span><span class="s3">= []</span>
+    <span class="s1">substr</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">] = []  </span><span class="s4"># Will join into a string before adding to `substrings`</span>
+    <span class="s1">i </span><span class="s3">= </span><span class="s5">0</span>
+    <span class="s1">parse_state </span><span class="s3">= </span><span class="s1">ParseState</span><span class="s3">.</span><span class="s1">DEFAULT</span>
+    <span class="s2">while </span><span class="s1">i </span><span class="s3">&lt; </span><span class="s1">len</span><span class="s3">(</span><span class="s1">s</span><span class="s3">):</span>
+        <span class="s1">char </span><span class="s3">= </span><span class="s1">s</span><span class="s3">[</span><span class="s1">i</span><span class="s3">]</span>
+
+        <span class="s1">match char</span><span class="s3">:</span>
+            <span class="s1">case </span><span class="s6">&quot;`&quot;</span><span class="s3">:</span>
+                <span class="s4"># start of a backtick-quoted string</span>
+                <span class="s2">if </span><span class="s1">parse_state </span><span class="s3">== </span><span class="s1">ParseState</span><span class="s3">.</span><span class="s1">DEFAULT</span><span class="s3">:</span>
+                    <span class="s2">if </span><span class="s1">substr</span><span class="s3">:</span>
+                        <span class="s1">substrings</span><span class="s3">.</span><span class="s1">append</span><span class="s3">((</span><span class="s2">False</span><span class="s3">, </span><span class="s6">&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">substr</span><span class="s3">)))</span>
+
+                    <span class="s1">substr </span><span class="s3">= [</span><span class="s1">char</span><span class="s3">]</span>
+                    <span class="s1">i </span><span class="s3">+= </span><span class="s5">1</span>
+                    <span class="s1">parse_state </span><span class="s3">= </span><span class="s1">ParseState</span><span class="s3">.</span><span class="s1">IN_BACKTICK</span>
+                    <span class="s2">continue</span>
+
+                <span class="s2">elif </span><span class="s1">parse_state </span><span class="s3">== </span><span class="s1">ParseState</span><span class="s3">.</span><span class="s1">IN_BACKTICK</span><span class="s3">:</span>
+                    <span class="s4"># escaped backtick inside a backtick-quoted string</span>
+                    <span class="s1">next_char </span><span class="s3">= </span><span class="s1">s</span><span class="s3">[</span><span class="s1">i </span><span class="s3">+ </span><span class="s5">1</span><span class="s3">] </span><span class="s2">if </span><span class="s3">(</span><span class="s1">i </span><span class="s3">!= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">s</span><span class="s3">) - </span><span class="s5">1</span><span class="s3">) </span><span class="s2">else None</span>
+                    <span class="s2">if </span><span class="s1">next_char </span><span class="s3">== </span><span class="s6">&quot;`&quot;</span><span class="s3">:</span>
+                        <span class="s1">substr</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">char</span><span class="s3">)</span>
+                        <span class="s1">substr</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">next_char</span><span class="s3">)</span>
+                        <span class="s1">i </span><span class="s3">+= </span><span class="s5">2</span>
+                        <span class="s2">continue</span>
+
+                    <span class="s4"># end of the backtick-quoted string</span>
+                    <span class="s2">else</span><span class="s3">:</span>
+                        <span class="s1">substr</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">char</span><span class="s3">)</span>
+                        <span class="s1">substrings</span><span class="s3">.</span><span class="s1">append</span><span class="s3">((</span><span class="s2">True</span><span class="s3">, </span><span class="s6">&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">substr</span><span class="s3">)))</span>
+
+                        <span class="s1">substr </span><span class="s3">= []</span>
+                        <span class="s1">i </span><span class="s3">+= </span><span class="s5">1</span>
+                        <span class="s1">parse_state </span><span class="s3">= </span><span class="s1">ParseState</span><span class="s3">.</span><span class="s1">DEFAULT</span>
+                        <span class="s2">continue</span>
+            <span class="s1">case </span><span class="s6">&quot;'&quot;</span><span class="s3">:</span>
+                <span class="s4"># start of a single-quoted string</span>
+                <span class="s2">if </span><span class="s1">parse_state </span><span class="s3">== </span><span class="s1">ParseState</span><span class="s3">.</span><span class="s1">DEFAULT</span><span class="s3">:</span>
+                    <span class="s1">parse_state </span><span class="s3">= </span><span class="s1">ParseState</span><span class="s3">.</span><span class="s1">IN_SINGLE_QUOTE</span>
+                <span class="s4"># end of a single-quoted string</span>
+                <span class="s2">elif </span><span class="s3">(</span><span class="s1">parse_state </span><span class="s3">== </span><span class="s1">ParseState</span><span class="s3">.</span><span class="s1">IN_SINGLE_QUOTE</span><span class="s3">) </span><span class="s2">and </span><span class="s3">(</span><span class="s1">s</span><span class="s3">[</span><span class="s1">i </span><span class="s3">- </span><span class="s5">1</span><span class="s3">] != </span><span class="s6">&quot;</span><span class="s2">\\</span><span class="s6">&quot;</span><span class="s3">):</span>
+                    <span class="s1">parse_state </span><span class="s3">= </span><span class="s1">ParseState</span><span class="s3">.</span><span class="s1">DEFAULT</span>
+            <span class="s1">case </span><span class="s6">'&quot;'</span><span class="s3">:</span>
+                <span class="s4"># start of a double-quoted string</span>
+                <span class="s2">if </span><span class="s1">parse_state </span><span class="s3">== </span><span class="s1">ParseState</span><span class="s3">.</span><span class="s1">DEFAULT</span><span class="s3">:</span>
+                    <span class="s1">parse_state </span><span class="s3">= </span><span class="s1">ParseState</span><span class="s3">.</span><span class="s1">IN_DOUBLE_QUOTE</span>
+                <span class="s4"># end of a double-quoted string</span>
+                <span class="s2">elif </span><span class="s3">(</span><span class="s1">parse_state </span><span class="s3">== </span><span class="s1">ParseState</span><span class="s3">.</span><span class="s1">IN_DOUBLE_QUOTE</span><span class="s3">) </span><span class="s2">and </span><span class="s3">(</span><span class="s1">s</span><span class="s3">[</span><span class="s1">i </span><span class="s3">- </span><span class="s5">1</span><span class="s3">] != </span><span class="s6">&quot;</span><span class="s2">\\</span><span class="s6">&quot;</span><span class="s3">):</span>
+                    <span class="s1">parse_state </span><span class="s3">= </span><span class="s1">ParseState</span><span class="s3">.</span><span class="s1">DEFAULT</span>
+        <span class="s1">substr</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">char</span><span class="s3">)</span>
+        <span class="s1">i </span><span class="s3">+= </span><span class="s5">1</span>
+
+    <span class="s2">if </span><span class="s1">substr</span><span class="s3">:</span>
+        <span class="s1">substrings</span><span class="s3">.</span><span class="s1">append</span><span class="s3">((</span><span class="s2">False</span><span class="s3">, </span><span class="s6">&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">substr</span><span class="s3">)))</span>
+
+    <span class="s2">return </span><span class="s1">substrings</span>
+
+
+<span class="s2">def </span><span class="s1">tokenize_string</span><span class="s3">(</span><span class="s1">source</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; Iterator</span><span class="s3">[</span><span class="s1">tuple</span><span class="s3">[</span><span class="s1">int</span><span class="s3">, </span><span class="s1">str</span><span class="s3">]]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Tokenize a Python source code string. 
+ 
+    Parameters 
+    ---------- 
+    source : str 
+        The Python source code string. 
+ 
+    Returns 
+    ------- 
+    tok_generator : Iterator[Tuple[int, str]] 
+        An iterator yielding all tokens with only toknum and tokval (Tuple[ing, str]). 
+    &quot;&quot;&quot;</span>
+    <span class="s4"># GH 59285</span>
+    <span class="s4"># Escape characters, including backticks</span>
+    <span class="s1">source </span><span class="s3">= </span><span class="s6">&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span>
+        <span class="s3">(</span>
+            <span class="s1">create_valid_python_identifier</span><span class="s3">(</span><span class="s1">substring</span><span class="s3">[</span><span class="s5">1</span><span class="s3">:-</span><span class="s5">1</span><span class="s3">])</span>
+            <span class="s2">if </span><span class="s1">is_backtick_quoted</span>
+            <span class="s2">else </span><span class="s1">substring</span>
+        <span class="s3">)</span>
+        <span class="s2">for </span><span class="s1">is_backtick_quoted</span><span class="s3">, </span><span class="s1">substring </span><span class="s2">in </span><span class="s1">_split_by_backtick</span><span class="s3">(</span><span class="s1">source</span><span class="s3">)</span>
+    <span class="s3">)</span>
+
+    <span class="s1">line_reader </span><span class="s3">= </span><span class="s1">StringIO</span><span class="s3">(</span><span class="s1">source</span><span class="s3">).</span><span class="s1">readline</span>
+    <span class="s1">token_generator </span><span class="s3">= </span><span class="s1">tokenize</span><span class="s3">.</span><span class="s1">generate_tokens</span><span class="s3">(</span><span class="s1">line_reader</span><span class="s3">)</span>
+
+    <span class="s2">for </span><span class="s1">toknum</span><span class="s3">, </span><span class="s1">tokval</span><span class="s3">, </span><span class="s1">_</span><span class="s3">, </span><span class="s1">_</span><span class="s3">, </span><span class="s1">_ </span><span class="s2">in </span><span class="s1">token_generator</span><span class="s3">:</span>
+        <span class="s2">yield </span><span class="s1">toknum</span><span class="s3">, </span><span class="s1">tokval</span>
+</pre>
+</body>
+</html>

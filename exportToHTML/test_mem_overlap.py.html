@@ -1,0 +1,956 @@
+<html>
+<head>
+<title>test_mem_overlap.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #2aacb8;}
+.s4 { color: #5f826b; font-style: italic;}
+.s5 { color: #7a7e85;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_mem_overlap.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">itertools</span>
+
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">_core </span><span class="s0">import </span><span class="s1">_umath_tests</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">_core</span><span class="s2">.</span><span class="s1">_multiarray_tests </span><span class="s0">import </span><span class="s1">internal_overlap</span><span class="s2">, </span><span class="s1">solve_diophantine</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">lib</span><span class="s2">.</span><span class="s1">stride_tricks </span><span class="s0">import </span><span class="s1">as_strided</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">testing </span><span class="s0">import </span><span class="s1">assert_</span><span class="s2">, </span><span class="s1">assert_array_equal</span><span class="s2">, </span><span class="s1">assert_equal</span><span class="s2">, </span><span class="s1">assert_raises</span>
+
+<span class="s1">ndims </span><span class="s2">= </span><span class="s3">2</span>
+<span class="s1">size </span><span class="s2">= </span><span class="s3">10</span>
+<span class="s1">shape </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">([</span><span class="s1">size</span><span class="s2">] * </span><span class="s1">ndims</span><span class="s2">)</span>
+
+<span class="s1">MAY_SHARE_BOUNDS </span><span class="s2">= </span><span class="s3">0</span>
+<span class="s1">MAY_SHARE_EXACT </span><span class="s2">= -</span><span class="s3">1</span>
+
+
+<span class="s0">def </span><span class="s1">_indices_for_nelems</span><span class="s2">(</span><span class="s1">nelems</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot;Returns slices of length nelems, from start onwards, in direction sign.&quot;&quot;&quot;</span>
+
+    <span class="s0">if </span><span class="s1">nelems </span><span class="s2">== </span><span class="s3">0</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s2">[</span><span class="s1">size </span><span class="s2">// </span><span class="s3">2</span><span class="s2">]  </span><span class="s5"># int index</span>
+
+    <span class="s1">res </span><span class="s2">= []</span>
+    <span class="s0">for </span><span class="s1">step </span><span class="s0">in </span><span class="s2">(</span><span class="s3">1</span><span class="s2">, </span><span class="s3">2</span><span class="s2">):</span>
+        <span class="s0">for </span><span class="s1">sign </span><span class="s0">in </span><span class="s2">(-</span><span class="s3">1</span><span class="s2">, </span><span class="s3">1</span><span class="s2">):</span>
+            <span class="s1">start </span><span class="s2">= </span><span class="s1">size </span><span class="s2">// </span><span class="s3">2 </span><span class="s2">- </span><span class="s1">nelems </span><span class="s2">* </span><span class="s1">step </span><span class="s2">* </span><span class="s1">sign </span><span class="s2">// </span><span class="s3">2</span>
+            <span class="s1">stop </span><span class="s2">= </span><span class="s1">start </span><span class="s2">+ </span><span class="s1">nelems </span><span class="s2">* </span><span class="s1">step </span><span class="s2">* </span><span class="s1">sign</span>
+            <span class="s1">res</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">slice</span><span class="s2">(</span><span class="s1">start</span><span class="s2">, </span><span class="s1">stop</span><span class="s2">, </span><span class="s1">step </span><span class="s2">* </span><span class="s1">sign</span><span class="s2">))</span>
+
+    <span class="s0">return </span><span class="s1">res</span>
+
+
+<span class="s0">def </span><span class="s1">_indices_for_axis</span><span class="s2">():</span>
+    <span class="s4">&quot;&quot;&quot;Returns (src, dst) pairs of indices.&quot;&quot;&quot;</span>
+
+    <span class="s1">res </span><span class="s2">= []</span>
+    <span class="s0">for </span><span class="s1">nelems </span><span class="s0">in </span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s3">2</span><span class="s2">, </span><span class="s3">3</span><span class="s2">):</span>
+        <span class="s1">ind </span><span class="s2">= </span><span class="s1">_indices_for_nelems</span><span class="s2">(</span><span class="s1">nelems</span><span class="s2">)</span>
+        <span class="s1">res</span><span class="s2">.</span><span class="s1">extend</span><span class="s2">(</span><span class="s1">itertools</span><span class="s2">.</span><span class="s1">product</span><span class="s2">(</span><span class="s1">ind</span><span class="s2">, </span><span class="s1">ind</span><span class="s2">))  </span><span class="s5"># all assignments of size &quot;nelems&quot;</span>
+
+    <span class="s0">return </span><span class="s1">res</span>
+
+
+<span class="s0">def </span><span class="s1">_indices</span><span class="s2">(</span><span class="s1">ndims</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot;Returns ((axis0_src, axis0_dst), (axis1_src, axis1_dst), ... ) index pairs.&quot;&quot;&quot;</span>
+
+    <span class="s1">ind </span><span class="s2">= </span><span class="s1">_indices_for_axis</span><span class="s2">()</span>
+    <span class="s0">return </span><span class="s1">itertools</span><span class="s2">.</span><span class="s1">product</span><span class="s2">(</span><span class="s1">ind</span><span class="s2">, </span><span class="s1">repeat</span><span class="s2">=</span><span class="s1">ndims</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_check_assignment</span><span class="s2">(</span><span class="s1">srcidx</span><span class="s2">, </span><span class="s1">dstidx</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot;Check assignment arr[dstidx] = arr[srcidx] works.&quot;&quot;&quot;</span>
+
+    <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">prod</span><span class="s2">(</span><span class="s1">shape</span><span class="s2">)).</span><span class="s1">reshape</span><span class="s2">(</span><span class="s1">shape</span><span class="s2">)</span>
+
+    <span class="s1">cpy </span><span class="s2">= </span><span class="s1">arr</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+
+    <span class="s1">cpy</span><span class="s2">[</span><span class="s1">dstidx</span><span class="s2">] = </span><span class="s1">arr</span><span class="s2">[</span><span class="s1">srcidx</span><span class="s2">]</span>
+    <span class="s1">arr</span><span class="s2">[</span><span class="s1">dstidx</span><span class="s2">] = </span><span class="s1">arr</span><span class="s2">[</span><span class="s1">srcidx</span><span class="s2">]</span>
+
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">all</span><span class="s2">(</span><span class="s1">arr </span><span class="s2">== </span><span class="s1">cpy</span><span class="s2">),</span>
+            <span class="s6">f'assigning arr[</span><span class="s0">{</span><span class="s1">dstidx</span><span class="s0">}</span><span class="s6">] = arr[</span><span class="s0">{</span><span class="s1">srcidx</span><span class="s0">}</span><span class="s6">]'</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_overlapping_assignments</span><span class="s2">():</span>
+    <span class="s5"># Test automatically generated assignments which overlap in memory.</span>
+
+    <span class="s1">inds </span><span class="s2">= </span><span class="s1">_indices</span><span class="s2">(</span><span class="s1">ndims</span><span class="s2">)</span>
+
+    <span class="s0">for </span><span class="s1">ind </span><span class="s0">in </span><span class="s1">inds</span><span class="s2">:</span>
+        <span class="s1">srcidx </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">a</span><span class="s2">[</span><span class="s3">0</span><span class="s2">] </span><span class="s0">for </span><span class="s1">a </span><span class="s0">in </span><span class="s1">ind</span><span class="s2">)</span>
+        <span class="s1">dstidx </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">a</span><span class="s2">[</span><span class="s3">1</span><span class="s2">] </span><span class="s0">for </span><span class="s1">a </span><span class="s0">in </span><span class="s1">ind</span><span class="s2">)</span>
+
+        <span class="s1">_check_assignment</span><span class="s2">(</span><span class="s1">srcidx</span><span class="s2">, </span><span class="s1">dstidx</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">slow</span>
+<span class="s0">def </span><span class="s1">test_diophantine_fuzz</span><span class="s2">():</span>
+    <span class="s5"># Fuzz test the diophantine solver</span>
+    <span class="s1">rng </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">RandomState</span><span class="s2">(</span><span class="s3">1234</span><span class="s2">)</span>
+
+    <span class="s1">max_int </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">iinfo</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">).</span><span class="s1">max</span>
+
+    <span class="s0">for </span><span class="s1">ndim </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s3">10</span><span class="s2">):</span>
+        <span class="s1">feasible_count </span><span class="s2">= </span><span class="s3">0</span>
+        <span class="s1">infeasible_count </span><span class="s2">= </span><span class="s3">0</span>
+
+        <span class="s1">min_count </span><span class="s2">= </span><span class="s3">500 </span><span class="s2">// (</span><span class="s1">ndim </span><span class="s2">+ </span><span class="s3">1</span><span class="s2">)</span>
+
+        <span class="s0">while </span><span class="s1">min</span><span class="s2">(</span><span class="s1">feasible_count</span><span class="s2">, </span><span class="s1">infeasible_count</span><span class="s2">) &lt; </span><span class="s1">min_count</span><span class="s2">:</span>
+            <span class="s5"># Ensure big and small integer problems</span>
+            <span class="s1">A_max </span><span class="s2">= </span><span class="s3">1 </span><span class="s2">+ </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s3">11</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">)**</span><span class="s3">6</span>
+            <span class="s1">U_max </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s3">11</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">)**</span><span class="s3">6</span>
+
+            <span class="s1">A_max </span><span class="s2">= </span><span class="s1">min</span><span class="s2">(</span><span class="s1">max_int</span><span class="s2">, </span><span class="s1">A_max</span><span class="s2">)</span>
+            <span class="s1">U_max </span><span class="s2">= </span><span class="s1">min</span><span class="s2">(</span><span class="s1">max_int </span><span class="s2">- </span><span class="s3">1</span><span class="s2">, </span><span class="s1">U_max</span><span class="s2">)</span>
+
+            <span class="s1">A </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">int</span><span class="s2">(</span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">1</span><span class="s2">, </span><span class="s1">A_max </span><span class="s2">+ </span><span class="s3">1</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">))</span>
+                      <span class="s0">for </span><span class="s1">j </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">ndim</span><span class="s2">))</span>
+            <span class="s1">U </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">int</span><span class="s2">(</span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s1">U_max </span><span class="s2">+ </span><span class="s3">2</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">))</span>
+                      <span class="s0">for </span><span class="s1">j </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">ndim</span><span class="s2">))</span>
+
+            <span class="s1">b_ub </span><span class="s2">= </span><span class="s1">min</span><span class="s2">(</span><span class="s1">max_int </span><span class="s2">- </span><span class="s3">2</span><span class="s2">, </span><span class="s1">sum</span><span class="s2">(</span><span class="s1">a </span><span class="s2">* </span><span class="s1">ub </span><span class="s0">for </span><span class="s1">a</span><span class="s2">, </span><span class="s1">ub </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">A</span><span class="s2">, </span><span class="s1">U</span><span class="s2">)))</span>
+            <span class="s1">b </span><span class="s2">= </span><span class="s1">int</span><span class="s2">(</span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(-</span><span class="s3">1</span><span class="s2">, </span><span class="s1">b_ub </span><span class="s2">+ </span><span class="s3">2</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">))</span>
+
+            <span class="s0">if </span><span class="s1">ndim </span><span class="s2">== </span><span class="s3">0 </span><span class="s0">and </span><span class="s1">feasible_count </span><span class="s2">&lt; </span><span class="s1">min_count</span><span class="s2">:</span>
+                <span class="s1">b </span><span class="s2">= </span><span class="s3">0</span>
+
+            <span class="s1">X </span><span class="s2">= </span><span class="s1">solve_diophantine</span><span class="s2">(</span><span class="s1">A</span><span class="s2">, </span><span class="s1">U</span><span class="s2">, </span><span class="s1">b</span><span class="s2">)</span>
+
+            <span class="s0">if </span><span class="s1">X </span><span class="s0">is None</span><span class="s2">:</span>
+                <span class="s5"># Check the simplified decision problem agrees</span>
+                <span class="s1">X_simplified </span><span class="s2">= </span><span class="s1">solve_diophantine</span><span class="s2">(</span><span class="s1">A</span><span class="s2">, </span><span class="s1">U</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">simplify</span><span class="s2">=</span><span class="s3">1</span><span class="s2">)</span>
+                <span class="s1">assert_</span><span class="s2">(</span><span class="s1">X_simplified </span><span class="s0">is None</span><span class="s2">, (</span><span class="s1">A</span><span class="s2">, </span><span class="s1">U</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">X_simplified</span><span class="s2">))</span>
+
+                <span class="s5"># Check no solution exists (provided the problem is</span>
+                <span class="s5"># small enough so that brute force checking doesn't</span>
+                <span class="s5"># take too long)</span>
+                <span class="s1">ranges </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">range</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s1">a </span><span class="s2">* </span><span class="s1">ub </span><span class="s2">+ </span><span class="s3">1</span><span class="s2">, </span><span class="s1">a</span><span class="s2">) </span><span class="s0">for </span><span class="s1">a</span><span class="s2">, </span><span class="s1">ub </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">A</span><span class="s2">, </span><span class="s1">U</span><span class="s2">))</span>
+
+                <span class="s1">size </span><span class="s2">= </span><span class="s3">1</span>
+                <span class="s0">for </span><span class="s1">r </span><span class="s0">in </span><span class="s1">ranges</span><span class="s2">:</span>
+                    <span class="s1">size </span><span class="s2">*= </span><span class="s1">len</span><span class="s2">(</span><span class="s1">r</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s1">size </span><span class="s2">&lt; </span><span class="s3">100000</span><span class="s2">:</span>
+                    <span class="s1">assert_</span><span class="s2">(</span><span class="s0">not </span><span class="s1">any</span><span class="s2">(</span><span class="s1">sum</span><span class="s2">(</span><span class="s1">w</span><span class="s2">) == </span><span class="s1">b </span><span class="s0">for </span><span class="s1">w </span><span class="s0">in </span><span class="s1">itertools</span><span class="s2">.</span><span class="s1">product</span><span class="s2">(*</span><span class="s1">ranges</span><span class="s2">)))</span>
+                    <span class="s1">infeasible_count </span><span class="s2">+= </span><span class="s3">1</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s5"># Check the simplified decision problem agrees</span>
+                <span class="s1">X_simplified </span><span class="s2">= </span><span class="s1">solve_diophantine</span><span class="s2">(</span><span class="s1">A</span><span class="s2">, </span><span class="s1">U</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">simplify</span><span class="s2">=</span><span class="s3">1</span><span class="s2">)</span>
+                <span class="s1">assert_</span><span class="s2">(</span><span class="s1">X_simplified </span><span class="s0">is not None</span><span class="s2">, (</span><span class="s1">A</span><span class="s2">, </span><span class="s1">U</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">X_simplified</span><span class="s2">))</span>
+
+                <span class="s5"># Check validity</span>
+                <span class="s1">assert_</span><span class="s2">(</span><span class="s1">sum</span><span class="s2">(</span><span class="s1">a </span><span class="s2">* </span><span class="s1">x </span><span class="s0">for </span><span class="s1">a</span><span class="s2">, </span><span class="s1">x </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">A</span><span class="s2">, </span><span class="s1">X</span><span class="s2">)) == </span><span class="s1">b</span><span class="s2">)</span>
+                <span class="s1">assert_</span><span class="s2">(</span><span class="s1">all</span><span class="s2">(</span><span class="s3">0 </span><span class="s2">&lt;= </span><span class="s1">x </span><span class="s2">&lt;= </span><span class="s1">ub </span><span class="s0">for </span><span class="s1">x</span><span class="s2">, </span><span class="s1">ub </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">X</span><span class="s2">, </span><span class="s1">U</span><span class="s2">)))</span>
+                <span class="s1">feasible_count </span><span class="s2">+= </span><span class="s3">1</span>
+
+
+<span class="s0">def </span><span class="s1">test_diophantine_overflow</span><span class="s2">():</span>
+    <span class="s5"># Smoke test integer overflow detection</span>
+    <span class="s1">max_intp </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">iinfo</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">).</span><span class="s1">max</span>
+    <span class="s1">max_int64 </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">iinfo</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">).</span><span class="s1">max</span>
+
+    <span class="s0">if </span><span class="s1">max_int64 </span><span class="s2">&lt;= </span><span class="s1">max_intp</span><span class="s2">:</span>
+        <span class="s5"># Check that the algorithm works internally in 128-bit;</span>
+        <span class="s5"># solving this problem requires large intermediate numbers</span>
+        <span class="s1">A </span><span class="s2">= (</span><span class="s1">max_int64 </span><span class="s2">// </span><span class="s3">2</span><span class="s2">, </span><span class="s1">max_int64 </span><span class="s2">// </span><span class="s3">2 </span><span class="s2">- </span><span class="s3">10</span><span class="s2">)</span>
+        <span class="s1">U </span><span class="s2">= (</span><span class="s1">max_int64 </span><span class="s2">// </span><span class="s3">2</span><span class="s2">, </span><span class="s1">max_int64 </span><span class="s2">// </span><span class="s3">2 </span><span class="s2">- </span><span class="s3">10</span><span class="s2">)</span>
+        <span class="s1">b </span><span class="s2">= </span><span class="s3">2 </span><span class="s2">* (</span><span class="s1">max_int64 </span><span class="s2">// </span><span class="s3">2</span><span class="s2">) - </span><span class="s3">10</span>
+
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">solve_diophantine</span><span class="s2">(</span><span class="s1">A</span><span class="s2">, </span><span class="s1">U</span><span class="s2">, </span><span class="s1">b</span><span class="s2">), (</span><span class="s3">1</span><span class="s2">, </span><span class="s3">1</span><span class="s2">))</span>
+
+
+<span class="s0">def </span><span class="s1">check_may_share_memory_exact</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">):</span>
+    <span class="s1">got </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">may_share_memory</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">max_work</span><span class="s2">=</span><span class="s1">MAY_SHARE_EXACT</span><span class="s2">)</span>
+
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">may_share_memory</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">),</span>
+                 <span class="s1">np</span><span class="s2">.</span><span class="s1">may_share_memory</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">max_work</span><span class="s2">=</span><span class="s1">MAY_SHARE_BOUNDS</span><span class="s2">))</span>
+
+    <span class="s1">a</span><span class="s2">.</span><span class="s1">fill</span><span class="s2">(</span><span class="s3">0</span><span class="s2">)</span>
+    <span class="s1">b</span><span class="s2">.</span><span class="s1">fill</span><span class="s2">(</span><span class="s3">0</span><span class="s2">)</span>
+    <span class="s1">a</span><span class="s2">.</span><span class="s1">fill</span><span class="s2">(</span><span class="s3">1</span><span class="s2">)</span>
+    <span class="s1">exact </span><span class="s2">= </span><span class="s1">b</span><span class="s2">.</span><span class="s1">any</span><span class="s2">()</span>
+
+    <span class="s1">err_msg </span><span class="s2">= </span><span class="s6">&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">got </span><span class="s2">!= </span><span class="s1">exact</span><span class="s2">:</span>
+        <span class="s1">base_delta </span><span class="s2">= </span><span class="s1">a</span><span class="s2">.</span><span class="s1">__array_interface__</span><span class="s2">[</span><span class="s6">'data'</span><span class="s2">][</span><span class="s3">0</span><span class="s2">] - </span><span class="s1">b</span><span class="s2">.</span><span class="s1">__array_interface__</span><span class="s2">[</span><span class="s6">'data'</span><span class="s2">][</span><span class="s3">0</span><span class="s2">]</span>
+        <span class="s1">err_msg </span><span class="s2">= </span><span class="s6">&quot;    &quot; </span><span class="s2">+ </span><span class="s6">&quot;</span><span class="s0">\n    </span><span class="s6">&quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">([</span>
+            <span class="s6">f&quot;base_a - base_b = </span><span class="s0">{</span><span class="s1">base_delta</span><span class="s0">!r}</span><span class="s6">&quot;</span><span class="s2">,</span>
+            <span class="s6">f&quot;shape_a = </span><span class="s0">{</span><span class="s1">a</span><span class="s2">.</span><span class="s1">shape</span><span class="s0">!r}</span><span class="s6">&quot;</span><span class="s2">,</span>
+            <span class="s6">f&quot;shape_b = </span><span class="s0">{</span><span class="s1">b</span><span class="s2">.</span><span class="s1">shape</span><span class="s0">!r}</span><span class="s6">&quot;</span><span class="s2">,</span>
+            <span class="s6">f&quot;strides_a = </span><span class="s0">{</span><span class="s1">a</span><span class="s2">.</span><span class="s1">strides</span><span class="s0">!r}</span><span class="s6">&quot;</span><span class="s2">,</span>
+            <span class="s6">f&quot;strides_b = </span><span class="s0">{</span><span class="s1">b</span><span class="s2">.</span><span class="s1">strides</span><span class="s0">!r}</span><span class="s6">&quot;</span><span class="s2">,</span>
+            <span class="s6">f&quot;size_a = </span><span class="s0">{</span><span class="s1">a</span><span class="s2">.</span><span class="s1">size</span><span class="s0">!r}</span><span class="s6">&quot;</span><span class="s2">,</span>
+            <span class="s6">f&quot;size_b = </span><span class="s0">{</span><span class="s1">b</span><span class="s2">.</span><span class="s1">size</span><span class="s0">!r}</span><span class="s6">&quot;</span>
+        <span class="s2">])</span>
+
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">got</span><span class="s2">, </span><span class="s1">exact</span><span class="s2">, </span><span class="s1">err_msg</span><span class="s2">=</span><span class="s1">err_msg</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_may_share_memory_manual</span><span class="s2">():</span>
+    <span class="s5"># Manual test cases for may_share_memory</span>
+
+    <span class="s5"># Base arrays</span>
+    <span class="s1">xs0 </span><span class="s2">= [</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">([</span><span class="s3">13</span><span class="s2">, </span><span class="s3">21</span><span class="s2">, </span><span class="s3">23</span><span class="s2">, </span><span class="s3">22</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int8</span><span class="s2">),</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">([</span><span class="s3">13</span><span class="s2">, </span><span class="s3">21</span><span class="s2">, </span><span class="s3">23 </span><span class="s2">* </span><span class="s3">2</span><span class="s2">, </span><span class="s3">22</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int8</span><span class="s2">)[:, :, ::</span><span class="s3">2</span><span class="s2">, :]</span>
+    <span class="s2">]</span>
+
+    <span class="s5"># Generate all negative stride combinations</span>
+    <span class="s1">xs </span><span class="s2">= []</span>
+    <span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">xs0</span><span class="s2">:</span>
+        <span class="s0">for </span><span class="s1">ss </span><span class="s0">in </span><span class="s1">itertools</span><span class="s2">.</span><span class="s1">product</span><span class="s2">(*(([</span><span class="s1">slice</span><span class="s2">(</span><span class="s0">None</span><span class="s2">), </span><span class="s1">slice</span><span class="s2">(</span><span class="s0">None</span><span class="s2">, </span><span class="s0">None</span><span class="s2">, -</span><span class="s3">1</span><span class="s2">)],) * </span><span class="s3">4</span><span class="s2">)):</span>
+            <span class="s1">xp </span><span class="s2">= </span><span class="s1">x</span><span class="s2">[</span><span class="s1">ss</span><span class="s2">]</span>
+            <span class="s1">xs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">xp</span><span class="s2">)</span>
+
+    <span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">xs</span><span class="s2">:</span>
+        <span class="s5"># The default is a simple extent check</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">may_share_memory</span><span class="s2">(</span><span class="s1">x</span><span class="s2">[:, </span><span class="s3">0</span><span class="s2">, :], </span><span class="s1">x</span><span class="s2">[:, </span><span class="s3">1</span><span class="s2">, :]))</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">may_share_memory</span><span class="s2">(</span><span class="s1">x</span><span class="s2">[:, </span><span class="s3">0</span><span class="s2">, :], </span><span class="s1">x</span><span class="s2">[:, </span><span class="s3">1</span><span class="s2">, :], </span><span class="s1">max_work</span><span class="s2">=</span><span class="s0">None</span><span class="s2">))</span>
+
+        <span class="s5"># Exact checks</span>
+        <span class="s1">check_may_share_memory_exact</span><span class="s2">(</span><span class="s1">x</span><span class="s2">[:, </span><span class="s3">0</span><span class="s2">, :], </span><span class="s1">x</span><span class="s2">[:, </span><span class="s3">1</span><span class="s2">, :])</span>
+        <span class="s1">check_may_share_memory_exact</span><span class="s2">(</span><span class="s1">x</span><span class="s2">[:, ::</span><span class="s3">7</span><span class="s2">], </span><span class="s1">x</span><span class="s2">[:, </span><span class="s3">3</span><span class="s2">::</span><span class="s3">3</span><span class="s2">])</span>
+
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">xp </span><span class="s2">= </span><span class="s1">x</span><span class="s2">.</span><span class="s1">ravel</span><span class="s2">()</span>
+            <span class="s0">if </span><span class="s1">xp</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">owndata</span><span class="s2">:</span>
+                <span class="s0">continue</span>
+            <span class="s1">xp </span><span class="s2">= </span><span class="s1">xp</span><span class="s2">.</span><span class="s1">view</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">)</span>
+        <span class="s0">except </span><span class="s1">ValueError</span><span class="s2">:</span>
+            <span class="s0">continue</span>
+
+        <span class="s5"># 0-size arrays cannot overlap</span>
+        <span class="s1">check_may_share_memory_exact</span><span class="s2">(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">ravel</span><span class="s2">()[</span><span class="s3">6</span><span class="s2">:</span><span class="s3">6</span><span class="s2">],</span>
+                                     <span class="s1">xp</span><span class="s2">.</span><span class="s1">reshape</span><span class="s2">(</span><span class="s3">13</span><span class="s2">, </span><span class="s3">21</span><span class="s2">, </span><span class="s3">23</span><span class="s2">, </span><span class="s3">11</span><span class="s2">)[:, ::</span><span class="s3">7</span><span class="s2">])</span>
+
+        <span class="s5"># Test itemsize is dealt with</span>
+        <span class="s1">check_may_share_memory_exact</span><span class="s2">(</span><span class="s1">x</span><span class="s2">[:, ::</span><span class="s3">7</span><span class="s2">],</span>
+                                     <span class="s1">xp</span><span class="s2">.</span><span class="s1">reshape</span><span class="s2">(</span><span class="s3">13</span><span class="s2">, </span><span class="s3">21</span><span class="s2">, </span><span class="s3">23</span><span class="s2">, </span><span class="s3">11</span><span class="s2">))</span>
+        <span class="s1">check_may_share_memory_exact</span><span class="s2">(</span><span class="s1">x</span><span class="s2">[:, ::</span><span class="s3">7</span><span class="s2">],</span>
+                                     <span class="s1">xp</span><span class="s2">.</span><span class="s1">reshape</span><span class="s2">(</span><span class="s3">13</span><span class="s2">, </span><span class="s3">21</span><span class="s2">, </span><span class="s3">23</span><span class="s2">, </span><span class="s3">11</span><span class="s2">)[:, </span><span class="s3">3</span><span class="s2">::</span><span class="s3">3</span><span class="s2">])</span>
+        <span class="s1">check_may_share_memory_exact</span><span class="s2">(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">ravel</span><span class="s2">()[</span><span class="s3">6</span><span class="s2">:</span><span class="s3">7</span><span class="s2">],</span>
+                                     <span class="s1">xp</span><span class="s2">.</span><span class="s1">reshape</span><span class="s2">(</span><span class="s3">13</span><span class="s2">, </span><span class="s3">21</span><span class="s2">, </span><span class="s3">23</span><span class="s2">, </span><span class="s3">11</span><span class="s2">)[:, ::</span><span class="s3">7</span><span class="s2">])</span>
+
+    <span class="s5"># Check unit size</span>
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">([</span><span class="s3">1</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int8</span><span class="s2">)</span>
+    <span class="s1">check_may_share_memory_exact</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">x</span><span class="s2">)</span>
+    <span class="s1">check_may_share_memory_exact</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">x</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">())</span>
+
+
+<span class="s0">def </span><span class="s1">iter_random_view_pairs</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">same_steps</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">equal_size</span><span class="s2">=</span><span class="s0">False</span><span class="s2">):</span>
+    <span class="s1">rng </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">RandomState</span><span class="s2">(</span><span class="s3">1234</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">equal_size </span><span class="s0">and </span><span class="s1">same_steps</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">ValueError</span>
+
+    <span class="s0">def </span><span class="s1">random_slice</span><span class="s2">(</span><span class="s1">n</span><span class="s2">, </span><span class="s1">step</span><span class="s2">):</span>
+        <span class="s1">start </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s1">n </span><span class="s2">+ </span><span class="s3">1</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">)</span>
+        <span class="s1">stop </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s1">start</span><span class="s2">, </span><span class="s1">n </span><span class="s2">+ </span><span class="s3">1</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s3">2</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">) == </span><span class="s3">0</span><span class="s2">:</span>
+            <span class="s1">stop</span><span class="s2">, </span><span class="s1">start </span><span class="s2">= </span><span class="s1">start</span><span class="s2">, </span><span class="s1">stop</span>
+            <span class="s1">step </span><span class="s2">*= -</span><span class="s3">1</span>
+        <span class="s0">return </span><span class="s1">slice</span><span class="s2">(</span><span class="s1">start</span><span class="s2">, </span><span class="s1">stop</span><span class="s2">, </span><span class="s1">step</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">random_slice_fixed_size</span><span class="s2">(</span><span class="s1">n</span><span class="s2">, </span><span class="s1">step</span><span class="s2">, </span><span class="s1">size</span><span class="s2">):</span>
+        <span class="s1">start </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s1">n </span><span class="s2">+ </span><span class="s3">1 </span><span class="s2">- </span><span class="s1">size </span><span class="s2">* </span><span class="s1">step</span><span class="s2">)</span>
+        <span class="s1">stop </span><span class="s2">= </span><span class="s1">start </span><span class="s2">+ (</span><span class="s1">size </span><span class="s2">- </span><span class="s3">1</span><span class="s2">) * </span><span class="s1">step </span><span class="s2">+ </span><span class="s3">1</span>
+        <span class="s0">if </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s3">2</span><span class="s2">) == </span><span class="s3">0</span><span class="s2">:</span>
+            <span class="s1">stop</span><span class="s2">, </span><span class="s1">start </span><span class="s2">= </span><span class="s1">start </span><span class="s2">- </span><span class="s3">1</span><span class="s2">, </span><span class="s1">stop </span><span class="s2">- </span><span class="s3">1</span>
+            <span class="s0">if </span><span class="s1">stop </span><span class="s2">&lt; </span><span class="s3">0</span><span class="s2">:</span>
+                <span class="s1">stop </span><span class="s2">= </span><span class="s0">None</span>
+            <span class="s1">step </span><span class="s2">*= -</span><span class="s3">1</span>
+        <span class="s0">return </span><span class="s1">slice</span><span class="s2">(</span><span class="s1">start</span><span class="s2">, </span><span class="s1">stop</span><span class="s2">, </span><span class="s1">step</span><span class="s2">)</span>
+
+    <span class="s5"># First a few regular views</span>
+    <span class="s0">yield </span><span class="s1">x</span><span class="s2">, </span><span class="s1">x</span>
+    <span class="s0">for </span><span class="s1">j </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s3">1</span><span class="s2">, </span><span class="s3">7</span><span class="s2">, </span><span class="s3">3</span><span class="s2">):</span>
+        <span class="s0">yield </span><span class="s1">x</span><span class="s2">[</span><span class="s1">j</span><span class="s2">:], </span><span class="s1">x</span><span class="s2">[:-</span><span class="s1">j</span><span class="s2">]</span>
+        <span class="s0">yield </span><span class="s1">x</span><span class="s2">[..., </span><span class="s1">j</span><span class="s2">:], </span><span class="s1">x</span><span class="s2">[..., :-</span><span class="s1">j</span><span class="s2">]</span>
+
+    <span class="s5"># An array with zero stride internal overlap</span>
+    <span class="s1">strides </span><span class="s2">= </span><span class="s1">list</span><span class="s2">(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">strides</span><span class="s2">)</span>
+    <span class="s1">strides</span><span class="s2">[</span><span class="s3">0</span><span class="s2">] = </span><span class="s3">0</span>
+    <span class="s1">xp </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=</span><span class="s1">x</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">, </span><span class="s1">strides</span><span class="s2">=</span><span class="s1">strides</span><span class="s2">)</span>
+    <span class="s0">yield </span><span class="s1">x</span><span class="s2">, </span><span class="s1">xp</span>
+    <span class="s0">yield </span><span class="s1">xp</span><span class="s2">, </span><span class="s1">xp</span>
+
+    <span class="s5"># An array with non-zero stride internal overlap</span>
+    <span class="s1">strides </span><span class="s2">= </span><span class="s1">list</span><span class="s2">(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">strides</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">strides</span><span class="s2">[</span><span class="s3">0</span><span class="s2">] &gt; </span><span class="s3">1</span><span class="s2">:</span>
+        <span class="s1">strides</span><span class="s2">[</span><span class="s3">0</span><span class="s2">] = </span><span class="s3">1</span>
+    <span class="s1">xp </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=</span><span class="s1">x</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">, </span><span class="s1">strides</span><span class="s2">=</span><span class="s1">strides</span><span class="s2">)</span>
+    <span class="s0">yield </span><span class="s1">x</span><span class="s2">, </span><span class="s1">xp</span>
+    <span class="s0">yield </span><span class="s1">xp</span><span class="s2">, </span><span class="s1">xp</span>
+
+    <span class="s5"># Then discontiguous views</span>
+    <span class="s0">while True</span><span class="s2">:</span>
+        <span class="s1">steps </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">1</span><span class="s2">, </span><span class="s3">11</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">)</span>
+                      <span class="s0">if </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s3">5</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">) == </span><span class="s3">0 </span><span class="s0">else </span><span class="s3">1</span>
+                      <span class="s0">for </span><span class="s1">j </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">ndim</span><span class="s2">))</span>
+        <span class="s1">s1 </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">random_slice</span><span class="s2">(</span><span class="s1">p</span><span class="s2">, </span><span class="s1">s</span><span class="s2">) </span><span class="s0">for </span><span class="s1">p</span><span class="s2">, </span><span class="s1">s </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">, </span><span class="s1">steps</span><span class="s2">))</span>
+
+        <span class="s1">t1 </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">ndim</span><span class="s2">)</span>
+        <span class="s1">rng</span><span class="s2">.</span><span class="s1">shuffle</span><span class="s2">(</span><span class="s1">t1</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">equal_size</span><span class="s2">:</span>
+            <span class="s1">t2 </span><span class="s2">= </span><span class="s1">t1</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">t2 </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">ndim</span><span class="s2">)</span>
+            <span class="s1">rng</span><span class="s2">.</span><span class="s1">shuffle</span><span class="s2">(</span><span class="s1">t2</span><span class="s2">)</span>
+
+        <span class="s1">a </span><span class="s2">= </span><span class="s1">x</span><span class="s2">[</span><span class="s1">s1</span><span class="s2">]</span>
+
+        <span class="s0">if </span><span class="s1">equal_size</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">a</span><span class="s2">.</span><span class="s1">size </span><span class="s2">== </span><span class="s3">0</span><span class="s2">:</span>
+                <span class="s0">continue</span>
+
+            <span class="s1">steps2 </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">1</span><span class="s2">, </span><span class="s1">max</span><span class="s2">(</span><span class="s3">2</span><span class="s2">, </span><span class="s1">p </span><span class="s2">// (</span><span class="s3">1 </span><span class="s2">+ </span><span class="s1">pa</span><span class="s2">)))</span>
+                           <span class="s0">if </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s3">5</span><span class="s2">) == </span><span class="s3">0 </span><span class="s0">else </span><span class="s3">1</span>
+                           <span class="s0">for </span><span class="s1">p</span><span class="s2">, </span><span class="s1">s</span><span class="s2">, </span><span class="s1">pa </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">, </span><span class="s1">s1</span><span class="s2">, </span><span class="s1">a</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">))</span>
+            <span class="s1">s2 </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">random_slice_fixed_size</span><span class="s2">(</span><span class="s1">p</span><span class="s2">, </span><span class="s1">s</span><span class="s2">, </span><span class="s1">pa</span><span class="s2">)</span>
+                       <span class="s0">for </span><span class="s1">p</span><span class="s2">, </span><span class="s1">s</span><span class="s2">, </span><span class="s1">pa </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">, </span><span class="s1">steps2</span><span class="s2">, </span><span class="s1">a</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">))</span>
+        <span class="s0">elif </span><span class="s1">same_steps</span><span class="s2">:</span>
+            <span class="s1">steps2 </span><span class="s2">= </span><span class="s1">steps</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">steps2 </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">1</span><span class="s2">, </span><span class="s3">11</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">)</span>
+                           <span class="s0">if </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s3">5</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">) == </span><span class="s3">0 </span><span class="s0">else </span><span class="s3">1</span>
+                           <span class="s0">for </span><span class="s1">j </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">ndim</span><span class="s2">))</span>
+
+        <span class="s0">if not </span><span class="s1">equal_size</span><span class="s2">:</span>
+            <span class="s1">s2 </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">random_slice</span><span class="s2">(</span><span class="s1">p</span><span class="s2">, </span><span class="s1">s</span><span class="s2">) </span><span class="s0">for </span><span class="s1">p</span><span class="s2">, </span><span class="s1">s </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">, </span><span class="s1">steps2</span><span class="s2">))</span>
+
+        <span class="s1">a </span><span class="s2">= </span><span class="s1">a</span><span class="s2">.</span><span class="s1">transpose</span><span class="s2">(</span><span class="s1">t1</span><span class="s2">)</span>
+        <span class="s1">b </span><span class="s2">= </span><span class="s1">x</span><span class="s2">[</span><span class="s1">s2</span><span class="s2">].</span><span class="s1">transpose</span><span class="s2">(</span><span class="s1">t2</span><span class="s2">)</span>
+
+        <span class="s0">yield </span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span>
+
+
+<span class="s0">def </span><span class="s1">check_may_share_memory_easy_fuzz</span><span class="s2">(</span><span class="s1">get_max_work</span><span class="s2">, </span><span class="s1">same_steps</span><span class="s2">, </span><span class="s1">min_count</span><span class="s2">):</span>
+    <span class="s5"># Check that overlap problems with common strides are solved with</span>
+    <span class="s5"># little work.</span>
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">([</span><span class="s3">17</span><span class="s2">, </span><span class="s3">34</span><span class="s2">, </span><span class="s3">71</span><span class="s2">, </span><span class="s3">97</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">)</span>
+
+    <span class="s1">feasible </span><span class="s2">= </span><span class="s3">0</span>
+    <span class="s1">infeasible </span><span class="s2">= </span><span class="s3">0</span>
+
+    <span class="s1">pair_iter </span><span class="s2">= </span><span class="s1">iter_random_view_pairs</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">same_steps</span><span class="s2">)</span>
+
+    <span class="s0">while </span><span class="s1">min</span><span class="s2">(</span><span class="s1">feasible</span><span class="s2">, </span><span class="s1">infeasible</span><span class="s2">) &lt; </span><span class="s1">min_count</span><span class="s2">:</span>
+        <span class="s1">a</span><span class="s2">, </span><span class="s1">b </span><span class="s2">= </span><span class="s1">next</span><span class="s2">(</span><span class="s1">pair_iter</span><span class="s2">)</span>
+
+        <span class="s1">bounds_overlap </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">may_share_memory</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">)</span>
+        <span class="s1">may_share_answer </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">may_share_memory</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">)</span>
+        <span class="s1">easy_answer </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">may_share_memory</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">max_work</span><span class="s2">=</span><span class="s1">get_max_work</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">))</span>
+        <span class="s1">exact_answer </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">may_share_memory</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">max_work</span><span class="s2">=</span><span class="s1">MAY_SHARE_EXACT</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">easy_answer </span><span class="s2">!= </span><span class="s1">exact_answer</span><span class="s2">:</span>
+            <span class="s5"># assert_equal is slow...</span>
+            <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">easy_answer</span><span class="s2">, </span><span class="s1">exact_answer</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">may_share_answer </span><span class="s2">!= </span><span class="s1">bounds_overlap</span><span class="s2">:</span>
+            <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">may_share_answer</span><span class="s2">, </span><span class="s1">bounds_overlap</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">bounds_overlap</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">exact_answer</span><span class="s2">:</span>
+                <span class="s1">feasible </span><span class="s2">+= </span><span class="s3">1</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">infeasible </span><span class="s2">+= </span><span class="s3">1</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">slow</span>
+<span class="s0">def </span><span class="s1">test_may_share_memory_easy_fuzz</span><span class="s2">():</span>
+    <span class="s5"># Check that overlap problems with common strides are always</span>
+    <span class="s5"># solved with little work.</span>
+
+    <span class="s1">check_may_share_memory_easy_fuzz</span><span class="s2">(</span><span class="s1">get_max_work</span><span class="s2">=</span><span class="s0">lambda </span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">: </span><span class="s3">1</span><span class="s2">,</span>
+                                     <span class="s1">same_steps</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,</span>
+                                     <span class="s1">min_count</span><span class="s2">=</span><span class="s3">2000</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">slow</span>
+<span class="s0">def </span><span class="s1">test_may_share_memory_harder_fuzz</span><span class="s2">():</span>
+    <span class="s5"># Overlap problems with not necessarily common strides take more</span>
+    <span class="s5"># work.</span>
+    <span class="s5">#</span>
+    <span class="s5"># The work bound below can't be reduced much. Harder problems can</span>
+    <span class="s5"># also exist but not be detected here, as the set of problems</span>
+    <span class="s5"># comes from RNG.</span>
+
+    <span class="s1">check_may_share_memory_easy_fuzz</span><span class="s2">(</span><span class="s1">get_max_work</span><span class="s2">=</span><span class="s0">lambda </span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">: </span><span class="s1">max</span><span class="s2">(</span><span class="s1">a</span><span class="s2">.</span><span class="s1">size</span><span class="s2">, </span><span class="s1">b</span><span class="s2">.</span><span class="s1">size</span><span class="s2">) // </span><span class="s3">2</span><span class="s2">,</span>
+                                     <span class="s1">same_steps</span><span class="s2">=</span><span class="s0">False</span><span class="s2">,</span>
+                                     <span class="s1">min_count</span><span class="s2">=</span><span class="s3">2000</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_shares_memory_api</span><span class="s2">():</span>
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">([</span><span class="s3">4</span><span class="s2">, </span><span class="s3">5</span><span class="s2">, </span><span class="s3">6</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int8</span><span class="s2">)</span>
+
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">x</span><span class="s2">), </span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">x</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()), </span><span class="s0">False</span><span class="s2">)</span>
+
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">x</span><span class="s2">[:, ::</span><span class="s3">2</span><span class="s2">, ::</span><span class="s3">3</span><span class="s2">]</span>
+    <span class="s1">b </span><span class="s2">= </span><span class="s1">x</span><span class="s2">[:, ::</span><span class="s3">3</span><span class="s2">, ::</span><span class="s3">2</span><span class="s2">]</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">), </span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">max_work</span><span class="s2">=</span><span class="s0">None</span><span class="s2">), </span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">assert_raises</span><span class="s2">(</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">exceptions</span><span class="s2">.</span><span class="s1">TooHardError</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">, </span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">max_work</span><span class="s2">=</span><span class="s3">1</span>
+    <span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_may_share_memory_bad_max_work</span><span class="s2">():</span>
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">([</span><span class="s3">1</span><span class="s2">])</span>
+    <span class="s1">assert_raises</span><span class="s2">(</span><span class="s1">OverflowError</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">may_share_memory</span><span class="s2">, </span><span class="s1">x</span><span class="s2">, </span><span class="s1">x</span><span class="s2">, </span><span class="s1">max_work</span><span class="s2">=</span><span class="s3">10</span><span class="s2">**</span><span class="s3">100</span><span class="s2">)</span>
+    <span class="s1">assert_raises</span><span class="s2">(</span><span class="s1">OverflowError</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">, </span><span class="s1">x</span><span class="s2">, </span><span class="s1">x</span><span class="s2">, </span><span class="s1">max_work</span><span class="s2">=</span><span class="s3">10</span><span class="s2">**</span><span class="s3">100</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_internal_overlap_diophantine</span><span class="s2">():</span>
+    <span class="s0">def </span><span class="s1">check</span><span class="s2">(</span><span class="s1">A</span><span class="s2">, </span><span class="s1">U</span><span class="s2">, </span><span class="s1">exists</span><span class="s2">=</span><span class="s0">None</span><span class="s2">):</span>
+        <span class="s1">X </span><span class="s2">= </span><span class="s1">solve_diophantine</span><span class="s2">(</span><span class="s1">A</span><span class="s2">, </span><span class="s1">U</span><span class="s2">, </span><span class="s3">0</span><span class="s2">, </span><span class="s1">require_ub_nontrivial</span><span class="s2">=</span><span class="s3">1</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">exists </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">exists </span><span class="s2">= (</span><span class="s1">X </span><span class="s0">is not None</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">X </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s1">sum_ax </span><span class="s2">= </span><span class="s1">sum</span><span class="s2">(</span><span class="s1">a </span><span class="s2">* </span><span class="s1">x </span><span class="s0">for </span><span class="s1">a</span><span class="s2">, </span><span class="s1">x </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">A</span><span class="s2">, </span><span class="s1">X</span><span class="s2">))</span>
+            <span class="s1">sum_au_half </span><span class="s2">= </span><span class="s1">sum</span><span class="s2">(</span><span class="s1">a </span><span class="s2">* </span><span class="s1">u </span><span class="s2">// </span><span class="s3">2 </span><span class="s0">for </span><span class="s1">a</span><span class="s2">, </span><span class="s1">u </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">A</span><span class="s2">, </span><span class="s1">U</span><span class="s2">))</span>
+            <span class="s1">assert_</span><span class="s2">(</span><span class="s1">sum_ax </span><span class="s2">== </span><span class="s1">sum_au_half</span><span class="s2">)</span>
+            <span class="s1">assert_</span><span class="s2">(</span><span class="s1">all</span><span class="s2">(</span><span class="s3">0 </span><span class="s2">&lt;= </span><span class="s1">x </span><span class="s2">&lt;= </span><span class="s1">u </span><span class="s0">for </span><span class="s1">x</span><span class="s2">, </span><span class="s1">u </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">X</span><span class="s2">, </span><span class="s1">U</span><span class="s2">)))</span>
+            <span class="s1">assert_</span><span class="s2">(</span><span class="s1">any</span><span class="s2">(</span><span class="s1">x </span><span class="s2">!= </span><span class="s1">u </span><span class="s2">// </span><span class="s3">2 </span><span class="s0">for </span><span class="s1">x</span><span class="s2">, </span><span class="s1">u </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">X</span><span class="s2">, </span><span class="s1">U</span><span class="s2">)))</span>
+
+        <span class="s0">if </span><span class="s1">exists</span><span class="s2">:</span>
+            <span class="s1">assert_</span><span class="s2">(</span><span class="s1">X </span><span class="s0">is not None</span><span class="s2">, </span><span class="s1">repr</span><span class="s2">(</span><span class="s1">X</span><span class="s2">))</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">assert_</span><span class="s2">(</span><span class="s1">X </span><span class="s0">is None</span><span class="s2">, </span><span class="s1">repr</span><span class="s2">(</span><span class="s1">X</span><span class="s2">))</span>
+
+    <span class="s5"># Smoke tests</span>
+    <span class="s1">check</span><span class="s2">((</span><span class="s3">3</span><span class="s2">, </span><span class="s3">2</span><span class="s2">), (</span><span class="s3">2 </span><span class="s2">* </span><span class="s3">2</span><span class="s2">, </span><span class="s3">3 </span><span class="s2">* </span><span class="s3">2</span><span class="s2">), </span><span class="s1">exists</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">check</span><span class="s2">((</span><span class="s3">3 </span><span class="s2">* </span><span class="s3">2</span><span class="s2">, </span><span class="s3">2</span><span class="s2">), (</span><span class="s3">15 </span><span class="s2">* </span><span class="s3">2</span><span class="s2">, (</span><span class="s3">3 </span><span class="s2">- </span><span class="s3">1</span><span class="s2">) * </span><span class="s3">2</span><span class="s2">), </span><span class="s1">exists</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_internal_overlap_slices</span><span class="s2">():</span>
+    <span class="s5"># Slicing an array never generates internal overlap</span>
+
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">([</span><span class="s3">17</span><span class="s2">, </span><span class="s3">34</span><span class="s2">, </span><span class="s3">71</span><span class="s2">, </span><span class="s3">97</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">)</span>
+
+    <span class="s1">rng </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">RandomState</span><span class="s2">(</span><span class="s3">1234</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">random_slice</span><span class="s2">(</span><span class="s1">n</span><span class="s2">, </span><span class="s1">step</span><span class="s2">):</span>
+        <span class="s1">start </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s1">n </span><span class="s2">+ </span><span class="s3">1</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">)</span>
+        <span class="s1">stop </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s1">start</span><span class="s2">, </span><span class="s1">n </span><span class="s2">+ </span><span class="s3">1</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s3">2</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">) == </span><span class="s3">0</span><span class="s2">:</span>
+            <span class="s1">stop</span><span class="s2">, </span><span class="s1">start </span><span class="s2">= </span><span class="s1">start</span><span class="s2">, </span><span class="s1">stop</span>
+            <span class="s1">step </span><span class="s2">*= -</span><span class="s3">1</span>
+        <span class="s0">return </span><span class="s1">slice</span><span class="s2">(</span><span class="s1">start</span><span class="s2">, </span><span class="s1">stop</span><span class="s2">, </span><span class="s1">step</span><span class="s2">)</span>
+
+    <span class="s1">cases </span><span class="s2">= </span><span class="s3">0</span>
+    <span class="s1">min_count </span><span class="s2">= </span><span class="s3">5000</span>
+
+    <span class="s0">while </span><span class="s1">cases </span><span class="s2">&lt; </span><span class="s1">min_count</span><span class="s2">:</span>
+        <span class="s1">steps </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">1</span><span class="s2">, </span><span class="s3">11</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">)</span>
+                      <span class="s0">if </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s3">5</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">) == </span><span class="s3">0 </span><span class="s0">else </span><span class="s3">1</span>
+                      <span class="s0">for </span><span class="s1">j </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">ndim</span><span class="s2">))</span>
+        <span class="s1">t1 </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">ndim</span><span class="s2">)</span>
+        <span class="s1">rng</span><span class="s2">.</span><span class="s1">shuffle</span><span class="s2">(</span><span class="s1">t1</span><span class="s2">)</span>
+        <span class="s1">s1 </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">random_slice</span><span class="s2">(</span><span class="s1">p</span><span class="s2">, </span><span class="s1">s</span><span class="s2">) </span><span class="s0">for </span><span class="s1">p</span><span class="s2">, </span><span class="s1">s </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">, </span><span class="s1">steps</span><span class="s2">))</span>
+        <span class="s1">a </span><span class="s2">= </span><span class="s1">x</span><span class="s2">[</span><span class="s1">s1</span><span class="s2">].</span><span class="s1">transpose</span><span class="s2">(</span><span class="s1">t1</span><span class="s2">)</span>
+
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s0">not </span><span class="s1">internal_overlap</span><span class="s2">(</span><span class="s1">a</span><span class="s2">))</span>
+        <span class="s1">cases </span><span class="s2">+= </span><span class="s3">1</span>
+
+
+<span class="s0">def </span><span class="s1">check_internal_overlap</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">manual_expected</span><span class="s2">=</span><span class="s0">None</span><span class="s2">):</span>
+    <span class="s1">got </span><span class="s2">= </span><span class="s1">internal_overlap</span><span class="s2">(</span><span class="s1">a</span><span class="s2">)</span>
+
+    <span class="s5"># Brute-force check</span>
+    <span class="s1">m </span><span class="s2">= </span><span class="s1">set</span><span class="s2">()</span>
+    <span class="s1">ranges </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">range</span><span class="s2">(</span><span class="s1">n</span><span class="s2">) </span><span class="s0">for </span><span class="s1">n </span><span class="s0">in </span><span class="s1">a</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+    <span class="s0">for </span><span class="s1">v </span><span class="s0">in </span><span class="s1">itertools</span><span class="s2">.</span><span class="s1">product</span><span class="s2">(*</span><span class="s1">ranges</span><span class="s2">):</span>
+        <span class="s1">offset </span><span class="s2">= </span><span class="s1">sum</span><span class="s2">(</span><span class="s1">s </span><span class="s2">* </span><span class="s1">w </span><span class="s0">for </span><span class="s1">s</span><span class="s2">, </span><span class="s1">w </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">a</span><span class="s2">.</span><span class="s1">strides</span><span class="s2">, </span><span class="s1">v</span><span class="s2">))</span>
+        <span class="s0">if </span><span class="s1">offset </span><span class="s0">in </span><span class="s1">m</span><span class="s2">:</span>
+            <span class="s1">expected </span><span class="s2">= </span><span class="s0">True</span>
+            <span class="s0">break</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">m</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s1">offset</span><span class="s2">)</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s0">False</span>
+
+    <span class="s5"># Compare</span>
+    <span class="s0">if </span><span class="s1">got </span><span class="s2">!= </span><span class="s1">expected</span><span class="s2">:</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">got</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">, </span><span class="s1">err_msg</span><span class="s2">=</span><span class="s1">repr</span><span class="s2">((</span><span class="s1">a</span><span class="s2">.</span><span class="s1">strides</span><span class="s2">, </span><span class="s1">a</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)))</span>
+    <span class="s0">if </span><span class="s1">manual_expected </span><span class="s0">is not None and </span><span class="s1">expected </span><span class="s2">!= </span><span class="s1">manual_expected</span><span class="s2">:</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">expected</span><span class="s2">, </span><span class="s1">manual_expected</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">got</span>
+
+
+<span class="s0">def </span><span class="s1">test_internal_overlap_manual</span><span class="s2">():</span>
+    <span class="s5"># Stride tricks can construct arrays with internal overlap</span>
+
+    <span class="s5"># We don't care about memory bounds, the array is not</span>
+    <span class="s5"># read/write accessed</span>
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s3">1</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int8</span><span class="s2">)</span>
+
+    <span class="s5"># Check low-dimensional special cases</span>
+
+    <span class="s1">check_internal_overlap</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)  </span><span class="s5"># 1-dim</span>
+    <span class="s1">check_internal_overlap</span><span class="s2">(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">reshape</span><span class="s2">([]), </span><span class="s0">False</span><span class="s2">)  </span><span class="s5"># 0-dim</span>
+
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">strides</span><span class="s2">=(</span><span class="s3">3</span><span class="s2">, </span><span class="s3">4</span><span class="s2">), </span><span class="s1">shape</span><span class="s2">=(</span><span class="s3">4</span><span class="s2">, </span><span class="s3">4</span><span class="s2">))</span>
+    <span class="s1">check_internal_overlap</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)</span>
+
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">strides</span><span class="s2">=(</span><span class="s3">3</span><span class="s2">, </span><span class="s3">4</span><span class="s2">), </span><span class="s1">shape</span><span class="s2">=(</span><span class="s3">5</span><span class="s2">, </span><span class="s3">4</span><span class="s2">))</span>
+    <span class="s1">check_internal_overlap</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">strides</span><span class="s2">=(</span><span class="s3">0</span><span class="s2">,), </span><span class="s1">shape</span><span class="s2">=(</span><span class="s3">0</span><span class="s2">,))</span>
+    <span class="s1">check_internal_overlap</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)</span>
+
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">strides</span><span class="s2">=(</span><span class="s3">0</span><span class="s2">,), </span><span class="s1">shape</span><span class="s2">=(</span><span class="s3">1</span><span class="s2">,))</span>
+    <span class="s1">check_internal_overlap</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)</span>
+
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">strides</span><span class="s2">=(</span><span class="s3">0</span><span class="s2">,), </span><span class="s1">shape</span><span class="s2">=(</span><span class="s3">2</span><span class="s2">,))</span>
+    <span class="s1">check_internal_overlap</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">strides</span><span class="s2">=(</span><span class="s3">0</span><span class="s2">, -</span><span class="s3">9993</span><span class="s2">), </span><span class="s1">shape</span><span class="s2">=(</span><span class="s3">87</span><span class="s2">, </span><span class="s3">22</span><span class="s2">))</span>
+    <span class="s1">check_internal_overlap</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">strides</span><span class="s2">=(</span><span class="s3">0</span><span class="s2">, -</span><span class="s3">9993</span><span class="s2">), </span><span class="s1">shape</span><span class="s2">=(</span><span class="s3">1</span><span class="s2">, </span><span class="s3">22</span><span class="s2">))</span>
+    <span class="s1">check_internal_overlap</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)</span>
+
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">strides</span><span class="s2">=(</span><span class="s3">0</span><span class="s2">, -</span><span class="s3">9993</span><span class="s2">), </span><span class="s1">shape</span><span class="s2">=(</span><span class="s3">0</span><span class="s2">, </span><span class="s3">22</span><span class="s2">))</span>
+    <span class="s1">check_internal_overlap</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_internal_overlap_fuzz</span><span class="s2">():</span>
+    <span class="s5"># Fuzz check; the brute-force check is fairly slow</span>
+
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s3">1</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int8</span><span class="s2">)</span>
+
+    <span class="s1">overlap </span><span class="s2">= </span><span class="s3">0</span>
+    <span class="s1">no_overlap </span><span class="s2">= </span><span class="s3">0</span>
+    <span class="s1">min_count </span><span class="s2">= </span><span class="s3">100</span>
+
+    <span class="s1">rng </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">RandomState</span><span class="s2">(</span><span class="s3">1234</span><span class="s2">)</span>
+
+    <span class="s0">while </span><span class="s1">min</span><span class="s2">(</span><span class="s1">overlap</span><span class="s2">, </span><span class="s1">no_overlap</span><span class="s2">) &lt; </span><span class="s1">min_count</span><span class="s2">:</span>
+        <span class="s1">ndim </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">1</span><span class="s2">, </span><span class="s3">4</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">)</span>
+
+        <span class="s1">strides </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(-</span><span class="s3">1000</span><span class="s2">, </span><span class="s3">1000</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">)</span>
+                        <span class="s0">for </span><span class="s1">j </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">ndim</span><span class="s2">))</span>
+        <span class="s1">shape </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">1</span><span class="s2">, </span><span class="s3">30</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">)</span>
+                      <span class="s0">for </span><span class="s1">j </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">ndim</span><span class="s2">))</span>
+
+        <span class="s1">a </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">strides</span><span class="s2">=</span><span class="s1">strides</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=</span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">check_internal_overlap</span><span class="s2">(</span><span class="s1">a</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">result</span><span class="s2">:</span>
+            <span class="s1">overlap </span><span class="s2">+= </span><span class="s3">1</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">no_overlap </span><span class="s2">+= </span><span class="s3">1</span>
+
+
+<span class="s0">def </span><span class="s1">test_non_ndarray_inputs</span><span class="s2">():</span>
+    <span class="s5"># Regression check for gh-5604</span>
+
+    <span class="s0">class </span><span class="s1">MyArray</span><span class="s2">:</span>
+        <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">data</span><span class="s2">):</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s1">data</span>
+
+        <span class="s2">@</span><span class="s1">property</span>
+        <span class="s0">def </span><span class="s1">__array_interface__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">.</span><span class="s1">__array_interface__</span>
+
+    <span class="s0">class </span><span class="s1">MyArray2</span><span class="s2">:</span>
+        <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">data</span><span class="s2">):</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s1">data</span>
+
+        <span class="s0">def </span><span class="s1">__array__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s0">None</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">None</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span>
+
+    <span class="s0">for </span><span class="s1">cls </span><span class="s0">in </span><span class="s2">[</span><span class="s1">MyArray</span><span class="s2">, </span><span class="s1">MyArray2</span><span class="s2">]:</span>
+        <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s3">5</span><span class="s2">)</span>
+
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">may_share_memory</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">(</span><span class="s1">x</span><span class="s2">[::</span><span class="s3">2</span><span class="s2">]), </span><span class="s1">x</span><span class="s2">[</span><span class="s3">1</span><span class="s2">::</span><span class="s3">2</span><span class="s2">]))</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s0">not </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">(</span><span class="s1">x</span><span class="s2">[::</span><span class="s3">2</span><span class="s2">]), </span><span class="s1">x</span><span class="s2">[</span><span class="s3">1</span><span class="s2">::</span><span class="s3">2</span><span class="s2">]))</span>
+
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">(</span><span class="s1">x</span><span class="s2">[</span><span class="s3">1</span><span class="s2">::</span><span class="s3">3</span><span class="s2">]), </span><span class="s1">x</span><span class="s2">[::</span><span class="s3">2</span><span class="s2">]))</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">may_share_memory</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">(</span><span class="s1">x</span><span class="s2">[</span><span class="s3">1</span><span class="s2">::</span><span class="s3">3</span><span class="s2">]), </span><span class="s1">x</span><span class="s2">[::</span><span class="s3">2</span><span class="s2">]))</span>
+
+
+<span class="s0">def </span><span class="s1">view_element_first_byte</span><span class="s2">(</span><span class="s1">x</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot;Construct an array viewing the first byte of each element of `x`&quot;&quot;&quot;</span>
+    <span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">lib</span><span class="s2">.</span><span class="s1">_stride_tricks_impl </span><span class="s0">import </span><span class="s1">DummyArray</span>
+    <span class="s1">interface </span><span class="s2">= </span><span class="s1">dict</span><span class="s2">(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">__array_interface__</span><span class="s2">)</span>
+    <span class="s1">interface</span><span class="s2">[</span><span class="s6">'typestr'</span><span class="s2">] = </span><span class="s6">'|b1'</span>
+    <span class="s1">interface</span><span class="s2">[</span><span class="s6">'descr'</span><span class="s2">] = [(</span><span class="s6">''</span><span class="s2">, </span><span class="s6">'|b1'</span><span class="s2">)]</span>
+    <span class="s0">return </span><span class="s1">np</span><span class="s2">.</span><span class="s1">asarray</span><span class="s2">(</span><span class="s1">DummyArray</span><span class="s2">(</span><span class="s1">interface</span><span class="s2">, </span><span class="s1">x</span><span class="s2">))</span>
+
+
+<span class="s0">def </span><span class="s1">assert_copy_equivalent</span><span class="s2">(</span><span class="s1">operation</span><span class="s2">, </span><span class="s1">args</span><span class="s2">, </span><span class="s1">out</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Check that operation(*args, out=out) produces results 
+    equivalent to out[...] = operation(*args, out=out.copy()) 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">kwargs</span><span class="s2">[</span><span class="s6">'out'</span><span class="s2">] = </span><span class="s1">out</span>
+    <span class="s1">kwargs2 </span><span class="s2">= </span><span class="s1">dict</span><span class="s2">(</span><span class="s1">kwargs</span><span class="s2">)</span>
+    <span class="s1">kwargs2</span><span class="s2">[</span><span class="s6">'out'</span><span class="s2">] = </span><span class="s1">out</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+
+    <span class="s1">out_orig </span><span class="s2">= </span><span class="s1">out</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+    <span class="s1">out</span><span class="s2">[...] = </span><span class="s1">operation</span><span class="s2">(*</span><span class="s1">args</span><span class="s2">, **</span><span class="s1">kwargs2</span><span class="s2">)</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">out</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+    <span class="s1">out</span><span class="s2">[...] = </span><span class="s1">out_orig</span>
+
+    <span class="s1">got </span><span class="s2">= </span><span class="s1">operation</span><span class="s2">(*</span><span class="s1">args</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">).</span><span class="s1">copy</span><span class="s2">()</span>
+
+    <span class="s0">if </span><span class="s2">(</span><span class="s1">got </span><span class="s2">!= </span><span class="s1">expected</span><span class="s2">).</span><span class="s1">any</span><span class="s2">():</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">got</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">TestUFunc</span><span class="s2">:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Test ufunc call memory overlap handling 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">check_unary_fuzz</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">operation</span><span class="s2">, </span><span class="s1">get_out_axis_size</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">,</span>
+                             <span class="s1">count</span><span class="s2">=</span><span class="s3">5000</span><span class="s2">):</span>
+        <span class="s1">shapes </span><span class="s2">= [</span><span class="s3">7</span><span class="s2">, </span><span class="s3">13</span><span class="s2">, </span><span class="s3">8</span><span class="s2">, </span><span class="s3">21</span><span class="s2">, </span><span class="s3">29</span><span class="s2">, </span><span class="s3">32</span><span class="s2">]</span>
+
+        <span class="s1">rng </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">RandomState</span><span class="s2">(</span><span class="s3">1234</span><span class="s2">)</span>
+
+        <span class="s0">for </span><span class="s1">ndim </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s3">1</span><span class="s2">, </span><span class="s3">6</span><span class="s2">):</span>
+            <span class="s1">x </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s3">2</span><span class="s2">**</span><span class="s3">16</span><span class="s2">, </span><span class="s1">size</span><span class="s2">=</span><span class="s1">shapes</span><span class="s2">[:</span><span class="s1">ndim</span><span class="s2">]).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+
+            <span class="s1">it </span><span class="s2">= </span><span class="s1">iter_random_view_pairs</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">same_steps</span><span class="s2">=</span><span class="s0">False</span><span class="s2">, </span><span class="s1">equal_size</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+            <span class="s1">min_count </span><span class="s2">= </span><span class="s1">count </span><span class="s2">// (</span><span class="s1">ndim </span><span class="s2">+ </span><span class="s3">1</span><span class="s2">)**</span><span class="s3">2</span>
+
+            <span class="s1">overlapping </span><span class="s2">= </span><span class="s3">0</span>
+            <span class="s0">while </span><span class="s1">overlapping </span><span class="s2">&lt; </span><span class="s1">min_count</span><span class="s2">:</span>
+                <span class="s1">a</span><span class="s2">, </span><span class="s1">b </span><span class="s2">= </span><span class="s1">next</span><span class="s2">(</span><span class="s1">it</span><span class="s2">)</span>
+
+                <span class="s1">a_orig </span><span class="s2">= </span><span class="s1">a</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+                <span class="s1">b_orig </span><span class="s2">= </span><span class="s1">b</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+
+                <span class="s0">if </span><span class="s1">get_out_axis_size </span><span class="s0">is None</span><span class="s2">:</span>
+                    <span class="s1">assert_copy_equivalent</span><span class="s2">(</span><span class="s1">operation</span><span class="s2">, [</span><span class="s1">a</span><span class="s2">], </span><span class="s1">out</span><span class="s2">=</span><span class="s1">b</span><span class="s2">)</span>
+
+                    <span class="s0">if </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">):</span>
+                        <span class="s1">overlapping </span><span class="s2">+= </span><span class="s3">1</span>
+                <span class="s0">else</span><span class="s2">:</span>
+                    <span class="s0">for </span><span class="s1">axis </span><span class="s0">in </span><span class="s1">itertools</span><span class="s2">.</span><span class="s1">chain</span><span class="s2">(</span><span class="s1">range</span><span class="s2">(</span><span class="s1">ndim</span><span class="s2">), [</span><span class="s0">None</span><span class="s2">]):</span>
+                        <span class="s1">a</span><span class="s2">[...] = </span><span class="s1">a_orig</span>
+                        <span class="s1">b</span><span class="s2">[...] = </span><span class="s1">b_orig</span>
+
+                        <span class="s5"># Determine size for reduction axis (None if scalar)</span>
+                        <span class="s1">outsize</span><span class="s2">, </span><span class="s1">scalarize </span><span class="s2">= </span><span class="s1">get_out_axis_size</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">axis</span><span class="s2">)</span>
+                        <span class="s0">if </span><span class="s1">outsize </span><span class="s2">== </span><span class="s6">'skip'</span><span class="s2">:</span>
+                            <span class="s0">continue</span>
+
+                        <span class="s5"># Slice b to get an output array of the correct size</span>
+                        <span class="s1">sl </span><span class="s2">= [</span><span class="s1">slice</span><span class="s2">(</span><span class="s0">None</span><span class="s2">)] * </span><span class="s1">ndim</span>
+                        <span class="s0">if </span><span class="s1">axis </span><span class="s0">is None</span><span class="s2">:</span>
+                            <span class="s0">if </span><span class="s1">outsize </span><span class="s0">is None</span><span class="s2">:</span>
+                                <span class="s1">sl </span><span class="s2">= [</span><span class="s1">slice</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s3">1</span><span class="s2">)] + [</span><span class="s3">0</span><span class="s2">] * (</span><span class="s1">ndim </span><span class="s2">- </span><span class="s3">1</span><span class="s2">)</span>
+                            <span class="s0">else</span><span class="s2">:</span>
+                                <span class="s1">sl </span><span class="s2">= [</span><span class="s1">slice</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s1">outsize</span><span class="s2">)] + [</span><span class="s3">0</span><span class="s2">] * (</span><span class="s1">ndim </span><span class="s2">- </span><span class="s3">1</span><span class="s2">)</span>
+                        <span class="s0">elif </span><span class="s1">outsize </span><span class="s0">is None</span><span class="s2">:</span>
+                            <span class="s1">k </span><span class="s2">= </span><span class="s1">b</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s1">axis</span><span class="s2">] // </span><span class="s3">2</span>
+                            <span class="s0">if </span><span class="s1">ndim </span><span class="s2">== </span><span class="s3">1</span><span class="s2">:</span>
+                                <span class="s1">sl</span><span class="s2">[</span><span class="s1">axis</span><span class="s2">] = </span><span class="s1">slice</span><span class="s2">(</span><span class="s1">k</span><span class="s2">, </span><span class="s1">k </span><span class="s2">+ </span><span class="s3">1</span><span class="s2">)</span>
+                            <span class="s0">else</span><span class="s2">:</span>
+                                <span class="s1">sl</span><span class="s2">[</span><span class="s1">axis</span><span class="s2">] = </span><span class="s1">k</span>
+                        <span class="s0">else</span><span class="s2">:</span>
+                            <span class="s0">assert </span><span class="s1">b</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s1">axis</span><span class="s2">] &gt;= </span><span class="s1">outsize</span>
+                            <span class="s1">sl</span><span class="s2">[</span><span class="s1">axis</span><span class="s2">] = </span><span class="s1">slice</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s1">outsize</span><span class="s2">)</span>
+                        <span class="s1">b_out </span><span class="s2">= </span><span class="s1">b</span><span class="s2">[</span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">sl</span><span class="s2">)]</span>
+
+                        <span class="s0">if </span><span class="s1">scalarize</span><span class="s2">:</span>
+                            <span class="s1">b_out </span><span class="s2">= </span><span class="s1">b_out</span><span class="s2">.</span><span class="s1">reshape</span><span class="s2">([])</span>
+
+                        <span class="s0">if </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b_out</span><span class="s2">):</span>
+                            <span class="s1">overlapping </span><span class="s2">+= </span><span class="s3">1</span>
+
+                        <span class="s5"># Check result</span>
+                        <span class="s1">assert_copy_equivalent</span><span class="s2">(</span><span class="s1">operation</span><span class="s2">, [</span><span class="s1">a</span><span class="s2">], </span><span class="s1">out</span><span class="s2">=</span><span class="s1">b_out</span><span class="s2">, </span><span class="s1">axis</span><span class="s2">=</span><span class="s1">axis</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">slow</span>
+    <span class="s0">def </span><span class="s1">test_unary_ufunc_call_fuzz</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">check_unary_fuzz</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">invert</span><span class="s2">, </span><span class="s0">None</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">slow</span>
+    <span class="s0">def </span><span class="s1">test_unary_ufunc_call_complex_fuzz</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># Complex typically has a smaller alignment than itemsize</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">check_unary_fuzz</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">negative</span><span class="s2">, </span><span class="s0">None</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">complex128</span><span class="s2">, </span><span class="s1">count</span><span class="s2">=</span><span class="s3">500</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_binary_ufunc_accumulate_fuzz</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">get_out_axis_size</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">axis</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s1">axis </span><span class="s0">is None</span><span class="s2">:</span>
+                <span class="s0">if </span><span class="s1">a</span><span class="s2">.</span><span class="s1">ndim </span><span class="s2">== </span><span class="s3">1</span><span class="s2">:</span>
+                    <span class="s0">return </span><span class="s1">a</span><span class="s2">.</span><span class="s1">size</span><span class="s2">, </span><span class="s0">False</span>
+                <span class="s0">else</span><span class="s2">:</span>
+                    <span class="s0">return </span><span class="s6">'skip'</span><span class="s2">, </span><span class="s0">False  </span><span class="s5"># accumulate doesn't support this</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s0">return </span><span class="s1">a</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s1">axis</span><span class="s2">], </span><span class="s0">False</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">check_unary_fuzz</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">add</span><span class="s2">.</span><span class="s1">accumulate</span><span class="s2">, </span><span class="s1">get_out_axis_size</span><span class="s2">,</span>
+                              <span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">, </span><span class="s1">count</span><span class="s2">=</span><span class="s3">500</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_binary_ufunc_reduce_fuzz</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">get_out_axis_size</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">axis</span><span class="s2">):</span>
+            <span class="s0">return None</span><span class="s2">, (</span><span class="s1">axis </span><span class="s0">is None or </span><span class="s1">a</span><span class="s2">.</span><span class="s1">ndim </span><span class="s2">== </span><span class="s3">1</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">check_unary_fuzz</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">add</span><span class="s2">.</span><span class="s1">reduce</span><span class="s2">, </span><span class="s1">get_out_axis_size</span><span class="s2">,</span>
+                              <span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">, </span><span class="s1">count</span><span class="s2">=</span><span class="s3">500</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_binary_ufunc_reduceat_fuzz</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">get_out_axis_size</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">axis</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s1">axis </span><span class="s0">is None</span><span class="s2">:</span>
+                <span class="s0">if </span><span class="s1">a</span><span class="s2">.</span><span class="s1">ndim </span><span class="s2">== </span><span class="s3">1</span><span class="s2">:</span>
+                    <span class="s0">return </span><span class="s1">a</span><span class="s2">.</span><span class="s1">size</span><span class="s2">, </span><span class="s0">False</span>
+                <span class="s0">else</span><span class="s2">:</span>
+                    <span class="s0">return </span><span class="s6">'skip'</span><span class="s2">, </span><span class="s0">False  </span><span class="s5"># reduceat doesn't support this</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s0">return </span><span class="s1">a</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s1">axis</span><span class="s2">], </span><span class="s0">False</span>
+
+        <span class="s0">def </span><span class="s1">do_reduceat</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">out</span><span class="s2">, </span><span class="s1">axis</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s1">axis </span><span class="s0">is None</span><span class="s2">:</span>
+                <span class="s1">size </span><span class="s2">= </span><span class="s1">len</span><span class="s2">(</span><span class="s1">a</span><span class="s2">)</span>
+                <span class="s1">step </span><span class="s2">= </span><span class="s1">size </span><span class="s2">// </span><span class="s1">len</span><span class="s2">(</span><span class="s1">out</span><span class="s2">)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">size </span><span class="s2">= </span><span class="s1">a</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s1">axis</span><span class="s2">]</span>
+                <span class="s1">step </span><span class="s2">= </span><span class="s1">a</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s1">axis</span><span class="s2">] // </span><span class="s1">out</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s1">axis</span><span class="s2">]</span>
+            <span class="s1">idx </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s1">size</span><span class="s2">, </span><span class="s1">step</span><span class="s2">)</span>
+            <span class="s0">return </span><span class="s1">np</span><span class="s2">.</span><span class="s1">add</span><span class="s2">.</span><span class="s1">reduceat</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">idx</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">out</span><span class="s2">, </span><span class="s1">axis</span><span class="s2">=</span><span class="s1">axis</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">check_unary_fuzz</span><span class="s2">(</span><span class="s1">do_reduceat</span><span class="s2">, </span><span class="s1">get_out_axis_size</span><span class="s2">,</span>
+                              <span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">, </span><span class="s1">count</span><span class="s2">=</span><span class="s3">500</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_binary_ufunc_reduceat_manual</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">check</span><span class="s2">(</span><span class="s1">ufunc</span><span class="s2">, </span><span class="s1">a</span><span class="s2">, </span><span class="s1">ind</span><span class="s2">, </span><span class="s1">out</span><span class="s2">):</span>
+            <span class="s1">c1 </span><span class="s2">= </span><span class="s1">ufunc</span><span class="s2">.</span><span class="s1">reduceat</span><span class="s2">(</span><span class="s1">a</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">(), </span><span class="s1">ind</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">(), </span><span class="s1">out</span><span class="s2">=</span><span class="s1">out</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">())</span>
+            <span class="s1">c2 </span><span class="s2">= </span><span class="s1">ufunc</span><span class="s2">.</span><span class="s1">reduceat</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">ind</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">out</span><span class="s2">)</span>
+            <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">c1</span><span class="s2">, </span><span class="s1">c2</span><span class="s2">)</span>
+
+        <span class="s5"># Exactly same input/output arrays</span>
+        <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s3">10000</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">)</span>
+        <span class="s1">check</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">add</span><span class="s2">, </span><span class="s1">a</span><span class="s2">, </span><span class="s1">a</span><span class="s2">[::-</span><span class="s3">1</span><span class="s2">].</span><span class="s1">copy</span><span class="s2">(), </span><span class="s1">a</span><span class="s2">)</span>
+
+        <span class="s5"># Overlap with index</span>
+        <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s3">10000</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">)</span>
+        <span class="s1">check</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">add</span><span class="s2">, </span><span class="s1">a</span><span class="s2">, </span><span class="s1">a</span><span class="s2">[::-</span><span class="s3">1</span><span class="s2">], </span><span class="s1">a</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">slow</span>
+    <span class="s0">def </span><span class="s1">test_unary_gufunc_fuzz</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">shapes </span><span class="s2">= [</span><span class="s3">7</span><span class="s2">, </span><span class="s3">13</span><span class="s2">, </span><span class="s3">8</span><span class="s2">, </span><span class="s3">21</span><span class="s2">, </span><span class="s3">29</span><span class="s2">, </span><span class="s3">32</span><span class="s2">]</span>
+        <span class="s1">gufunc </span><span class="s2">= </span><span class="s1">_umath_tests</span><span class="s2">.</span><span class="s1">euclidean_pdist</span>
+
+        <span class="s1">rng </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">RandomState</span><span class="s2">(</span><span class="s3">1234</span><span class="s2">)</span>
+
+        <span class="s0">for </span><span class="s1">ndim </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s3">2</span><span class="s2">, </span><span class="s3">6</span><span class="s2">):</span>
+            <span class="s1">x </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">rand</span><span class="s2">(*</span><span class="s1">shapes</span><span class="s2">[:</span><span class="s1">ndim</span><span class="s2">])</span>
+
+            <span class="s1">it </span><span class="s2">= </span><span class="s1">iter_random_view_pairs</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">same_steps</span><span class="s2">=</span><span class="s0">False</span><span class="s2">, </span><span class="s1">equal_size</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+            <span class="s1">min_count </span><span class="s2">= </span><span class="s3">500 </span><span class="s2">// (</span><span class="s1">ndim </span><span class="s2">+ </span><span class="s3">1</span><span class="s2">)**</span><span class="s3">2</span>
+
+            <span class="s1">overlapping </span><span class="s2">= </span><span class="s3">0</span>
+            <span class="s0">while </span><span class="s1">overlapping </span><span class="s2">&lt; </span><span class="s1">min_count</span><span class="s2">:</span>
+                <span class="s1">a</span><span class="s2">, </span><span class="s1">b </span><span class="s2">= </span><span class="s1">next</span><span class="s2">(</span><span class="s1">it</span><span class="s2">)</span>
+
+                <span class="s0">if </span><span class="s1">min</span><span class="s2">(</span><span class="s1">a</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[-</span><span class="s3">2</span><span class="s2">:]) &lt; </span><span class="s3">2 </span><span class="s0">or </span><span class="s1">min</span><span class="s2">(</span><span class="s1">b</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[-</span><span class="s3">2</span><span class="s2">:]) &lt; </span><span class="s3">2 </span><span class="s0">or </span><span class="s1">a</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[-</span><span class="s3">1</span><span class="s2">] &lt; </span><span class="s3">2</span><span class="s2">:</span>
+                    <span class="s0">continue</span>
+
+                <span class="s5"># Ensure the shapes are so that euclidean_pdist is happy</span>
+                <span class="s0">if </span><span class="s1">b</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[-</span><span class="s3">1</span><span class="s2">] &gt; </span><span class="s1">b</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[-</span><span class="s3">2</span><span class="s2">]:</span>
+                    <span class="s1">b </span><span class="s2">= </span><span class="s1">b</span><span class="s2">[..., </span><span class="s3">0</span><span class="s2">, :]</span>
+                <span class="s0">else</span><span class="s2">:</span>
+                    <span class="s1">b </span><span class="s2">= </span><span class="s1">b</span><span class="s2">[..., :, </span><span class="s3">0</span><span class="s2">]</span>
+
+                <span class="s1">n </span><span class="s2">= </span><span class="s1">a</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[-</span><span class="s3">2</span><span class="s2">]</span>
+                <span class="s1">p </span><span class="s2">= </span><span class="s1">n </span><span class="s2">* (</span><span class="s1">n </span><span class="s2">- </span><span class="s3">1</span><span class="s2">) // </span><span class="s3">2</span>
+                <span class="s0">if </span><span class="s1">p </span><span class="s2">&lt;= </span><span class="s1">b</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[-</span><span class="s3">1</span><span class="s2">] </span><span class="s0">and </span><span class="s1">p </span><span class="s2">&gt; </span><span class="s3">0</span><span class="s2">:</span>
+                    <span class="s1">b </span><span class="s2">= </span><span class="s1">b</span><span class="s2">[..., :</span><span class="s1">p</span><span class="s2">]</span>
+                <span class="s0">else</span><span class="s2">:</span>
+                    <span class="s1">n </span><span class="s2">= </span><span class="s1">max</span><span class="s2">(</span><span class="s3">2</span><span class="s2">, </span><span class="s1">int</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">sqrt</span><span class="s2">(</span><span class="s1">b</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[-</span><span class="s3">1</span><span class="s2">])) // </span><span class="s3">2</span><span class="s2">)</span>
+                    <span class="s1">p </span><span class="s2">= </span><span class="s1">n </span><span class="s2">* (</span><span class="s1">n </span><span class="s2">- </span><span class="s3">1</span><span class="s2">) // </span><span class="s3">2</span>
+                    <span class="s1">a </span><span class="s2">= </span><span class="s1">a</span><span class="s2">[..., :</span><span class="s1">n</span><span class="s2">, :]</span>
+                    <span class="s1">b </span><span class="s2">= </span><span class="s1">b</span><span class="s2">[..., :</span><span class="s1">p</span><span class="s2">]</span>
+
+                <span class="s5"># Call</span>
+                <span class="s0">if </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">):</span>
+                    <span class="s1">overlapping </span><span class="s2">+= </span><span class="s3">1</span>
+
+                <span class="s0">with </span><span class="s1">np</span><span class="s2">.</span><span class="s1">errstate</span><span class="s2">(</span><span class="s1">over</span><span class="s2">=</span><span class="s6">'ignore'</span><span class="s2">, </span><span class="s1">invalid</span><span class="s2">=</span><span class="s6">'ignore'</span><span class="s2">):</span>
+                    <span class="s1">assert_copy_equivalent</span><span class="s2">(</span><span class="s1">gufunc</span><span class="s2">, [</span><span class="s1">a</span><span class="s2">], </span><span class="s1">out</span><span class="s2">=</span><span class="s1">b</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_ufunc_at_manual</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">check</span><span class="s2">(</span><span class="s1">ufunc</span><span class="s2">, </span><span class="s1">a</span><span class="s2">, </span><span class="s1">ind</span><span class="s2">, </span><span class="s1">b</span><span class="s2">=</span><span class="s0">None</span><span class="s2">):</span>
+            <span class="s1">a0 </span><span class="s2">= </span><span class="s1">a</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+            <span class="s0">if </span><span class="s1">b </span><span class="s0">is None</span><span class="s2">:</span>
+                <span class="s1">ufunc</span><span class="s2">.</span><span class="s1">at</span><span class="s2">(</span><span class="s1">a0</span><span class="s2">, </span><span class="s1">ind</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">())</span>
+                <span class="s1">c1 </span><span class="s2">= </span><span class="s1">a0</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+                <span class="s1">ufunc</span><span class="s2">.</span><span class="s1">at</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">ind</span><span class="s2">)</span>
+                <span class="s1">c2 </span><span class="s2">= </span><span class="s1">a</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">ufunc</span><span class="s2">.</span><span class="s1">at</span><span class="s2">(</span><span class="s1">a0</span><span class="s2">, </span><span class="s1">ind</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">(), </span><span class="s1">b</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">())</span>
+                <span class="s1">c1 </span><span class="s2">= </span><span class="s1">a0</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+                <span class="s1">ufunc</span><span class="s2">.</span><span class="s1">at</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">ind</span><span class="s2">, </span><span class="s1">b</span><span class="s2">)</span>
+                <span class="s1">c2 </span><span class="s2">= </span><span class="s1">a</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+            <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">c1</span><span class="s2">, </span><span class="s1">c2</span><span class="s2">)</span>
+
+        <span class="s5"># Overlap with index</span>
+        <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s3">10000</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">)</span>
+        <span class="s1">check</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">invert</span><span class="s2">, </span><span class="s1">a</span><span class="s2">[::-</span><span class="s3">1</span><span class="s2">], </span><span class="s1">a</span><span class="s2">)</span>
+
+        <span class="s5"># Overlap with second data array</span>
+        <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s3">100</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">)</span>
+        <span class="s1">ind </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s3">100</span><span class="s2">, </span><span class="s3">2</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">)</span>
+        <span class="s1">check</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">add</span><span class="s2">, </span><span class="s1">a</span><span class="s2">, </span><span class="s1">ind</span><span class="s2">, </span><span class="s1">a</span><span class="s2">[</span><span class="s3">25</span><span class="s2">:</span><span class="s3">75</span><span class="s2">])</span>
+
+    <span class="s0">def </span><span class="s1">test_unary_ufunc_1d_manual</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># Exercise ufunc fast-paths (that avoid creation of an `np.nditer`)</span>
+
+        <span class="s0">def </span><span class="s1">check</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">):</span>
+            <span class="s1">a_orig </span><span class="s2">= </span><span class="s1">a</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+            <span class="s1">b_orig </span><span class="s2">= </span><span class="s1">b</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+
+            <span class="s1">b0 </span><span class="s2">= </span><span class="s1">b</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+            <span class="s1">c1 </span><span class="s2">= </span><span class="s1">ufunc</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">b0</span><span class="s2">)</span>
+            <span class="s1">c2 </span><span class="s2">= </span><span class="s1">ufunc</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">b</span><span class="s2">)</span>
+            <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">c1</span><span class="s2">, </span><span class="s1">c2</span><span class="s2">)</span>
+
+            <span class="s5"># Trigger &quot;fancy ufunc loop&quot; code path</span>
+            <span class="s1">mask </span><span class="s2">= </span><span class="s1">view_element_first_byte</span><span class="s2">(</span><span class="s1">b</span><span class="s2">).</span><span class="s1">view</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">bool</span><span class="s2">)</span>
+
+            <span class="s1">a</span><span class="s2">[...] = </span><span class="s1">a_orig</span>
+            <span class="s1">b</span><span class="s2">[...] = </span><span class="s1">b_orig</span>
+            <span class="s1">c1 </span><span class="s2">= </span><span class="s1">ufunc</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">b</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">(), </span><span class="s1">where</span><span class="s2">=</span><span class="s1">mask</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()).</span><span class="s1">copy</span><span class="s2">()</span>
+
+            <span class="s1">a</span><span class="s2">[...] = </span><span class="s1">a_orig</span>
+            <span class="s1">b</span><span class="s2">[...] = </span><span class="s1">b_orig</span>
+            <span class="s1">c2 </span><span class="s2">= </span><span class="s1">ufunc</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">b</span><span class="s2">, </span><span class="s1">where</span><span class="s2">=</span><span class="s1">mask</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()).</span><span class="s1">copy</span><span class="s2">()</span>
+
+            <span class="s5"># Also, mask overlapping with output</span>
+            <span class="s1">a</span><span class="s2">[...] = </span><span class="s1">a_orig</span>
+            <span class="s1">b</span><span class="s2">[...] = </span><span class="s1">b_orig</span>
+            <span class="s1">c3 </span><span class="s2">= </span><span class="s1">ufunc</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">b</span><span class="s2">, </span><span class="s1">where</span><span class="s2">=</span><span class="s1">mask</span><span class="s2">).</span><span class="s1">copy</span><span class="s2">()</span>
+
+            <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">c1</span><span class="s2">, </span><span class="s1">c2</span><span class="s2">)</span>
+            <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">c1</span><span class="s2">, </span><span class="s1">c3</span><span class="s2">)</span>
+
+        <span class="s1">dtypes </span><span class="s2">= [</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int8</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int32</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float32</span><span class="s2">,</span>
+                  <span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">complex64</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">complex128</span><span class="s2">]</span>
+        <span class="s1">dtypes </span><span class="s2">= [</span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s1">x</span><span class="s2">) </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">dtypes</span><span class="s2">]</span>
+
+        <span class="s0">for </span><span class="s1">dtype </span><span class="s0">in </span><span class="s1">dtypes</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">np</span><span class="s2">.</span><span class="s1">issubdtype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">integer</span><span class="s2">):</span>
+                <span class="s1">ufunc </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">invert</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">ufunc </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">reciprocal</span>
+
+            <span class="s1">n </span><span class="s2">= </span><span class="s3">1000</span>
+            <span class="s1">k </span><span class="s2">= </span><span class="s3">10</span>
+            <span class="s1">indices </span><span class="s2">= [</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">index_exp</span><span class="s2">[:</span><span class="s1">n</span><span class="s2">],</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">index_exp</span><span class="s2">[</span><span class="s1">k</span><span class="s2">:</span><span class="s1">k </span><span class="s2">+ </span><span class="s1">n</span><span class="s2">],</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">index_exp</span><span class="s2">[</span><span class="s1">n </span><span class="s2">- </span><span class="s3">1</span><span class="s2">::-</span><span class="s3">1</span><span class="s2">],</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">index_exp</span><span class="s2">[</span><span class="s1">k </span><span class="s2">+ </span><span class="s1">n </span><span class="s2">- </span><span class="s3">1</span><span class="s2">:</span><span class="s1">k </span><span class="s2">- </span><span class="s3">1</span><span class="s2">:-</span><span class="s3">1</span><span class="s2">],</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">index_exp</span><span class="s2">[:</span><span class="s3">2 </span><span class="s2">* </span><span class="s1">n</span><span class="s2">:</span><span class="s3">2</span><span class="s2">],</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">index_exp</span><span class="s2">[</span><span class="s1">k</span><span class="s2">:</span><span class="s1">k </span><span class="s2">+ </span><span class="s3">2 </span><span class="s2">* </span><span class="s1">n</span><span class="s2">:</span><span class="s3">2</span><span class="s2">],</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">index_exp</span><span class="s2">[</span><span class="s3">2 </span><span class="s2">* </span><span class="s1">n </span><span class="s2">- </span><span class="s3">1</span><span class="s2">::-</span><span class="s3">2</span><span class="s2">],</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">index_exp</span><span class="s2">[</span><span class="s1">k </span><span class="s2">+ </span><span class="s3">2 </span><span class="s2">* </span><span class="s1">n </span><span class="s2">- </span><span class="s3">1</span><span class="s2">:</span><span class="s1">k </span><span class="s2">- </span><span class="s3">1</span><span class="s2">:-</span><span class="s3">2</span><span class="s2">],</span>
+            <span class="s2">]</span>
+
+            <span class="s0">for </span><span class="s1">xi</span><span class="s2">, </span><span class="s1">yi </span><span class="s0">in </span><span class="s1">itertools</span><span class="s2">.</span><span class="s1">product</span><span class="s2">(</span><span class="s1">indices</span><span class="s2">, </span><span class="s1">indices</span><span class="s2">):</span>
+                <span class="s1">v </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s3">1</span><span class="s2">, </span><span class="s3">1 </span><span class="s2">+ </span><span class="s1">n </span><span class="s2">* </span><span class="s3">2 </span><span class="s2">+ </span><span class="s1">k</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+                <span class="s1">x </span><span class="s2">= </span><span class="s1">v</span><span class="s2">[</span><span class="s1">xi</span><span class="s2">]</span>
+                <span class="s1">y </span><span class="s2">= </span><span class="s1">v</span><span class="s2">[</span><span class="s1">yi</span><span class="s2">]</span>
+
+                <span class="s0">with </span><span class="s1">np</span><span class="s2">.</span><span class="s1">errstate</span><span class="s2">(</span><span class="s1">all</span><span class="s2">=</span><span class="s6">'ignore'</span><span class="s2">):</span>
+                    <span class="s1">check</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">y</span><span class="s2">)</span>
+
+                    <span class="s5"># Scalar cases</span>
+                    <span class="s1">check</span><span class="s2">(</span><span class="s1">x</span><span class="s2">[:</span><span class="s3">1</span><span class="s2">], </span><span class="s1">y</span><span class="s2">)</span>
+                    <span class="s1">check</span><span class="s2">(</span><span class="s1">x</span><span class="s2">[-</span><span class="s3">1</span><span class="s2">:], </span><span class="s1">y</span><span class="s2">)</span>
+                    <span class="s1">check</span><span class="s2">(</span><span class="s1">x</span><span class="s2">[:</span><span class="s3">1</span><span class="s2">].</span><span class="s1">reshape</span><span class="s2">([]), </span><span class="s1">y</span><span class="s2">)</span>
+                    <span class="s1">check</span><span class="s2">(</span><span class="s1">x</span><span class="s2">[-</span><span class="s3">1</span><span class="s2">:].</span><span class="s1">reshape</span><span class="s2">([]), </span><span class="s1">y</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_unary_ufunc_where_same</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># Check behavior at wheremask overlap</span>
+        <span class="s1">ufunc </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">invert</span>
+
+        <span class="s0">def </span><span class="s1">check</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">out</span><span class="s2">, </span><span class="s1">mask</span><span class="s2">):</span>
+            <span class="s1">c1 </span><span class="s2">= </span><span class="s1">ufunc</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">out</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">(), </span><span class="s1">where</span><span class="s2">=</span><span class="s1">mask</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">())</span>
+            <span class="s1">c2 </span><span class="s2">= </span><span class="s1">ufunc</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">out</span><span class="s2">, </span><span class="s1">where</span><span class="s2">=</span><span class="s1">mask</span><span class="s2">)</span>
+            <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">c1</span><span class="s2">, </span><span class="s1">c2</span><span class="s2">)</span>
+
+        <span class="s5"># Check behavior with same input and output arrays</span>
+        <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s3">100</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">bool</span><span class="s2">)</span>
+        <span class="s1">check</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">x</span><span class="s2">, </span><span class="s1">x</span><span class="s2">)</span>
+        <span class="s1">check</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">x</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">(), </span><span class="s1">x</span><span class="s2">)</span>
+        <span class="s1">check</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">x</span><span class="s2">, </span><span class="s1">x</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">())</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">slow</span>
+    <span class="s0">def </span><span class="s1">test_binary_ufunc_1d_manual</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">ufunc </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">add</span>
+
+        <span class="s0">def </span><span class="s1">check</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">c</span><span class="s2">):</span>
+            <span class="s1">c0 </span><span class="s2">= </span><span class="s1">c</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+            <span class="s1">c1 </span><span class="s2">= </span><span class="s1">ufunc</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">c0</span><span class="s2">)</span>
+            <span class="s1">c2 </span><span class="s2">= </span><span class="s1">ufunc</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">c</span><span class="s2">)</span>
+            <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">c1</span><span class="s2">, </span><span class="s1">c2</span><span class="s2">)</span>
+
+        <span class="s0">for </span><span class="s1">dtype </span><span class="s0">in </span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int8</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int32</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">,</span>
+                      <span class="s1">np</span><span class="s2">.</span><span class="s1">float32</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">complex64</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">complex128</span><span class="s2">]:</span>
+            <span class="s5"># Check different data dependency orders</span>
+
+            <span class="s1">n </span><span class="s2">= </span><span class="s3">1000</span>
+            <span class="s1">k </span><span class="s2">= </span><span class="s3">10</span>
+
+            <span class="s1">indices </span><span class="s2">= []</span>
+            <span class="s0">for </span><span class="s1">p </span><span class="s0">in </span><span class="s2">[</span><span class="s3">1</span><span class="s2">, </span><span class="s3">2</span><span class="s2">]:</span>
+                <span class="s1">indices</span><span class="s2">.</span><span class="s1">extend</span><span class="s2">([</span>
+                    <span class="s1">np</span><span class="s2">.</span><span class="s1">index_exp</span><span class="s2">[:</span><span class="s1">p </span><span class="s2">* </span><span class="s1">n</span><span class="s2">:</span><span class="s1">p</span><span class="s2">],</span>
+                    <span class="s1">np</span><span class="s2">.</span><span class="s1">index_exp</span><span class="s2">[</span><span class="s1">k</span><span class="s2">:</span><span class="s1">k </span><span class="s2">+ </span><span class="s1">p </span><span class="s2">* </span><span class="s1">n</span><span class="s2">:</span><span class="s1">p</span><span class="s2">],</span>
+                    <span class="s1">np</span><span class="s2">.</span><span class="s1">index_exp</span><span class="s2">[</span><span class="s1">p </span><span class="s2">* </span><span class="s1">n </span><span class="s2">- </span><span class="s3">1</span><span class="s2">::-</span><span class="s1">p</span><span class="s2">],</span>
+                    <span class="s1">np</span><span class="s2">.</span><span class="s1">index_exp</span><span class="s2">[</span><span class="s1">k </span><span class="s2">+ </span><span class="s1">p </span><span class="s2">* </span><span class="s1">n </span><span class="s2">- </span><span class="s3">1</span><span class="s2">:</span><span class="s1">k </span><span class="s2">- </span><span class="s3">1</span><span class="s2">:-</span><span class="s1">p</span><span class="s2">],</span>
+                <span class="s2">])</span>
+
+            <span class="s0">for </span><span class="s1">x</span><span class="s2">, </span><span class="s1">y</span><span class="s2">, </span><span class="s1">z </span><span class="s0">in </span><span class="s1">itertools</span><span class="s2">.</span><span class="s1">product</span><span class="s2">(</span><span class="s1">indices</span><span class="s2">, </span><span class="s1">indices</span><span class="s2">, </span><span class="s1">indices</span><span class="s2">):</span>
+                <span class="s1">v </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s3">6 </span><span class="s2">* </span><span class="s1">n</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+                <span class="s1">x </span><span class="s2">= </span><span class="s1">v</span><span class="s2">[</span><span class="s1">x</span><span class="s2">]</span>
+                <span class="s1">y </span><span class="s2">= </span><span class="s1">v</span><span class="s2">[</span><span class="s1">y</span><span class="s2">]</span>
+                <span class="s1">z </span><span class="s2">= </span><span class="s1">v</span><span class="s2">[</span><span class="s1">z</span><span class="s2">]</span>
+
+                <span class="s1">check</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">y</span><span class="s2">, </span><span class="s1">z</span><span class="s2">)</span>
+
+                <span class="s5"># Scalar cases</span>
+                <span class="s1">check</span><span class="s2">(</span><span class="s1">x</span><span class="s2">[:</span><span class="s3">1</span><span class="s2">], </span><span class="s1">y</span><span class="s2">, </span><span class="s1">z</span><span class="s2">)</span>
+                <span class="s1">check</span><span class="s2">(</span><span class="s1">x</span><span class="s2">[-</span><span class="s3">1</span><span class="s2">:], </span><span class="s1">y</span><span class="s2">, </span><span class="s1">z</span><span class="s2">)</span>
+                <span class="s1">check</span><span class="s2">(</span><span class="s1">x</span><span class="s2">[:</span><span class="s3">1</span><span class="s2">].</span><span class="s1">reshape</span><span class="s2">([]), </span><span class="s1">y</span><span class="s2">, </span><span class="s1">z</span><span class="s2">)</span>
+                <span class="s1">check</span><span class="s2">(</span><span class="s1">x</span><span class="s2">[-</span><span class="s3">1</span><span class="s2">:].</span><span class="s1">reshape</span><span class="s2">([]), </span><span class="s1">y</span><span class="s2">, </span><span class="s1">z</span><span class="s2">)</span>
+                <span class="s1">check</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">y</span><span class="s2">[:</span><span class="s3">1</span><span class="s2">], </span><span class="s1">z</span><span class="s2">)</span>
+                <span class="s1">check</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">y</span><span class="s2">[-</span><span class="s3">1</span><span class="s2">:], </span><span class="s1">z</span><span class="s2">)</span>
+                <span class="s1">check</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">y</span><span class="s2">[:</span><span class="s3">1</span><span class="s2">].</span><span class="s1">reshape</span><span class="s2">([]), </span><span class="s1">z</span><span class="s2">)</span>
+                <span class="s1">check</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">y</span><span class="s2">[-</span><span class="s3">1</span><span class="s2">:].</span><span class="s1">reshape</span><span class="s2">([]), </span><span class="s1">z</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_inplace_op_simple_manual</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">rng </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">RandomState</span><span class="s2">(</span><span class="s3">1234</span><span class="s2">)</span>
+        <span class="s1">x </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">rand</span><span class="s2">(</span><span class="s3">200</span><span class="s2">, </span><span class="s3">200</span><span class="s2">)  </span><span class="s5"># bigger than bufsize</span>
+
+        <span class="s1">x </span><span class="s2">+= </span><span class="s1">x</span><span class="s2">.</span><span class="s1">T</span>
+        <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">x </span><span class="s2">- </span><span class="s1">x</span><span class="s2">.</span><span class="s1">T</span><span class="s2">, </span><span class="s3">0</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

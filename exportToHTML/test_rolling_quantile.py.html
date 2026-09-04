@@ -1,0 +1,197 @@
+<html>
+<head>
+<title>test_rolling_quantile.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #2aacb8;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_rolling_quantile.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">functools </span><span class="s0">import </span><span class="s1">partial</span>
+
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">from </span><span class="s1">pandas </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">DataFrame</span><span class="s2">,</span>
+    <span class="s1">Series</span><span class="s2">,</span>
+    <span class="s1">concat</span><span class="s2">,</span>
+    <span class="s1">isna</span><span class="s2">,</span>
+    <span class="s1">notna</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">import </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_testing </span><span class="s0">as </span><span class="s1">tm</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">tseries </span><span class="s0">import </span><span class="s1">offsets</span>
+
+
+<span class="s0">def </span><span class="s1">scoreatpercentile</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">per</span><span class="s2">):</span>
+    <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">sort</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">axis</span><span class="s2">=</span><span class="s3">0</span><span class="s2">)</span>
+
+    <span class="s1">idx </span><span class="s2">= </span><span class="s1">int</span><span class="s2">(</span><span class="s1">per </span><span class="s2">/ </span><span class="s3">1.0 </span><span class="s2">* (</span><span class="s1">values</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s3">0</span><span class="s2">] - </span><span class="s3">1</span><span class="s2">))</span>
+
+    <span class="s0">if </span><span class="s1">idx </span><span class="s2">== </span><span class="s1">values</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s3">0</span><span class="s2">] - </span><span class="s3">1</span><span class="s2">:</span>
+        <span class="s1">retval </span><span class="s2">= </span><span class="s1">values</span><span class="s2">[-</span><span class="s3">1</span><span class="s2">]</span>
+
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">qlow </span><span class="s2">= </span><span class="s1">idx </span><span class="s2">/ (</span><span class="s1">values</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s3">0</span><span class="s2">] - </span><span class="s3">1</span><span class="s2">)</span>
+        <span class="s1">qhig </span><span class="s2">= (</span><span class="s1">idx </span><span class="s2">+ </span><span class="s3">1</span><span class="s2">) / (</span><span class="s1">values</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s3">0</span><span class="s2">] - </span><span class="s3">1</span><span class="s2">)</span>
+        <span class="s1">vlow </span><span class="s2">= </span><span class="s1">values</span><span class="s2">[</span><span class="s1">idx</span><span class="s2">]</span>
+        <span class="s1">vhig </span><span class="s2">= </span><span class="s1">values</span><span class="s2">[</span><span class="s1">idx </span><span class="s2">+ </span><span class="s3">1</span><span class="s2">]</span>
+        <span class="s1">retval </span><span class="s2">= </span><span class="s1">vlow </span><span class="s2">+ (</span><span class="s1">vhig </span><span class="s2">- </span><span class="s1">vlow</span><span class="s2">) * (</span><span class="s1">per </span><span class="s2">- </span><span class="s1">qlow</span><span class="s2">) / (</span><span class="s1">qhig </span><span class="s2">- </span><span class="s1">qlow</span><span class="s2">)</span>
+
+    <span class="s0">return </span><span class="s1">retval</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;q&quot;</span><span class="s2">, [</span><span class="s3">0.0</span><span class="s2">, </span><span class="s3">0.1</span><span class="s2">, </span><span class="s3">0.5</span><span class="s2">, </span><span class="s3">0.9</span><span class="s2">, </span><span class="s3">1.0</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_series</span><span class="s2">(</span><span class="s1">series</span><span class="s2">, </span><span class="s1">q</span><span class="s2">, </span><span class="s1">step</span><span class="s2">):</span>
+    <span class="s1">compare_func </span><span class="s2">= </span><span class="s1">partial</span><span class="s2">(</span><span class="s1">scoreatpercentile</span><span class="s2">, </span><span class="s1">per</span><span class="s2">=</span><span class="s1">q</span><span class="s2">)</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">series</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s3">50</span><span class="s2">, </span><span class="s1">step</span><span class="s2">=</span><span class="s1">step</span><span class="s2">).</span><span class="s1">quantile</span><span class="s2">(</span><span class="s1">q</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">Series</span><span class="s2">)</span>
+    <span class="s1">end </span><span class="s2">= </span><span class="s1">range</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s1">len</span><span class="s2">(</span><span class="s1">series</span><span class="s2">), </span><span class="s1">step </span><span class="s0">or </span><span class="s3">1</span><span class="s2">)[-</span><span class="s3">1</span><span class="s2">] + </span><span class="s3">1</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_almost_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[-</span><span class="s3">1</span><span class="s2">], </span><span class="s1">compare_func</span><span class="s2">(</span><span class="s1">series</span><span class="s2">[</span><span class="s1">end </span><span class="s2">- </span><span class="s3">50 </span><span class="s2">: </span><span class="s1">end</span><span class="s2">]))</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;q&quot;</span><span class="s2">, [</span><span class="s3">0.0</span><span class="s2">, </span><span class="s3">0.1</span><span class="s2">, </span><span class="s3">0.5</span><span class="s2">, </span><span class="s3">0.9</span><span class="s2">, </span><span class="s3">1.0</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_frame</span><span class="s2">(</span><span class="s1">raw</span><span class="s2">, </span><span class="s1">frame</span><span class="s2">, </span><span class="s1">q</span><span class="s2">, </span><span class="s1">step</span><span class="s2">):</span>
+    <span class="s1">compare_func </span><span class="s2">= </span><span class="s1">partial</span><span class="s2">(</span><span class="s1">scoreatpercentile</span><span class="s2">, </span><span class="s1">per</span><span class="s2">=</span><span class="s1">q</span><span class="s2">)</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">frame</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s3">50</span><span class="s2">, </span><span class="s1">step</span><span class="s2">=</span><span class="s1">step</span><span class="s2">).</span><span class="s1">quantile</span><span class="s2">(</span><span class="s1">q</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">DataFrame</span><span class="s2">)</span>
+    <span class="s1">end </span><span class="s2">= </span><span class="s1">range</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s1">len</span><span class="s2">(</span><span class="s1">frame</span><span class="s2">), </span><span class="s1">step </span><span class="s0">or </span><span class="s3">1</span><span class="s2">)[-</span><span class="s3">1</span><span class="s2">] + </span><span class="s3">1</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_series_equal</span><span class="s2">(</span>
+        <span class="s1">result</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[-</span><span class="s3">1</span><span class="s2">, :],</span>
+        <span class="s1">frame</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s1">end </span><span class="s2">- </span><span class="s3">50 </span><span class="s2">: </span><span class="s1">end</span><span class="s2">, :].</span><span class="s1">apply</span><span class="s2">(</span><span class="s1">compare_func</span><span class="s2">, </span><span class="s1">axis</span><span class="s2">=</span><span class="s3">0</span><span class="s2">, </span><span class="s1">raw</span><span class="s2">=</span><span class="s1">raw</span><span class="s2">),</span>
+        <span class="s1">check_names</span><span class="s2">=</span><span class="s0">False</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;q&quot;</span><span class="s2">, [</span><span class="s3">0.0</span><span class="s2">, </span><span class="s3">0.1</span><span class="s2">, </span><span class="s3">0.5</span><span class="s2">, </span><span class="s3">0.9</span><span class="s2">, </span><span class="s3">1.0</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_time_rule_series</span><span class="s2">(</span><span class="s1">series</span><span class="s2">, </span><span class="s1">q</span><span class="s2">):</span>
+    <span class="s1">compare_func </span><span class="s2">= </span><span class="s1">partial</span><span class="s2">(</span><span class="s1">scoreatpercentile</span><span class="s2">, </span><span class="s1">per</span><span class="s2">=</span><span class="s1">q</span><span class="s2">)</span>
+    <span class="s1">win </span><span class="s2">= </span><span class="s3">25</span>
+    <span class="s1">ser </span><span class="s2">= </span><span class="s1">series</span><span class="s2">[::</span><span class="s3">2</span><span class="s2">].</span><span class="s1">resample</span><span class="s2">(</span><span class="s4">&quot;B&quot;</span><span class="s2">).</span><span class="s1">mean</span><span class="s2">()</span>
+    <span class="s1">series_result </span><span class="s2">= </span><span class="s1">ser</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">window</span><span class="s2">=</span><span class="s1">win</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s3">10</span><span class="s2">).</span><span class="s1">quantile</span><span class="s2">(</span><span class="s1">q</span><span class="s2">)</span>
+    <span class="s1">last_date </span><span class="s2">= </span><span class="s1">series_result</span><span class="s2">.</span><span class="s1">index</span><span class="s2">[-</span><span class="s3">1</span><span class="s2">]</span>
+    <span class="s1">prev_date </span><span class="s2">= </span><span class="s1">last_date </span><span class="s2">- </span><span class="s3">24 </span><span class="s2">* </span><span class="s1">offsets</span><span class="s2">.</span><span class="s1">BDay</span><span class="s2">()</span>
+
+    <span class="s1">trunc_series </span><span class="s2">= </span><span class="s1">series</span><span class="s2">[::</span><span class="s3">2</span><span class="s2">].</span><span class="s1">truncate</span><span class="s2">(</span><span class="s1">prev_date</span><span class="s2">, </span><span class="s1">last_date</span><span class="s2">)</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_almost_equal</span><span class="s2">(</span><span class="s1">series_result</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[-</span><span class="s3">1</span><span class="s2">], </span><span class="s1">compare_func</span><span class="s2">(</span><span class="s1">trunc_series</span><span class="s2">))</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;q&quot;</span><span class="s2">, [</span><span class="s3">0.0</span><span class="s2">, </span><span class="s3">0.1</span><span class="s2">, </span><span class="s3">0.5</span><span class="s2">, </span><span class="s3">0.9</span><span class="s2">, </span><span class="s3">1.0</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_time_rule_frame</span><span class="s2">(</span><span class="s1">raw</span><span class="s2">, </span><span class="s1">frame</span><span class="s2">, </span><span class="s1">q</span><span class="s2">):</span>
+    <span class="s1">compare_func </span><span class="s2">= </span><span class="s1">partial</span><span class="s2">(</span><span class="s1">scoreatpercentile</span><span class="s2">, </span><span class="s1">per</span><span class="s2">=</span><span class="s1">q</span><span class="s2">)</span>
+    <span class="s1">win </span><span class="s2">= </span><span class="s3">25</span>
+    <span class="s1">frm </span><span class="s2">= </span><span class="s1">frame</span><span class="s2">[::</span><span class="s3">2</span><span class="s2">].</span><span class="s1">resample</span><span class="s2">(</span><span class="s4">&quot;B&quot;</span><span class="s2">).</span><span class="s1">mean</span><span class="s2">()</span>
+    <span class="s1">frame_result </span><span class="s2">= </span><span class="s1">frm</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">window</span><span class="s2">=</span><span class="s1">win</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s3">10</span><span class="s2">).</span><span class="s1">quantile</span><span class="s2">(</span><span class="s1">q</span><span class="s2">)</span>
+    <span class="s1">last_date </span><span class="s2">= </span><span class="s1">frame_result</span><span class="s2">.</span><span class="s1">index</span><span class="s2">[-</span><span class="s3">1</span><span class="s2">]</span>
+    <span class="s1">prev_date </span><span class="s2">= </span><span class="s1">last_date </span><span class="s2">- </span><span class="s3">24 </span><span class="s2">* </span><span class="s1">offsets</span><span class="s2">.</span><span class="s1">BDay</span><span class="s2">()</span>
+
+    <span class="s1">trunc_frame </span><span class="s2">= </span><span class="s1">frame</span><span class="s2">[::</span><span class="s3">2</span><span class="s2">].</span><span class="s1">truncate</span><span class="s2">(</span><span class="s1">prev_date</span><span class="s2">, </span><span class="s1">last_date</span><span class="s2">)</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_series_equal</span><span class="s2">(</span>
+        <span class="s1">frame_result</span><span class="s2">.</span><span class="s1">xs</span><span class="s2">(</span><span class="s1">last_date</span><span class="s2">),</span>
+        <span class="s1">trunc_frame</span><span class="s2">.</span><span class="s1">apply</span><span class="s2">(</span><span class="s1">compare_func</span><span class="s2">, </span><span class="s1">raw</span><span class="s2">=</span><span class="s1">raw</span><span class="s2">),</span>
+        <span class="s1">check_names</span><span class="s2">=</span><span class="s0">False</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;q&quot;</span><span class="s2">, [</span><span class="s3">0.0</span><span class="s2">, </span><span class="s3">0.1</span><span class="s2">, </span><span class="s3">0.5</span><span class="s2">, </span><span class="s3">0.9</span><span class="s2">, </span><span class="s3">1.0</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_nans</span><span class="s2">(</span><span class="s1">q</span><span class="s2">):</span>
+    <span class="s1">compare_func </span><span class="s2">= </span><span class="s1">partial</span><span class="s2">(</span><span class="s1">scoreatpercentile</span><span class="s2">, </span><span class="s1">per</span><span class="s2">=</span><span class="s1">q</span><span class="s2">)</span>
+    <span class="s1">obj </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">default_rng</span><span class="s2">(</span><span class="s3">2</span><span class="s2">).</span><span class="s1">standard_normal</span><span class="s2">(</span><span class="s3">50</span><span class="s2">))</span>
+    <span class="s1">obj</span><span class="s2">[:</span><span class="s3">10</span><span class="s2">] = </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span>
+    <span class="s1">obj</span><span class="s2">[-</span><span class="s3">10</span><span class="s2">:] = </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span>
+
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s3">50</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s3">30</span><span class="s2">).</span><span class="s1">quantile</span><span class="s2">(</span><span class="s1">q</span><span class="s2">)</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_almost_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[-</span><span class="s3">1</span><span class="s2">], </span><span class="s1">compare_func</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">[</span><span class="s3">10</span><span class="s2">:-</span><span class="s3">10</span><span class="s2">]))</span>
+
+    <span class="s5"># min_periods is working correctly</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s3">20</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s3">15</span><span class="s2">).</span><span class="s1">quantile</span><span class="s2">(</span><span class="s1">q</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">isna</span><span class="s2">(</span><span class="s1">result</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s3">23</span><span class="s2">])</span>
+    <span class="s0">assert not </span><span class="s1">isna</span><span class="s2">(</span><span class="s1">result</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s3">24</span><span class="s2">])</span>
+
+    <span class="s0">assert not </span><span class="s1">isna</span><span class="s2">(</span><span class="s1">result</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[-</span><span class="s3">6</span><span class="s2">])</span>
+    <span class="s0">assert </span><span class="s1">isna</span><span class="s2">(</span><span class="s1">result</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[-</span><span class="s3">5</span><span class="s2">])</span>
+
+    <span class="s1">obj2 </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">default_rng</span><span class="s2">(</span><span class="s3">2</span><span class="s2">).</span><span class="s1">standard_normal</span><span class="s2">(</span><span class="s3">20</span><span class="s2">))</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">obj2</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s3">10</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s3">5</span><span class="s2">).</span><span class="s1">quantile</span><span class="s2">(</span><span class="s1">q</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">isna</span><span class="s2">(</span><span class="s1">result</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s3">3</span><span class="s2">])</span>
+    <span class="s0">assert </span><span class="s1">notna</span><span class="s2">(</span><span class="s1">result</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s3">4</span><span class="s2">])</span>
+
+    <span class="s1">result0 </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s3">20</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s3">0</span><span class="s2">).</span><span class="s1">quantile</span><span class="s2">(</span><span class="s1">q</span><span class="s2">)</span>
+    <span class="s1">result1 </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s3">20</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s3">1</span><span class="s2">).</span><span class="s1">quantile</span><span class="s2">(</span><span class="s1">q</span><span class="s2">)</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_almost_equal</span><span class="s2">(</span><span class="s1">result0</span><span class="s2">, </span><span class="s1">result1</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;minp&quot;</span><span class="s2">, [</span><span class="s3">0</span><span class="s2">, </span><span class="s3">99</span><span class="s2">, </span><span class="s3">100</span><span class="s2">])</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;q&quot;</span><span class="s2">, [</span><span class="s3">0.0</span><span class="s2">, </span><span class="s3">0.1</span><span class="s2">, </span><span class="s3">0.5</span><span class="s2">, </span><span class="s3">0.9</span><span class="s2">, </span><span class="s3">1.0</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_min_periods</span><span class="s2">(</span><span class="s1">series</span><span class="s2">, </span><span class="s1">minp</span><span class="s2">, </span><span class="s1">q</span><span class="s2">, </span><span class="s1">step</span><span class="s2">):</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">series</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">series</span><span class="s2">) + </span><span class="s3">1</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">minp</span><span class="s2">, </span><span class="s1">step</span><span class="s2">=</span><span class="s1">step</span><span class="s2">).</span><span class="s1">quantile</span><span class="s2">(</span><span class="s1">q</span><span class="s2">)</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">series</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">series</span><span class="s2">), </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">minp</span><span class="s2">, </span><span class="s1">step</span><span class="s2">=</span><span class="s1">step</span><span class="s2">).</span><span class="s1">quantile</span><span class="s2">(</span><span class="s1">q</span><span class="s2">)</span>
+    <span class="s1">nan_mask </span><span class="s2">= </span><span class="s1">isna</span><span class="s2">(</span><span class="s1">result</span><span class="s2">)</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_series_equal</span><span class="s2">(</span><span class="s1">nan_mask</span><span class="s2">, </span><span class="s1">isna</span><span class="s2">(</span><span class="s1">expected</span><span class="s2">))</span>
+
+    <span class="s1">nan_mask </span><span class="s2">= ~</span><span class="s1">nan_mask</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_almost_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">[</span><span class="s1">nan_mask</span><span class="s2">], </span><span class="s1">expected</span><span class="s2">[</span><span class="s1">nan_mask</span><span class="s2">])</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;q&quot;</span><span class="s2">, [</span><span class="s3">0.0</span><span class="s2">, </span><span class="s3">0.1</span><span class="s2">, </span><span class="s3">0.5</span><span class="s2">, </span><span class="s3">0.9</span><span class="s2">, </span><span class="s3">1.0</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_center</span><span class="s2">(</span><span class="s1">q</span><span class="s2">):</span>
+    <span class="s1">obj </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">default_rng</span><span class="s2">(</span><span class="s3">2</span><span class="s2">).</span><span class="s1">standard_normal</span><span class="s2">(</span><span class="s3">50</span><span class="s2">))</span>
+    <span class="s1">obj</span><span class="s2">[:</span><span class="s3">10</span><span class="s2">] = </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span>
+    <span class="s1">obj</span><span class="s2">[-</span><span class="s3">10</span><span class="s2">:] = </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span>
+
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s3">20</span><span class="s2">, </span><span class="s1">center</span><span class="s2">=</span><span class="s0">True</span><span class="s2">).</span><span class="s1">quantile</span><span class="s2">(</span><span class="s1">q</span><span class="s2">)</span>
+    <span class="s1">expected </span><span class="s2">= (</span>
+        <span class="s1">concat</span><span class="s2">([</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">Series</span><span class="s2">([</span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">] * </span><span class="s3">9</span><span class="s2">)])</span>
+        <span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s3">20</span><span class="s2">)</span>
+        <span class="s2">.</span><span class="s1">quantile</span><span class="s2">(</span><span class="s1">q</span><span class="s2">)</span>
+        <span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s3">9</span><span class="s2">:]</span>
+        <span class="s2">.</span><span class="s1">reset_index</span><span class="s2">(</span><span class="s1">drop</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s2">)</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_series_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;q&quot;</span><span class="s2">, [</span><span class="s3">0.0</span><span class="s2">, </span><span class="s3">0.1</span><span class="s2">, </span><span class="s3">0.5</span><span class="s2">, </span><span class="s3">0.9</span><span class="s2">, </span><span class="s3">1.0</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_center_reindex_series</span><span class="s2">(</span><span class="s1">series</span><span class="s2">, </span><span class="s1">q</span><span class="s2">):</span>
+    <span class="s5"># shifter index</span>
+    <span class="s1">s </span><span class="s2">= [</span><span class="s4">f&quot;x</span><span class="s0">{</span><span class="s1">x</span><span class="s0">:</span><span class="s4">d</span><span class="s0">}</span><span class="s4">&quot; </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s3">12</span><span class="s2">)]</span>
+
+    <span class="s1">series_xp </span><span class="s2">= (</span>
+        <span class="s1">series</span><span class="s2">.</span><span class="s1">reindex</span><span class="s2">(</span><span class="s1">list</span><span class="s2">(</span><span class="s1">series</span><span class="s2">.</span><span class="s1">index</span><span class="s2">) + </span><span class="s1">s</span><span class="s2">)</span>
+        <span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">window</span><span class="s2">=</span><span class="s3">25</span><span class="s2">)</span>
+        <span class="s2">.</span><span class="s1">quantile</span><span class="s2">(</span><span class="s1">q</span><span class="s2">)</span>
+        <span class="s2">.</span><span class="s1">shift</span><span class="s2">(-</span><span class="s3">12</span><span class="s2">)</span>
+        <span class="s2">.</span><span class="s1">reindex</span><span class="s2">(</span><span class="s1">series</span><span class="s2">.</span><span class="s1">index</span><span class="s2">)</span>
+    <span class="s2">)</span>
+
+    <span class="s1">series_rs </span><span class="s2">= </span><span class="s1">series</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">window</span><span class="s2">=</span><span class="s3">25</span><span class="s2">, </span><span class="s1">center</span><span class="s2">=</span><span class="s0">True</span><span class="s2">).</span><span class="s1">quantile</span><span class="s2">(</span><span class="s1">q</span><span class="s2">)</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_series_equal</span><span class="s2">(</span><span class="s1">series_xp</span><span class="s2">, </span><span class="s1">series_rs</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;q&quot;</span><span class="s2">, [</span><span class="s3">0.0</span><span class="s2">, </span><span class="s3">0.1</span><span class="s2">, </span><span class="s3">0.5</span><span class="s2">, </span><span class="s3">0.9</span><span class="s2">, </span><span class="s3">1.0</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_center_reindex_frame</span><span class="s2">(</span><span class="s1">frame</span><span class="s2">, </span><span class="s1">q</span><span class="s2">):</span>
+    <span class="s5"># shifter index</span>
+    <span class="s1">s </span><span class="s2">= [</span><span class="s4">f&quot;x</span><span class="s0">{</span><span class="s1">x</span><span class="s0">:</span><span class="s4">d</span><span class="s0">}</span><span class="s4">&quot; </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s3">12</span><span class="s2">)]</span>
+
+    <span class="s1">frame_xp </span><span class="s2">= (</span>
+        <span class="s1">frame</span><span class="s2">.</span><span class="s1">reindex</span><span class="s2">(</span><span class="s1">list</span><span class="s2">(</span><span class="s1">frame</span><span class="s2">.</span><span class="s1">index</span><span class="s2">) + </span><span class="s1">s</span><span class="s2">)</span>
+        <span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">window</span><span class="s2">=</span><span class="s3">25</span><span class="s2">)</span>
+        <span class="s2">.</span><span class="s1">quantile</span><span class="s2">(</span><span class="s1">q</span><span class="s2">)</span>
+        <span class="s2">.</span><span class="s1">shift</span><span class="s2">(-</span><span class="s3">12</span><span class="s2">)</span>
+        <span class="s2">.</span><span class="s1">reindex</span><span class="s2">(</span><span class="s1">frame</span><span class="s2">.</span><span class="s1">index</span><span class="s2">)</span>
+    <span class="s2">)</span>
+    <span class="s1">frame_rs </span><span class="s2">= </span><span class="s1">frame</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">window</span><span class="s2">=</span><span class="s3">25</span><span class="s2">, </span><span class="s1">center</span><span class="s2">=</span><span class="s0">True</span><span class="s2">).</span><span class="s1">quantile</span><span class="s2">(</span><span class="s1">q</span><span class="s2">)</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_frame_equal</span><span class="s2">(</span><span class="s1">frame_xp</span><span class="s2">, </span><span class="s1">frame_rs</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

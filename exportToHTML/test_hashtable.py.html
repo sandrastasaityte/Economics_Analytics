@@ -1,0 +1,804 @@
+<html>
+<head>
+<title>test_hashtable.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #2aacb8;}
+.s5 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_hashtable.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">collections </span><span class="s0">import </span><span class="s1">namedtuple</span>
+<span class="s0">from </span><span class="s1">collections</span><span class="s2">.</span><span class="s1">abc </span><span class="s0">import </span><span class="s1">Generator</span>
+<span class="s0">from </span><span class="s1">contextlib </span><span class="s0">import </span><span class="s1">contextmanager</span>
+<span class="s0">import </span><span class="s1">re</span>
+<span class="s0">import </span><span class="s1">struct</span>
+<span class="s0">import </span><span class="s1">tracemalloc</span>
+
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_libs </span><span class="s0">import </span><span class="s1">hashtable </span><span class="s0">as </span><span class="s1">ht</span>
+
+<span class="s0">import </span><span class="s1">pandas </span><span class="s0">as </span><span class="s1">pd</span>
+<span class="s0">import </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_testing </span><span class="s0">as </span><span class="s1">tm</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">algorithms </span><span class="s0">import </span><span class="s1">isin</span>
+
+
+<span class="s2">@</span><span class="s1">contextmanager</span>
+<span class="s0">def </span><span class="s1">activated_tracemalloc</span><span class="s2">() </span><span class="s1">-&gt; Generator</span><span class="s2">[</span><span class="s0">None</span><span class="s2">, </span><span class="s0">None</span><span class="s2">, </span><span class="s0">None</span><span class="s2">]:</span>
+    <span class="s1">tracemalloc</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s0">yield</span>
+    <span class="s0">finally</span><span class="s2">:</span>
+        <span class="s1">tracemalloc</span><span class="s2">.</span><span class="s1">stop</span><span class="s2">()</span>
+
+
+<span class="s0">def </span><span class="s1">get_allocated_khash_memory</span><span class="s2">():</span>
+    <span class="s1">snapshot </span><span class="s2">= </span><span class="s1">tracemalloc</span><span class="s2">.</span><span class="s1">take_snapshot</span><span class="s2">()</span>
+    <span class="s1">snapshot </span><span class="s2">= </span><span class="s1">snapshot</span><span class="s2">.</span><span class="s1">filter_traces</span><span class="s2">(</span>
+        <span class="s2">(</span><span class="s1">tracemalloc</span><span class="s2">.</span><span class="s1">DomainFilter</span><span class="s2">(</span><span class="s0">True</span><span class="s2">, </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">get_hashtable_trace_domain</span><span class="s2">()),)</span>
+    <span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">sum</span><span class="s2">(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">size </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">snapshot</span><span class="s2">.</span><span class="s1">traces</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s3">&quot;table_type, dtype&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">PyObjectHashTable</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">object_</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Complex128HashTable</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">complex128</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Int64HashTable</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">UInt64HashTable</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint64</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Float64HashTable</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Complex64HashTable</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">complex64</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Int32HashTable</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int32</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">UInt32HashTable</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint32</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Float32HashTable</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float32</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Int16HashTable</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">UInt16HashTable</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint16</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Int8HashTable</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int8</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">UInt8HashTable</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint8</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">IntpHashTable</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">),</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">class </span><span class="s1">TestHashTable</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">test_get_set_contains_len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">table_type</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">):</span>
+        <span class="s1">index </span><span class="s2">= </span><span class="s4">5</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">table_type</span><span class="s2">(</span><span class="s4">55</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">table</span><span class="s2">) == </span><span class="s4">0</span>
+        <span class="s0">assert </span><span class="s1">index </span><span class="s0">not in </span><span class="s1">table</span>
+
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s1">index</span><span class="s2">, </span><span class="s4">42</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">table</span><span class="s2">) == </span><span class="s4">1</span>
+        <span class="s0">assert </span><span class="s1">index </span><span class="s0">in </span><span class="s1">table</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">index</span><span class="s2">) == </span><span class="s4">42</span>
+
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s1">index </span><span class="s2">+ </span><span class="s4">1</span><span class="s2">, </span><span class="s4">41</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">index </span><span class="s0">in </span><span class="s1">table</span>
+        <span class="s0">assert </span><span class="s1">index </span><span class="s2">+ </span><span class="s4">1 </span><span class="s0">in </span><span class="s1">table</span>
+        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">table</span><span class="s2">) == </span><span class="s4">2</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">index</span><span class="s2">) == </span><span class="s4">42</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">index </span><span class="s2">+ </span><span class="s4">1</span><span class="s2">) == </span><span class="s4">41</span>
+
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s1">index</span><span class="s2">, </span><span class="s4">21</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">index </span><span class="s0">in </span><span class="s1">table</span>
+        <span class="s0">assert </span><span class="s1">index </span><span class="s2">+ </span><span class="s4">1 </span><span class="s0">in </span><span class="s1">table</span>
+        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">table</span><span class="s2">) == </span><span class="s4">2</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">index</span><span class="s2">) == </span><span class="s4">21</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">index </span><span class="s2">+ </span><span class="s4">1</span><span class="s2">) == </span><span class="s4">41</span>
+        <span class="s0">assert </span><span class="s1">index </span><span class="s2">+ </span><span class="s4">2 </span><span class="s0">not in </span><span class="s1">table</span>
+
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s1">index </span><span class="s2">+ </span><span class="s4">1</span><span class="s2">, </span><span class="s4">21</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">index </span><span class="s0">in </span><span class="s1">table</span>
+        <span class="s0">assert </span><span class="s1">index </span><span class="s2">+ </span><span class="s4">1 </span><span class="s0">in </span><span class="s1">table</span>
+        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">table</span><span class="s2">) == </span><span class="s4">2</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">index</span><span class="s2">) == </span><span class="s4">21</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">index </span><span class="s2">+ </span><span class="s4">1</span><span class="s2">) == </span><span class="s4">21</span>
+
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">KeyError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">str</span><span class="s2">(</span><span class="s1">index </span><span class="s2">+ </span><span class="s4">2</span><span class="s2">)):</span>
+            <span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">index </span><span class="s2">+ </span><span class="s4">2</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_get_set_contains_len_mask</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">table_type</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">table_type </span><span class="s2">== </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">PyObjectHashTable</span><span class="s2">:</span>
+            <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span><span class="s3">&quot;Mask not supported for object&quot;</span><span class="s2">)</span>
+        <span class="s1">index </span><span class="s2">= </span><span class="s4">5</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">table_type</span><span class="s2">(</span><span class="s4">55</span><span class="s2">, </span><span class="s1">uses_mask</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">table</span><span class="s2">) == </span><span class="s4">0</span>
+        <span class="s0">assert </span><span class="s1">index </span><span class="s0">not in </span><span class="s1">table</span>
+
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s1">index</span><span class="s2">, </span><span class="s4">42</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">table</span><span class="s2">) == </span><span class="s4">1</span>
+        <span class="s0">assert </span><span class="s1">index </span><span class="s0">in </span><span class="s1">table</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">index</span><span class="s2">) == </span><span class="s4">42</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">KeyError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s3">&quot;NA&quot;</span><span class="s2">):</span>
+            <span class="s1">table</span><span class="s2">.</span><span class="s1">get_na</span><span class="s2">()</span>
+
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s1">index </span><span class="s2">+ </span><span class="s4">1</span><span class="s2">, </span><span class="s4">41</span><span class="s2">)</span>
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">set_na</span><span class="s2">(</span><span class="s4">41</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">NA </span><span class="s0">in </span><span class="s1">table</span>
+        <span class="s0">assert </span><span class="s1">index </span><span class="s0">in </span><span class="s1">table</span>
+        <span class="s0">assert </span><span class="s1">index </span><span class="s2">+ </span><span class="s4">1 </span><span class="s0">in </span><span class="s1">table</span>
+        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">table</span><span class="s2">) == </span><span class="s4">3</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">index</span><span class="s2">) == </span><span class="s4">42</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">index </span><span class="s2">+ </span><span class="s4">1</span><span class="s2">) == </span><span class="s4">41</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_na</span><span class="s2">() == </span><span class="s4">41</span>
+
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">set_na</span><span class="s2">(</span><span class="s4">21</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">index </span><span class="s0">in </span><span class="s1">table</span>
+        <span class="s0">assert </span><span class="s1">index </span><span class="s2">+ </span><span class="s4">1 </span><span class="s0">in </span><span class="s1">table</span>
+        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">table</span><span class="s2">) == </span><span class="s4">3</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">index </span><span class="s2">+ </span><span class="s4">1</span><span class="s2">) == </span><span class="s4">41</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_na</span><span class="s2">() == </span><span class="s4">21</span>
+        <span class="s0">assert </span><span class="s1">index </span><span class="s2">+ </span><span class="s4">2 </span><span class="s0">not in </span><span class="s1">table</span>
+
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">KeyError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">str</span><span class="s2">(</span><span class="s1">index </span><span class="s2">+ </span><span class="s4">2</span><span class="s2">)):</span>
+            <span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">index </span><span class="s2">+ </span><span class="s4">2</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_map_keys_to_values</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">table_type</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">writable</span><span class="s2">):</span>
+        <span class="s5"># only Int64HashTable has this method</span>
+        <span class="s0">if </span><span class="s1">table_type </span><span class="s2">== </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Int64HashTable</span><span class="s2">:</span>
+            <span class="s1">N </span><span class="s2">= </span><span class="s4">77</span>
+            <span class="s1">table </span><span class="s2">= </span><span class="s1">table_type</span><span class="s2">()</span>
+            <span class="s1">keys </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+            <span class="s1">vals </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">) + </span><span class="s1">N</span>
+            <span class="s1">keys</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable </span><span class="s2">= </span><span class="s1">writable</span>
+            <span class="s1">vals</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable </span><span class="s2">= </span><span class="s1">writable</span>
+            <span class="s1">table</span><span class="s2">.</span><span class="s1">map_keys_to_values</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">, </span><span class="s1">vals</span><span class="s2">)</span>
+            <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">N</span><span class="s2">):</span>
+                <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">[</span><span class="s1">i</span><span class="s2">]) == </span><span class="s1">i </span><span class="s2">+ </span><span class="s1">N</span>
+
+    <span class="s0">def </span><span class="s1">test_map_locations</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">table_type</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">writable</span><span class="s2">):</span>
+        <span class="s1">N </span><span class="s2">= </span><span class="s4">8</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">table_type</span><span class="s2">()</span>
+        <span class="s1">keys </span><span class="s2">= (</span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">) + </span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">keys</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable </span><span class="s2">= </span><span class="s1">writable</span>
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">map_locations</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">N</span><span class="s2">):</span>
+            <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">[</span><span class="s1">i</span><span class="s2">]) == </span><span class="s1">i</span>
+
+    <span class="s0">def </span><span class="s1">test_map_locations_mask</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">table_type</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">writable</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">table_type </span><span class="s2">== </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">PyObjectHashTable</span><span class="s2">:</span>
+            <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span><span class="s3">&quot;Mask not supported for object&quot;</span><span class="s2">)</span>
+        <span class="s1">N </span><span class="s2">= </span><span class="s4">129  </span><span class="s5"># must be &gt; 128 to test GH#58924</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">table_type</span><span class="s2">(</span><span class="s1">uses_mask</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+        <span class="s1">keys </span><span class="s2">= (</span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">) + </span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">keys</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable </span><span class="s2">= </span><span class="s1">writable</span>
+        <span class="s1">mask </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">concatenate</span><span class="s2">([</span><span class="s1">np</span><span class="s2">.</span><span class="s1">repeat</span><span class="s2">(</span><span class="s0">False</span><span class="s2">, </span><span class="s1">N </span><span class="s2">- </span><span class="s4">1</span><span class="s2">), [</span><span class="s0">True</span><span class="s2">]], </span><span class="s1">axis</span><span class="s2">=</span><span class="s4">0</span><span class="s2">)</span>
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">map_locations</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">, </span><span class="s1">mask</span><span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">N </span><span class="s2">- </span><span class="s4">1</span><span class="s2">):</span>
+            <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">[</span><span class="s1">i</span><span class="s2">]) == </span><span class="s1">i</span>
+
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">KeyError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">re</span><span class="s2">.</span><span class="s1">escape</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">[</span><span class="s1">N </span><span class="s2">- </span><span class="s4">1</span><span class="s2">]))):</span>
+            <span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">[</span><span class="s1">N </span><span class="s2">- </span><span class="s4">1</span><span class="s2">])</span>
+
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_na</span><span class="s2">() == </span><span class="s1">N </span><span class="s2">- </span><span class="s4">1</span>
+
+    <span class="s0">def </span><span class="s1">test_lookup</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">table_type</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">writable</span><span class="s2">):</span>
+        <span class="s1">N </span><span class="s2">= </span><span class="s4">3</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">table_type</span><span class="s2">()</span>
+        <span class="s1">keys </span><span class="s2">= (</span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">) + </span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">keys</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable </span><span class="s2">= </span><span class="s1">writable</span>
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">map_locations</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">)</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">table</span><span class="s2">.</span><span class="s1">lookup</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">), </span><span class="s1">expected</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">test_lookup_wrong</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">table_type</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">dtype </span><span class="s0">in </span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int8</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint8</span><span class="s2">):</span>
+            <span class="s1">N </span><span class="s2">= </span><span class="s4">100</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">N </span><span class="s2">= </span><span class="s4">512</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">table_type</span><span class="s2">()</span>
+        <span class="s1">keys </span><span class="s2">= (</span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">) + </span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">map_locations</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">)</span>
+        <span class="s1">wrong_keys </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">table</span><span class="s2">.</span><span class="s1">lookup</span><span class="s2">(</span><span class="s1">wrong_keys</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">all</span><span class="s2">(</span><span class="s1">result </span><span class="s2">== -</span><span class="s4">1</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_lookup_mask</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">table_type</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">writable</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">table_type </span><span class="s2">== </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">PyObjectHashTable</span><span class="s2">:</span>
+            <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span><span class="s3">&quot;Mask not supported for object&quot;</span><span class="s2">)</span>
+        <span class="s1">N </span><span class="s2">= </span><span class="s4">3</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">table_type</span><span class="s2">(</span><span class="s1">uses_mask</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+        <span class="s1">keys </span><span class="s2">= (</span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">) + </span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">mask </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s0">False</span><span class="s2">, </span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">])</span>
+        <span class="s1">keys</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable </span><span class="s2">= </span><span class="s1">writable</span>
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">map_locations</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">, </span><span class="s1">mask</span><span class="s2">)</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">table</span><span class="s2">.</span><span class="s1">lookup</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">, </span><span class="s1">mask</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">), </span><span class="s1">expected</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">))</span>
+
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">table</span><span class="s2">.</span><span class="s1">lookup</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">1 </span><span class="s2">+ </span><span class="s1">N</span><span class="s2">]).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s0">False</span><span class="s2">]))</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span>
+            <span class="s1">result</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([-</span><span class="s4">1</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+        <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_unique</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">table_type</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">writable</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">dtype </span><span class="s0">in </span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int8</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint8</span><span class="s2">):</span>
+            <span class="s1">N </span><span class="s2">= </span><span class="s4">88</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">N </span><span class="s2">= </span><span class="s4">1000</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">table_type</span><span class="s2">()</span>
+        <span class="s1">expected </span><span class="s2">= (</span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">) + </span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">keys </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">repeat</span><span class="s2">(</span><span class="s1">expected</span><span class="s2">, </span><span class="s4">5</span><span class="s2">)</span>
+        <span class="s1">keys</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable </span><span class="s2">= </span><span class="s1">writable</span>
+        <span class="s1">unique </span><span class="s2">= </span><span class="s1">table</span><span class="s2">.</span><span class="s1">unique</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">unique</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_tracemalloc_works</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">table_type</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">dtype </span><span class="s0">in </span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int8</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint8</span><span class="s2">):</span>
+            <span class="s1">N </span><span class="s2">= </span><span class="s4">256</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">N </span><span class="s2">= </span><span class="s4">30000</span>
+        <span class="s1">keys </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">activated_tracemalloc</span><span class="s2">():</span>
+            <span class="s1">table </span><span class="s2">= </span><span class="s1">table_type</span><span class="s2">()</span>
+            <span class="s1">table</span><span class="s2">.</span><span class="s1">map_locations</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">)</span>
+            <span class="s1">used </span><span class="s2">= </span><span class="s1">get_allocated_khash_memory</span><span class="s2">()</span>
+            <span class="s1">my_size </span><span class="s2">= </span><span class="s1">table</span><span class="s2">.</span><span class="s1">sizeof</span><span class="s2">()</span>
+            <span class="s0">assert </span><span class="s1">used </span><span class="s2">== </span><span class="s1">my_size</span>
+            <span class="s0">del </span><span class="s1">table</span>
+            <span class="s0">assert </span><span class="s1">get_allocated_khash_memory</span><span class="s2">() == </span><span class="s4">0</span>
+
+    <span class="s0">def </span><span class="s1">test_tracemalloc_for_empty</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">table_type</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">activated_tracemalloc</span><span class="s2">():</span>
+            <span class="s1">table </span><span class="s2">= </span><span class="s1">table_type</span><span class="s2">()</span>
+            <span class="s1">used </span><span class="s2">= </span><span class="s1">get_allocated_khash_memory</span><span class="s2">()</span>
+            <span class="s1">my_size </span><span class="s2">= </span><span class="s1">table</span><span class="s2">.</span><span class="s1">sizeof</span><span class="s2">()</span>
+            <span class="s0">assert </span><span class="s1">used </span><span class="s2">== </span><span class="s1">my_size</span>
+            <span class="s0">del </span><span class="s1">table</span>
+            <span class="s0">assert </span><span class="s1">get_allocated_khash_memory</span><span class="s2">() == </span><span class="s4">0</span>
+
+    <span class="s0">def </span><span class="s1">test_get_state</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">table_type</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">):</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">table_type</span><span class="s2">(</span><span class="s4">1000</span><span class="s2">)</span>
+        <span class="s1">state </span><span class="s2">= </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_state</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">state</span><span class="s2">[</span><span class="s3">&quot;size&quot;</span><span class="s2">] == </span><span class="s4">0</span>
+        <span class="s0">assert </span><span class="s1">state</span><span class="s2">[</span><span class="s3">&quot;n_occupied&quot;</span><span class="s2">] == </span><span class="s4">0</span>
+        <span class="s0">assert </span><span class="s3">&quot;n_buckets&quot; </span><span class="s0">in </span><span class="s1">state</span>
+        <span class="s0">assert </span><span class="s3">&quot;upper_bound&quot; </span><span class="s0">in </span><span class="s1">state</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s3">&quot;N&quot;</span><span class="s2">, </span><span class="s1">range</span><span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">110</span><span class="s2">, </span><span class="s4">4</span><span class="s2">))</span>
+    <span class="s0">def </span><span class="s1">test_no_reallocation</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">table_type</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">N</span><span class="s2">):</span>
+        <span class="s1">keys </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">preallocated_table </span><span class="s2">= </span><span class="s1">table_type</span><span class="s2">(</span><span class="s1">N</span><span class="s2">)</span>
+        <span class="s1">n_buckets_start </span><span class="s2">= </span><span class="s1">preallocated_table</span><span class="s2">.</span><span class="s1">get_state</span><span class="s2">()[</span><span class="s3">&quot;n_buckets&quot;</span><span class="s2">]</span>
+        <span class="s1">preallocated_table</span><span class="s2">.</span><span class="s1">map_locations</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">)</span>
+        <span class="s1">n_buckets_end </span><span class="s2">= </span><span class="s1">preallocated_table</span><span class="s2">.</span><span class="s1">get_state</span><span class="s2">()[</span><span class="s3">&quot;n_buckets&quot;</span><span class="s2">]</span>
+        <span class="s5"># original number of buckets was enough:</span>
+        <span class="s0">assert </span><span class="s1">n_buckets_start </span><span class="s2">== </span><span class="s1">n_buckets_end</span>
+        <span class="s5"># check with clean table (not too much preallocated)</span>
+        <span class="s1">clean_table </span><span class="s2">= </span><span class="s1">table_type</span><span class="s2">()</span>
+        <span class="s1">clean_table</span><span class="s2">.</span><span class="s1">map_locations</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">n_buckets_start </span><span class="s2">== </span><span class="s1">clean_table</span><span class="s2">.</span><span class="s1">get_state</span><span class="s2">()[</span><span class="s3">&quot;n_buckets&quot;</span><span class="s2">]</span>
+
+
+<span class="s0">class </span><span class="s1">TestHashTableUnsorted</span><span class="s2">:</span>
+    <span class="s5"># TODO: moved from test_algos; may be redundancies with other tests</span>
+    <span class="s0">def </span><span class="s1">test_string_hashtable_set_item_signature</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># GH#30419 fix typing in StringHashTable.set_item to prevent segfault</span>
+        <span class="s1">tbl </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">StringHashTable</span><span class="s2">()</span>
+
+        <span class="s1">tbl</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s3">&quot;key&quot;</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">tbl</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s3">&quot;key&quot;</span><span class="s2">) == </span><span class="s4">1</span>
+
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s3">&quot;'key' has incorrect type&quot;</span><span class="s2">):</span>
+            <span class="s5"># key arg typed as string, not object</span>
+            <span class="s1">tbl</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s4">4</span><span class="s2">, </span><span class="s4">6</span><span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s3">&quot;'val' has incorrect type&quot;</span><span class="s2">):</span>
+            <span class="s1">tbl</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s4">4</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_lookup_nan</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">writable</span><span class="s2">):</span>
+        <span class="s5"># GH#21688 ensure we can deal with readonly memory views</span>
+        <span class="s1">xs </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">2.718</span><span class="s2">, </span><span class="s4">3.14</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, -</span><span class="s4">7</span><span class="s2">, </span><span class="s4">5</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">])</span>
+        <span class="s1">xs</span><span class="s2">.</span><span class="s1">setflags</span><span class="s2">(</span><span class="s1">write</span><span class="s2">=</span><span class="s1">writable</span><span class="s2">)</span>
+        <span class="s1">m </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Float64HashTable</span><span class="s2">()</span>
+        <span class="s1">m</span><span class="s2">.</span><span class="s1">map_locations</span><span class="s2">(</span><span class="s1">xs</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">m</span><span class="s2">.</span><span class="s1">lookup</span><span class="s2">(</span><span class="s1">xs</span><span class="s2">), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">xs</span><span class="s2">), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">test_add_signed_zeros</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># GH#21866 inconsistent hash-function for float64</span>
+        <span class="s5"># default hash-function would lead to different hash-buckets</span>
+        <span class="s5"># for 0.0 and -0.0 if there are more than 2^30 hash-buckets</span>
+        <span class="s5"># but this would mean 16GB</span>
+        <span class="s1">N </span><span class="s2">= </span><span class="s4">4  </span><span class="s5"># 12 * 10**8 would trigger the error, if you have enough memory</span>
+        <span class="s1">m </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Float64HashTable</span><span class="s2">(</span><span class="s1">N</span><span class="s2">)</span>
+        <span class="s1">m</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s4">0.0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)</span>
+        <span class="s1">m</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(-</span><span class="s4">0.0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">m</span><span class="s2">) == </span><span class="s4">1  </span><span class="s5"># 0.0 and -0.0 are equivalent</span>
+
+    <span class="s0">def </span><span class="s1">test_add_different_nans</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># GH#21866 inconsistent hash-function for float64</span>
+        <span class="s5"># create different nans from bit-patterns:</span>
+        <span class="s1">NAN1 </span><span class="s2">= </span><span class="s1">struct</span><span class="s2">.</span><span class="s1">unpack</span><span class="s2">(</span><span class="s3">&quot;d&quot;</span><span class="s2">, </span><span class="s1">struct</span><span class="s2">.</span><span class="s1">pack</span><span class="s2">(</span><span class="s3">&quot;=Q&quot;</span><span class="s2">, </span><span class="s4">0x7FF8000000000000</span><span class="s2">))[</span><span class="s4">0</span><span class="s2">]</span>
+        <span class="s1">NAN2 </span><span class="s2">= </span><span class="s1">struct</span><span class="s2">.</span><span class="s1">unpack</span><span class="s2">(</span><span class="s3">&quot;d&quot;</span><span class="s2">, </span><span class="s1">struct</span><span class="s2">.</span><span class="s1">pack</span><span class="s2">(</span><span class="s3">&quot;=Q&quot;</span><span class="s2">, </span><span class="s4">0x7FF8000000000001</span><span class="s2">))[</span><span class="s4">0</span><span class="s2">]</span>
+        <span class="s0">assert </span><span class="s1">NAN1 </span><span class="s2">!= </span><span class="s1">NAN1</span>
+        <span class="s0">assert </span><span class="s1">NAN2 </span><span class="s2">!= </span><span class="s1">NAN2</span>
+        <span class="s5"># default hash function would lead to different hash-buckets</span>
+        <span class="s5"># for NAN1 and NAN2 even if there are only 4 buckets:</span>
+        <span class="s1">m </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Float64HashTable</span><span class="s2">()</span>
+        <span class="s1">m</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s1">NAN1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)</span>
+        <span class="s1">m</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s1">NAN2</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">m</span><span class="s2">) == </span><span class="s4">1  </span><span class="s5"># NAN1 and NAN2 are equivalent</span>
+
+    <span class="s0">def </span><span class="s1">test_lookup_overflow</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">writable</span><span class="s2">):</span>
+        <span class="s1">xs </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">2</span><span class="s2">**</span><span class="s4">63</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint64</span><span class="s2">)</span>
+        <span class="s5"># GH 21688 ensure we can deal with readonly memory views</span>
+        <span class="s1">xs</span><span class="s2">.</span><span class="s1">setflags</span><span class="s2">(</span><span class="s1">write</span><span class="s2">=</span><span class="s1">writable</span><span class="s2">)</span>
+        <span class="s1">m </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">UInt64HashTable</span><span class="s2">()</span>
+        <span class="s1">m</span><span class="s2">.</span><span class="s1">map_locations</span><span class="s2">(</span><span class="s1">xs</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">m</span><span class="s2">.</span><span class="s1">lookup</span><span class="s2">(</span><span class="s1">xs</span><span class="s2">), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">xs</span><span class="s2">), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">))</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s3">&quot;nvals&quot;</span><span class="s2">, [</span><span class="s4">0</span><span class="s2">, </span><span class="s4">10</span><span class="s2">])  </span><span class="s5"># resizing to 0 is special case</span>
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+        <span class="s3">&quot;htable, uniques, dtype, safely_resizes&quot;</span><span class="s2">,</span>
+        <span class="s2">[</span>
+            <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">PyObjectHashTable</span><span class="s2">, </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">ObjectVector</span><span class="s2">, </span><span class="s3">&quot;object&quot;</span><span class="s2">, </span><span class="s0">False</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">StringHashTable</span><span class="s2">, </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">ObjectVector</span><span class="s2">, </span><span class="s3">&quot;object&quot;</span><span class="s2">, </span><span class="s0">True</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Float64HashTable</span><span class="s2">, </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Float64Vector</span><span class="s2">, </span><span class="s3">&quot;float64&quot;</span><span class="s2">, </span><span class="s0">False</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Int64HashTable</span><span class="s2">, </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Int64Vector</span><span class="s2">, </span><span class="s3">&quot;int64&quot;</span><span class="s2">, </span><span class="s0">False</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Int32HashTable</span><span class="s2">, </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Int32Vector</span><span class="s2">, </span><span class="s3">&quot;int32&quot;</span><span class="s2">, </span><span class="s0">False</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">UInt64HashTable</span><span class="s2">, </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">UInt64Vector</span><span class="s2">, </span><span class="s3">&quot;uint64&quot;</span><span class="s2">, </span><span class="s0">False</span><span class="s2">),</span>
+        <span class="s2">],</span>
+    <span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_vector_resize</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">writable</span><span class="s2">, </span><span class="s1">htable</span><span class="s2">, </span><span class="s1">uniques</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">safely_resizes</span><span class="s2">, </span><span class="s1">nvals</span>
+    <span class="s2">):</span>
+        <span class="s5"># Test for memory errors after internal vector</span>
+        <span class="s5"># reallocations (GH 7157)</span>
+        <span class="s5"># Changed from using np.random.default_rng(2).rand to range</span>
+        <span class="s5"># which could cause flaky CI failures when safely_resizes=False</span>
+        <span class="s1">vals </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">range</span><span class="s2">(</span><span class="s4">1000</span><span class="s2">), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+
+        <span class="s5"># GH 21688 ensures we can deal with read-only memory views</span>
+        <span class="s1">vals</span><span class="s2">.</span><span class="s1">setflags</span><span class="s2">(</span><span class="s1">write</span><span class="s2">=</span><span class="s1">writable</span><span class="s2">)</span>
+
+        <span class="s5"># initialise instances; cannot initialise in parametrization,</span>
+        <span class="s5"># as otherwise external views would be held on the array (which is</span>
+        <span class="s5"># one of the things this test is checking)</span>
+        <span class="s1">htable </span><span class="s2">= </span><span class="s1">htable</span><span class="s2">()</span>
+        <span class="s1">uniques </span><span class="s2">= </span><span class="s1">uniques</span><span class="s2">()</span>
+
+        <span class="s5"># get_labels may append to uniques</span>
+        <span class="s1">htable</span><span class="s2">.</span><span class="s1">get_labels</span><span class="s2">(</span><span class="s1">vals</span><span class="s2">[:</span><span class="s1">nvals</span><span class="s2">], </span><span class="s1">uniques</span><span class="s2">, </span><span class="s4">0</span><span class="s2">, -</span><span class="s4">1</span><span class="s2">)</span>
+        <span class="s5"># to_array() sets an external_view_exists flag on uniques.</span>
+        <span class="s1">tmp </span><span class="s2">= </span><span class="s1">uniques</span><span class="s2">.</span><span class="s1">to_array</span><span class="s2">()</span>
+        <span class="s1">oldshape </span><span class="s2">= </span><span class="s1">tmp</span><span class="s2">.</span><span class="s1">shape</span>
+
+        <span class="s5"># subsequent get_labels() calls can no longer append to it</span>
+        <span class="s5"># (except for StringHashTables + ObjectVector)</span>
+        <span class="s0">if </span><span class="s1">safely_resizes</span><span class="s2">:</span>
+            <span class="s1">htable</span><span class="s2">.</span><span class="s1">get_labels</span><span class="s2">(</span><span class="s1">vals</span><span class="s2">, </span><span class="s1">uniques</span><span class="s2">, </span><span class="s4">0</span><span class="s2">, -</span><span class="s4">1</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s3">&quot;external reference.*&quot;</span><span class="s2">):</span>
+                <span class="s1">htable</span><span class="s2">.</span><span class="s1">get_labels</span><span class="s2">(</span><span class="s1">vals</span><span class="s2">, </span><span class="s1">uniques</span><span class="s2">, </span><span class="s4">0</span><span class="s2">, -</span><span class="s4">1</span><span class="s2">)</span>
+
+        <span class="s1">uniques</span><span class="s2">.</span><span class="s1">to_array</span><span class="s2">()  </span><span class="s5"># should not raise here</span>
+        <span class="s0">assert </span><span class="s1">tmp</span><span class="s2">.</span><span class="s1">shape </span><span class="s2">== </span><span class="s1">oldshape</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+        <span class="s3">&quot;hashtable&quot;</span><span class="s2">,</span>
+        <span class="s2">[</span>
+            <span class="s1">ht</span><span class="s2">.</span><span class="s1">PyObjectHashTable</span><span class="s2">,</span>
+            <span class="s1">ht</span><span class="s2">.</span><span class="s1">StringHashTable</span><span class="s2">,</span>
+            <span class="s1">ht</span><span class="s2">.</span><span class="s1">Float64HashTable</span><span class="s2">,</span>
+            <span class="s1">ht</span><span class="s2">.</span><span class="s1">Int64HashTable</span><span class="s2">,</span>
+            <span class="s1">ht</span><span class="s2">.</span><span class="s1">Int32HashTable</span><span class="s2">,</span>
+            <span class="s1">ht</span><span class="s2">.</span><span class="s1">UInt64HashTable</span><span class="s2">,</span>
+        <span class="s2">],</span>
+    <span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_hashtable_large_sizehint</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">hashtable</span><span class="s2">):</span>
+        <span class="s5"># GH#22729 smoketest for not raising when passing a large size_hint</span>
+        <span class="s1">size_hint </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">iinfo</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint32</span><span class="s2">).</span><span class="s1">max </span><span class="s2">+ </span><span class="s4">1</span>
+        <span class="s1">hashtable</span><span class="s2">(</span><span class="s1">size_hint</span><span class="s2">=</span><span class="s1">size_hint</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">TestPyObjectHashTableWithNans</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">test_nan_float</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">nan1 </span><span class="s2">= </span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">)</span>
+        <span class="s1">nan2 </span><span class="s2">= </span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">nan1 </span><span class="s0">is not </span><span class="s1">nan2</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">PyObjectHashTable</span><span class="s2">()</span>
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s1">nan1</span><span class="s2">, </span><span class="s4">42</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">nan2</span><span class="s2">) == </span><span class="s4">42</span>
+
+    <span class="s0">def </span><span class="s1">test_nan_complex_both</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">nan1 </span><span class="s2">= </span><span class="s1">complex</span><span class="s2">(</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">), </span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">))</span>
+        <span class="s1">nan2 </span><span class="s2">= </span><span class="s1">complex</span><span class="s2">(</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">), </span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">))</span>
+        <span class="s0">assert </span><span class="s1">nan1 </span><span class="s0">is not </span><span class="s1">nan2</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">PyObjectHashTable</span><span class="s2">()</span>
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s1">nan1</span><span class="s2">, </span><span class="s4">42</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">nan2</span><span class="s2">) == </span><span class="s4">42</span>
+
+    <span class="s0">def </span><span class="s1">test_nan_complex_real</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">nan1 </span><span class="s2">= </span><span class="s1">complex</span><span class="s2">(</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">), </span><span class="s4">1</span><span class="s2">)</span>
+        <span class="s1">nan2 </span><span class="s2">= </span><span class="s1">complex</span><span class="s2">(</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">), </span><span class="s4">1</span><span class="s2">)</span>
+        <span class="s1">other </span><span class="s2">= </span><span class="s1">complex</span><span class="s2">(</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">), </span><span class="s4">2</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">nan1 </span><span class="s0">is not </span><span class="s1">nan2</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">PyObjectHashTable</span><span class="s2">()</span>
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s1">nan1</span><span class="s2">, </span><span class="s4">42</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">nan2</span><span class="s2">) == </span><span class="s4">42</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">KeyError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">re</span><span class="s2">.</span><span class="s1">escape</span><span class="s2">(</span><span class="s1">repr</span><span class="s2">(</span><span class="s1">other</span><span class="s2">))):</span>
+            <span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_nan_complex_imag</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">nan1 </span><span class="s2">= </span><span class="s1">complex</span><span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">))</span>
+        <span class="s1">nan2 </span><span class="s2">= </span><span class="s1">complex</span><span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">))</span>
+        <span class="s1">other </span><span class="s2">= </span><span class="s1">complex</span><span class="s2">(</span><span class="s4">2</span><span class="s2">, </span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">))</span>
+        <span class="s0">assert </span><span class="s1">nan1 </span><span class="s0">is not </span><span class="s1">nan2</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">PyObjectHashTable</span><span class="s2">()</span>
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s1">nan1</span><span class="s2">, </span><span class="s4">42</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">nan2</span><span class="s2">) == </span><span class="s4">42</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">KeyError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">re</span><span class="s2">.</span><span class="s1">escape</span><span class="s2">(</span><span class="s1">repr</span><span class="s2">(</span><span class="s1">other</span><span class="s2">))):</span>
+            <span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_nan_in_tuple</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">nan1 </span><span class="s2">= (</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">),)</span>
+        <span class="s1">nan2 </span><span class="s2">= (</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">),)</span>
+        <span class="s0">assert </span><span class="s1">nan1</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] </span><span class="s0">is not </span><span class="s1">nan2</span><span class="s2">[</span><span class="s4">0</span><span class="s2">]</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">PyObjectHashTable</span><span class="s2">()</span>
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s1">nan1</span><span class="s2">, </span><span class="s4">42</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">nan2</span><span class="s2">) == </span><span class="s4">42</span>
+
+    <span class="s0">def </span><span class="s1">test_nan_in_nested_tuple</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">nan1 </span><span class="s2">= (</span><span class="s4">1</span><span class="s2">, (</span><span class="s4">2</span><span class="s2">, (</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">),)))</span>
+        <span class="s1">nan2 </span><span class="s2">= (</span><span class="s4">1</span><span class="s2">, (</span><span class="s4">2</span><span class="s2">, (</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">),)))</span>
+        <span class="s1">other </span><span class="s2">= (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">)</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">PyObjectHashTable</span><span class="s2">()</span>
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s1">nan1</span><span class="s2">, </span><span class="s4">42</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">nan2</span><span class="s2">) == </span><span class="s4">42</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">KeyError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">re</span><span class="s2">.</span><span class="s1">escape</span><span class="s2">(</span><span class="s1">repr</span><span class="s2">(</span><span class="s1">other</span><span class="s2">))):</span>
+            <span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_nan_in_namedtuple</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">T </span><span class="s2">= </span><span class="s1">namedtuple</span><span class="s2">(</span><span class="s3">&quot;T&quot;</span><span class="s2">, [</span><span class="s3">&quot;x&quot;</span><span class="s2">])</span>
+        <span class="s1">nan1 </span><span class="s2">= </span><span class="s1">T</span><span class="s2">(</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">))</span>
+        <span class="s1">nan2 </span><span class="s2">= </span><span class="s1">T</span><span class="s2">(</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">))</span>
+        <span class="s0">assert </span><span class="s1">nan1</span><span class="s2">.</span><span class="s1">x </span><span class="s0">is not </span><span class="s1">nan2</span><span class="s2">.</span><span class="s1">x</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">PyObjectHashTable</span><span class="s2">()</span>
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s1">nan1</span><span class="s2">, </span><span class="s4">42</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">nan2</span><span class="s2">) == </span><span class="s4">42</span>
+
+    <span class="s0">def </span><span class="s1">test_nan_in_nested_namedtuple</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">T </span><span class="s2">= </span><span class="s1">namedtuple</span><span class="s2">(</span><span class="s3">&quot;T&quot;</span><span class="s2">, [</span><span class="s3">&quot;x&quot;</span><span class="s2">, </span><span class="s3">&quot;y&quot;</span><span class="s2">])</span>
+        <span class="s1">nan1 </span><span class="s2">= </span><span class="s1">T</span><span class="s2">(</span><span class="s4">1</span><span class="s2">, (</span><span class="s4">2</span><span class="s2">, (</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">),)))</span>
+        <span class="s1">nan2 </span><span class="s2">= </span><span class="s1">T</span><span class="s2">(</span><span class="s4">1</span><span class="s2">, (</span><span class="s4">2</span><span class="s2">, (</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">),)))</span>
+        <span class="s1">other </span><span class="s2">= </span><span class="s1">T</span><span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">)</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">PyObjectHashTable</span><span class="s2">()</span>
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s1">nan1</span><span class="s2">, </span><span class="s4">42</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">nan2</span><span class="s2">) == </span><span class="s4">42</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">KeyError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">re</span><span class="s2">.</span><span class="s1">escape</span><span class="s2">(</span><span class="s1">repr</span><span class="s2">(</span><span class="s1">other</span><span class="s2">))):</span>
+            <span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_hash_equal_tuple_with_nans</span><span class="s2">():</span>
+    <span class="s1">a </span><span class="s2">= (</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">), (</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">), </span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">)))</span>
+    <span class="s1">b </span><span class="s2">= (</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">), (</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">), </span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">)))</span>
+    <span class="s0">assert </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">object_hash</span><span class="s2">(</span><span class="s1">a</span><span class="s2">) == </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">object_hash</span><span class="s2">(</span><span class="s1">b</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">objects_are_equal</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_hash_equal_namedtuple_with_nans</span><span class="s2">():</span>
+    <span class="s1">T </span><span class="s2">= </span><span class="s1">namedtuple</span><span class="s2">(</span><span class="s3">&quot;T&quot;</span><span class="s2">, [</span><span class="s3">&quot;x&quot;</span><span class="s2">, </span><span class="s3">&quot;y&quot;</span><span class="s2">])</span>
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">T</span><span class="s2">(</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">), (</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">), </span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">)))</span>
+    <span class="s1">b </span><span class="s2">= </span><span class="s1">T</span><span class="s2">(</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">), (</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">), </span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">)))</span>
+    <span class="s0">assert </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">object_hash</span><span class="s2">(</span><span class="s1">a</span><span class="s2">) == </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">object_hash</span><span class="s2">(</span><span class="s1">b</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">objects_are_equal</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_hash_equal_namedtuple_and_tuple</span><span class="s2">():</span>
+    <span class="s1">T </span><span class="s2">= </span><span class="s1">namedtuple</span><span class="s2">(</span><span class="s3">&quot;T&quot;</span><span class="s2">, [</span><span class="s3">&quot;x&quot;</span><span class="s2">, </span><span class="s3">&quot;y&quot;</span><span class="s2">])</span>
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">T</span><span class="s2">(</span><span class="s4">1</span><span class="s2">, (</span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">))</span>
+    <span class="s1">b </span><span class="s2">= (</span><span class="s4">1</span><span class="s2">, (</span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">))</span>
+    <span class="s0">assert </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">object_hash</span><span class="s2">(</span><span class="s1">a</span><span class="s2">) == </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">object_hash</span><span class="s2">(</span><span class="s1">b</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">objects_are_equal</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_get_labels_groupby_for_Int64</span><span class="s2">(</span><span class="s1">writable</span><span class="s2">):</span>
+    <span class="s1">table </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Int64HashTable</span><span class="s2">()</span>
+    <span class="s1">vals </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, -</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, -</span><span class="s4">1</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+    <span class="s1">vals</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable </span><span class="s2">= </span><span class="s1">writable</span>
+    <span class="s1">arr</span><span class="s2">, </span><span class="s1">unique </span><span class="s2">= </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_labels_groupby</span><span class="s2">(</span><span class="s1">vals</span><span class="s2">)</span>
+    <span class="s1">expected_arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, -</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">, -</span><span class="s4">1</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">)</span>
+    <span class="s1">expected_unique </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">expected_arr</span><span class="s2">)</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">unique</span><span class="s2">, </span><span class="s1">expected_unique</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_tracemalloc_works_for_StringHashTable</span><span class="s2">():</span>
+    <span class="s1">N </span><span class="s2">= </span><span class="s4">1000</span>
+    <span class="s1">keys </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">str_</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">object_</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">activated_tracemalloc</span><span class="s2">():</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">StringHashTable</span><span class="s2">()</span>
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">map_locations</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">)</span>
+        <span class="s1">used </span><span class="s2">= </span><span class="s1">get_allocated_khash_memory</span><span class="s2">()</span>
+        <span class="s1">my_size </span><span class="s2">= </span><span class="s1">table</span><span class="s2">.</span><span class="s1">sizeof</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">used </span><span class="s2">== </span><span class="s1">my_size</span>
+        <span class="s0">del </span><span class="s1">table</span>
+        <span class="s0">assert </span><span class="s1">get_allocated_khash_memory</span><span class="s2">() == </span><span class="s4">0</span>
+
+
+<span class="s0">def </span><span class="s1">test_tracemalloc_for_empty_StringHashTable</span><span class="s2">():</span>
+    <span class="s0">with </span><span class="s1">activated_tracemalloc</span><span class="s2">():</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">StringHashTable</span><span class="s2">()</span>
+        <span class="s1">used </span><span class="s2">= </span><span class="s1">get_allocated_khash_memory</span><span class="s2">()</span>
+        <span class="s1">my_size </span><span class="s2">= </span><span class="s1">table</span><span class="s2">.</span><span class="s1">sizeof</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">used </span><span class="s2">== </span><span class="s1">my_size</span>
+        <span class="s0">del </span><span class="s1">table</span>
+        <span class="s0">assert </span><span class="s1">get_allocated_khash_memory</span><span class="s2">() == </span><span class="s4">0</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s3">&quot;N&quot;</span><span class="s2">, </span><span class="s1">range</span><span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">110</span><span class="s2">, </span><span class="s4">4</span><span class="s2">))</span>
+<span class="s0">def </span><span class="s1">test_no_reallocation_StringHashTable</span><span class="s2">(</span><span class="s1">N</span><span class="s2">):</span>
+    <span class="s1">keys </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">str_</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">object_</span><span class="s2">)</span>
+    <span class="s1">preallocated_table </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">StringHashTable</span><span class="s2">(</span><span class="s1">N</span><span class="s2">)</span>
+    <span class="s1">n_buckets_start </span><span class="s2">= </span><span class="s1">preallocated_table</span><span class="s2">.</span><span class="s1">get_state</span><span class="s2">()[</span><span class="s3">&quot;n_buckets&quot;</span><span class="s2">]</span>
+    <span class="s1">preallocated_table</span><span class="s2">.</span><span class="s1">map_locations</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">)</span>
+    <span class="s1">n_buckets_end </span><span class="s2">= </span><span class="s1">preallocated_table</span><span class="s2">.</span><span class="s1">get_state</span><span class="s2">()[</span><span class="s3">&quot;n_buckets&quot;</span><span class="s2">]</span>
+    <span class="s5"># original number of buckets was enough:</span>
+    <span class="s0">assert </span><span class="s1">n_buckets_start </span><span class="s2">== </span><span class="s1">n_buckets_end</span>
+    <span class="s5"># check with clean table (not too much preallocated)</span>
+    <span class="s1">clean_table </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">StringHashTable</span><span class="s2">()</span>
+    <span class="s1">clean_table</span><span class="s2">.</span><span class="s1">map_locations</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">n_buckets_start </span><span class="s2">== </span><span class="s1">clean_table</span><span class="s2">.</span><span class="s1">get_state</span><span class="s2">()[</span><span class="s3">&quot;n_buckets&quot;</span><span class="s2">]</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s3">&quot;table_type, dtype&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Float64HashTable</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Float32HashTable</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float32</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Complex128HashTable</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">complex128</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">Complex64HashTable</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">complex64</span><span class="s2">),</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">class </span><span class="s1">TestHashTableWithNans</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">test_get_set_contains_len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">table_type</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">):</span>
+        <span class="s1">index </span><span class="s2">= </span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">)</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">table_type</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">index </span><span class="s0">not in </span><span class="s1">table</span>
+
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s1">index</span><span class="s2">, </span><span class="s4">42</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">table</span><span class="s2">) == </span><span class="s4">1</span>
+        <span class="s0">assert </span><span class="s1">index </span><span class="s0">in </span><span class="s1">table</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">index</span><span class="s2">) == </span><span class="s4">42</span>
+
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">set_item</span><span class="s2">(</span><span class="s1">index</span><span class="s2">, </span><span class="s4">41</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">table</span><span class="s2">) == </span><span class="s4">1</span>
+        <span class="s0">assert </span><span class="s1">index </span><span class="s0">in </span><span class="s1">table</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">index</span><span class="s2">) == </span><span class="s4">41</span>
+
+    <span class="s0">def </span><span class="s1">test_map_locations</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">table_type</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">):</span>
+        <span class="s1">N </span><span class="s2">= </span><span class="s4">10</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">table_type</span><span class="s2">()</span>
+        <span class="s1">keys </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">full</span><span class="s2">(</span><span class="s1">N</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">table</span><span class="s2">.</span><span class="s1">map_locations</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">table</span><span class="s2">) == </span><span class="s4">1</span>
+        <span class="s0">assert </span><span class="s1">table</span><span class="s2">.</span><span class="s1">get_item</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">) == </span><span class="s1">N </span><span class="s2">- </span><span class="s4">1</span>
+
+    <span class="s0">def </span><span class="s1">test_unique</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">table_type</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">):</span>
+        <span class="s1">N </span><span class="s2">= </span><span class="s4">1020</span>
+        <span class="s1">table </span><span class="s2">= </span><span class="s1">table_type</span><span class="s2">()</span>
+        <span class="s1">keys </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">full</span><span class="s2">(</span><span class="s1">N</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">unique </span><span class="s2">= </span><span class="s1">table</span><span class="s2">.</span><span class="s1">unique</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">all</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">isnan</span><span class="s2">(</span><span class="s1">unique</span><span class="s2">)) </span><span class="s0">and </span><span class="s1">len</span><span class="s2">(</span><span class="s1">unique</span><span class="s2">) == </span><span class="s4">1</span>
+
+
+<span class="s0">def </span><span class="s1">test_unique_for_nan_objects_floats</span><span class="s2">():</span>
+    <span class="s1">table </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">PyObjectHashTable</span><span class="s2">()</span>
+    <span class="s1">keys </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">) </span><span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s4">50</span><span class="s2">)], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">object_</span><span class="s2">)</span>
+    <span class="s1">unique </span><span class="s2">= </span><span class="s1">table</span><span class="s2">.</span><span class="s1">unique</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">unique</span><span class="s2">) == </span><span class="s4">1</span>
+
+
+<span class="s0">def </span><span class="s1">test_unique_for_nan_objects_complex</span><span class="s2">():</span>
+    <span class="s1">table </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">PyObjectHashTable</span><span class="s2">()</span>
+    <span class="s1">keys </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s1">complex</span><span class="s2">(</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">), </span><span class="s4">1.0</span><span class="s2">) </span><span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s4">50</span><span class="s2">)], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">object_</span><span class="s2">)</span>
+    <span class="s1">unique </span><span class="s2">= </span><span class="s1">table</span><span class="s2">.</span><span class="s1">unique</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">unique</span><span class="s2">) == </span><span class="s4">1</span>
+
+
+<span class="s0">def </span><span class="s1">test_unique_for_nan_objects_tuple</span><span class="s2">():</span>
+    <span class="s1">table </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">PyObjectHashTable</span><span class="s2">()</span>
+    <span class="s1">keys </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span>
+        <span class="s2">[</span><span class="s4">1</span><span class="s2">] + [(</span><span class="s4">1.0</span><span class="s2">, (</span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">), </span><span class="s4">1.0</span><span class="s2">)) </span><span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s4">50</span><span class="s2">)], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">object_</span>
+    <span class="s2">)</span>
+    <span class="s1">unique </span><span class="s2">= </span><span class="s1">table</span><span class="s2">.</span><span class="s1">unique</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">unique</span><span class="s2">) == </span><span class="s4">2</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s3">&quot;dtype&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">object_</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">complex128</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">uint64</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">complex64</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">int32</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">uint32</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">float32</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">uint16</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">int8</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">uint8</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">,</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">class </span><span class="s1">TestHelpFunctions</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">test_value_count</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">writable</span><span class="s2">):</span>
+        <span class="s1">N </span><span class="s2">= </span><span class="s4">43</span>
+        <span class="s1">expected </span><span class="s2">= (</span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">) + </span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">repeat</span><span class="s2">(</span><span class="s1">expected</span><span class="s2">, </span><span class="s4">5</span><span class="s2">)</span>
+        <span class="s1">values</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable </span><span class="s2">= </span><span class="s1">writable</span>
+        <span class="s1">keys</span><span class="s2">, </span><span class="s1">counts</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">value_count</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">sort</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">), </span><span class="s1">expected</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">all</span><span class="s2">(</span><span class="s1">counts </span><span class="s2">== </span><span class="s4">5</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_value_count_mask</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">dtype </span><span class="s2">== </span><span class="s1">np</span><span class="s2">.</span><span class="s1">object_</span><span class="s2">:</span>
+            <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span><span class="s3">&quot;mask not implemented for object dtype&quot;</span><span class="s2">)</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">1</span><span class="s2">] * </span><span class="s4">5</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">mask </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">((</span><span class="s4">5</span><span class="s2">,), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">bool_</span><span class="s2">)</span>
+        <span class="s1">mask</span><span class="s2">[</span><span class="s4">1</span><span class="s2">] = </span><span class="s0">True</span>
+        <span class="s1">mask</span><span class="s2">[</span><span class="s4">4</span><span class="s2">] = </span><span class="s0">True</span>
+        <span class="s1">keys</span><span class="s2">, </span><span class="s1">counts</span><span class="s2">, </span><span class="s1">na_counter </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">value_count</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s0">False</span><span class="s2">, </span><span class="s1">mask</span><span class="s2">=</span><span class="s1">mask</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">) == </span><span class="s4">2</span>
+        <span class="s0">assert </span><span class="s1">na_counter </span><span class="s2">== </span><span class="s4">2</span>
+
+    <span class="s0">def </span><span class="s1">test_value_count_stable</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">writable</span><span class="s2">):</span>
+        <span class="s5"># GH12679</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">2</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">5</span><span class="s2">, </span><span class="s4">22</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, -</span><span class="s4">1</span><span class="s2">, </span><span class="s4">8</span><span class="s2">]).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">values</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable </span><span class="s2">= </span><span class="s1">writable</span>
+        <span class="s1">keys</span><span class="s2">, </span><span class="s1">counts</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">value_count</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">, </span><span class="s1">values</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">all</span><span class="s2">(</span><span class="s1">counts </span><span class="s2">== </span><span class="s4">1</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_duplicated_first</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">writable</span><span class="s2">):</span>
+        <span class="s1">N </span><span class="s2">= </span><span class="s4">100</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">repeat</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">), </span><span class="s4">5</span><span class="s2">)</span>
+        <span class="s1">values</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable </span><span class="s2">= </span><span class="s1">writable</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">duplicated</span><span class="s2">(</span><span class="s1">values</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones_like</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">bool_</span><span class="s2">)</span>
+        <span class="s1">expected</span><span class="s2">[::</span><span class="s4">5</span><span class="s2">] = </span><span class="s0">False</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_ismember_yes</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">writable</span><span class="s2">):</span>
+        <span class="s1">N </span><span class="s2">= </span><span class="s4">127</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">arr</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable </span><span class="s2">= </span><span class="s1">writable</span>
+        <span class="s1">values</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable </span><span class="s2">= </span><span class="s1">writable</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">ismember</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">values</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones_like</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">bool_</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_ismember_no</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">):</span>
+        <span class="s1">N </span><span class="s2">= </span><span class="s4">17</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">values </span><span class="s2">= (</span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">) + </span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">ismember</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">values</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros_like</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">bool_</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_mode</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">writable</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">dtype </span><span class="s0">in </span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int8</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint8</span><span class="s2">):</span>
+            <span class="s1">N </span><span class="s2">= </span><span class="s4">53</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">N </span><span class="s2">= </span><span class="s4">11111</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">repeat</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">N</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">), </span><span class="s4">5</span><span class="s2">)</span>
+        <span class="s1">values</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] = </span><span class="s4">42</span>
+        <span class="s1">values</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable </span><span class="s2">= </span><span class="s1">writable</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">mode</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)[</span><span class="s4">0</span><span class="s2">]</span>
+        <span class="s0">assert </span><span class="s1">result </span><span class="s2">== </span><span class="s4">42</span>
+
+    <span class="s0">def </span><span class="s1">test_mode_stable</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">writable</span><span class="s2">):</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">2</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">5</span><span class="s2">, </span><span class="s4">22</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, -</span><span class="s4">1</span><span class="s2">, </span><span class="s4">8</span><span class="s2">]).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">values</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable </span><span class="s2">= </span><span class="s1">writable</span>
+        <span class="s1">keys </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">mode</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)[</span><span class="s4">0</span><span class="s2">]</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">, </span><span class="s1">values</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_modes_with_nans</span><span class="s2">():</span>
+    <span class="s5"># GH42688, nans aren't mangled</span>
+    <span class="s1">nulls </span><span class="s2">= [</span><span class="s1">pd</span><span class="s2">.</span><span class="s1">NA</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">NaT</span><span class="s2">, </span><span class="s0">None</span><span class="s2">]</span>
+    <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s0">True</span><span class="s2">] + </span><span class="s1">nulls </span><span class="s2">* </span><span class="s4">2</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">object_</span><span class="s2">)</span>
+    <span class="s1">modes </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">mode</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)[</span><span class="s4">0</span><span class="s2">]</span>
+    <span class="s0">assert </span><span class="s1">modes</span><span class="s2">.</span><span class="s1">size </span><span class="s2">== </span><span class="s1">len</span><span class="s2">(</span><span class="s1">nulls</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_unique_label_indices_intp</span><span class="s2">(</span><span class="s1">writable</span><span class="s2">):</span>
+    <span class="s1">keys </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">)</span>
+    <span class="s1">keys</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable </span><span class="s2">= </span><span class="s1">writable</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">unique_label_indices</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">)</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">5</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">)</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_unique_label_indices</span><span class="s2">():</span>
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">default_rng</span><span class="s2">(</span><span class="s4">2</span><span class="s2">).</span><span class="s1">integers</span><span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1 </span><span class="s2">&lt;&lt; </span><span class="s4">10</span><span class="s2">, </span><span class="s4">1 </span><span class="s2">&lt;&lt; </span><span class="s4">15</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">)</span>
+
+    <span class="s1">left </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">unique_label_indices</span><span class="s2">(</span><span class="s1">a</span><span class="s2">)</span>
+    <span class="s1">right </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">unique</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">return_index</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)[</span><span class="s4">1</span><span class="s2">]</span>
+
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">left</span><span class="s2">, </span><span class="s1">right</span><span class="s2">, </span><span class="s1">check_dtype</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+
+    <span class="s1">a</span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">default_rng</span><span class="s2">(</span><span class="s4">2</span><span class="s2">).</span><span class="s1">choice</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">a</span><span class="s2">), </span><span class="s4">10</span><span class="s2">)] = -</span><span class="s4">1</span>
+    <span class="s1">left </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">unique_label_indices</span><span class="s2">(</span><span class="s1">a</span><span class="s2">)</span>
+    <span class="s1">right </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">unique</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">return_index</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)[</span><span class="s4">1</span><span class="s2">][</span><span class="s4">1</span><span class="s2">:]</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">left</span><span class="s2">, </span><span class="s1">right</span><span class="s2">, </span><span class="s1">check_dtype</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s3">&quot;dtype&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">float32</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">complex128</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">complex64</span><span class="s2">,</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">class </span><span class="s1">TestHelpFunctionsWithNans</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">test_value_count</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">):</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">keys</span><span class="s2">, </span><span class="s1">counts</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">value_count</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s0">True</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">) == </span><span class="s4">0</span>
+        <span class="s1">keys</span><span class="s2">, </span><span class="s1">counts</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">value_count</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">) == </span><span class="s4">1 </span><span class="s0">and </span><span class="s1">np</span><span class="s2">.</span><span class="s1">all</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">isnan</span><span class="s2">(</span><span class="s1">keys</span><span class="s2">))</span>
+        <span class="s0">assert </span><span class="s1">counts</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] == </span><span class="s4">3</span>
+
+    <span class="s0">def </span><span class="s1">test_duplicated_first</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">):</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">duplicated</span><span class="s2">(</span><span class="s1">values</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s0">False</span><span class="s2">, </span><span class="s0">True</span><span class="s2">, </span><span class="s0">True</span><span class="s2">])</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_ismember_yes</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">):</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">ismember</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">values</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s0">True</span><span class="s2">, </span><span class="s0">True</span><span class="s2">, </span><span class="s0">True</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">bool_</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_ismember_no</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">):</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">1</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">ismember</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">values</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s0">False</span><span class="s2">, </span><span class="s0">False</span><span class="s2">, </span><span class="s0">False</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">bool_</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_mode</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">):</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">42</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">ht</span><span class="s2">.</span><span class="s1">mode</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s0">True</span><span class="s2">)[</span><span class="s4">0</span><span class="s2">] == </span><span class="s4">42</span>
+        <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">isnan</span><span class="s2">(</span><span class="s1">ht</span><span class="s2">.</span><span class="s1">mode</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)[</span><span class="s4">0</span><span class="s2">])</span>
+
+
+<span class="s0">def </span><span class="s1">test_ismember_tuple_with_nans</span><span class="s2">():</span>
+    <span class="s5"># GH-41836</span>
+    <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">empty</span><span class="s2">(</span><span class="s4">2</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">object</span><span class="s2">)</span>
+    <span class="s1">values</span><span class="s2">[:] = [(</span><span class="s3">&quot;a&quot;</span><span class="s2">, </span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">)), (</span><span class="s3">&quot;b&quot;</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)]</span>
+    <span class="s1">comps </span><span class="s2">= [(</span><span class="s3">&quot;a&quot;</span><span class="s2">, </span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;nan&quot;</span><span class="s2">))]</span>
+
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">isin</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s1">comps</span><span class="s2">)</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">bool_</span><span class="s2">)</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_float_complex_int_are_equal_as_objects</span><span class="s2">():</span>
+    <span class="s1">values </span><span class="s2">= [</span><span class="s3">&quot;a&quot;</span><span class="s2">, </span><span class="s4">5</span><span class="s2">, </span><span class="s4">5.0</span><span class="s2">, </span><span class="s4">5.0 </span><span class="s2">+ </span><span class="s4">0j</span><span class="s2">]</span>
+    <span class="s1">comps </span><span class="s2">= </span><span class="s1">list</span><span class="s2">(</span><span class="s1">range</span><span class="s2">(</span><span class="s4">129</span><span class="s2">))</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">isin</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">object</span><span class="s2">), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">asarray</span><span class="s2">(</span><span class="s1">comps</span><span class="s2">))</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s0">False</span><span class="s2">, </span><span class="s0">True</span><span class="s2">, </span><span class="s0">True</span><span class="s2">, </span><span class="s0">True</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">bool_</span><span class="s2">)</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

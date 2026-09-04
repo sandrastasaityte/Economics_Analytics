@@ -1,0 +1,1029 @@
+<html>
+<head>
+<title>test_f2py2e.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_f2py2e.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">platform</span>
+<span class="s0">import </span><span class="s1">re</span>
+<span class="s0">import </span><span class="s1">shlex</span>
+<span class="s0">import </span><span class="s1">subprocess</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">import </span><span class="s1">textwrap</span>
+<span class="s0">from </span><span class="s1">collections </span><span class="s0">import </span><span class="s1">namedtuple</span>
+<span class="s0">from </span><span class="s1">pathlib </span><span class="s0">import </span><span class="s1">Path</span>
+
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">f2py</span><span class="s2">.</span><span class="s1">f2py2e </span><span class="s0">import </span><span class="s1">main </span><span class="s0">as </span><span class="s1">f2pycli</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">testing</span><span class="s2">.</span><span class="s1">_private</span><span class="s2">.</span><span class="s1">utils </span><span class="s0">import </span><span class="s1">NOGIL_BUILD</span>
+
+<span class="s0">from </span><span class="s2">. </span><span class="s0">import </span><span class="s1">util</span>
+
+<span class="s3">#######################</span>
+<span class="s3"># F2PY Test utilities #</span>
+<span class="s3">######################</span>
+
+<span class="s3"># Tests for CLI commands which call meson will fail if no compilers are present, these are to be skipped</span>
+
+<span class="s0">def </span><span class="s1">compiler_check_f2pycli</span><span class="s2">():</span>
+    <span class="s0">if not </span><span class="s1">util</span><span class="s2">.</span><span class="s1">has_fortran_compiler</span><span class="s2">():</span>
+        <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span><span class="s4">&quot;CLI command needs a Fortran compiler&quot;</span><span class="s2">)</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+
+<span class="s3">#########################</span>
+<span class="s3"># CLI utils and classes #</span>
+<span class="s3">#########################</span>
+
+
+<span class="s1">PPaths </span><span class="s2">= </span><span class="s1">namedtuple</span><span class="s2">(</span><span class="s4">&quot;PPaths&quot;</span><span class="s2">, </span><span class="s4">&quot;finp, f90inp, pyf, wrap77, wrap90, cmodf&quot;</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">get_io_paths</span><span class="s2">(</span><span class="s1">fname_inp</span><span class="s2">, </span><span class="s1">mname</span><span class="s2">=</span><span class="s4">&quot;untitled&quot;</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Takes in a temporary file for testing and returns the expected output and input paths 
+ 
+    Here expected output is essentially one of any of the possible generated 
+    files. 
+ 
+    ..note:: 
+ 
+         Since this does not actually run f2py, none of these are guaranteed to 
+         exist, and module names are typically incorrect 
+ 
+    Parameters 
+    ---------- 
+    fname_inp : str 
+                The input filename 
+    mname : str, optional 
+                The name of the module, untitled by default 
+ 
+    Returns 
+    ------- 
+    genp : NamedTuple PPaths 
+            The possible paths which are generated, not all of which exist 
+    &quot;&quot;&quot;</span>
+    <span class="s1">bpath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">fname_inp</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">PPaths</span><span class="s2">(</span>
+        <span class="s1">finp</span><span class="s2">=</span><span class="s1">bpath</span><span class="s2">.</span><span class="s1">with_suffix</span><span class="s2">(</span><span class="s4">&quot;.f&quot;</span><span class="s2">),</span>
+        <span class="s1">f90inp</span><span class="s2">=</span><span class="s1">bpath</span><span class="s2">.</span><span class="s1">with_suffix</span><span class="s2">(</span><span class="s4">&quot;.f90&quot;</span><span class="s2">),</span>
+        <span class="s1">pyf</span><span class="s2">=</span><span class="s1">bpath</span><span class="s2">.</span><span class="s1">with_suffix</span><span class="s2">(</span><span class="s4">&quot;.pyf&quot;</span><span class="s2">),</span>
+        <span class="s1">wrap77</span><span class="s2">=</span><span class="s1">bpath</span><span class="s2">.</span><span class="s1">with_name</span><span class="s2">(</span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">mname</span><span class="s0">}</span><span class="s4">-f2pywrappers.f&quot;</span><span class="s2">),</span>
+        <span class="s1">wrap90</span><span class="s2">=</span><span class="s1">bpath</span><span class="s2">.</span><span class="s1">with_name</span><span class="s2">(</span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">mname</span><span class="s0">}</span><span class="s4">-f2pywrappers2.f90&quot;</span><span class="s2">),</span>
+        <span class="s1">cmodf</span><span class="s2">=</span><span class="s1">bpath</span><span class="s2">.</span><span class="s1">with_name</span><span class="s2">(</span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">mname</span><span class="s0">}</span><span class="s4">module.c&quot;</span><span class="s2">),</span>
+    <span class="s2">)</span>
+
+
+<span class="s3">################</span>
+<span class="s3"># CLI Fixtures #</span>
+<span class="s3">################</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">fixture</span><span class="s2">(</span><span class="s1">scope</span><span class="s2">=</span><span class="s4">&quot;session&quot;</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">hello_world_f90</span><span class="s2">(</span><span class="s1">tmpdir_factory</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Generates a single f90 file for testing&quot;&quot;&quot;</span>
+    <span class="s1">fdat </span><span class="s2">= </span><span class="s1">util</span><span class="s2">.</span><span class="s1">getpath</span><span class="s2">(</span><span class="s4">&quot;tests&quot;</span><span class="s2">, </span><span class="s4">&quot;src&quot;</span><span class="s2">, </span><span class="s4">&quot;cli&quot;</span><span class="s2">, </span><span class="s4">&quot;hiworld.f90&quot;</span><span class="s2">).</span><span class="s1">read_text</span><span class="s2">()</span>
+    <span class="s1">fn </span><span class="s2">= </span><span class="s1">tmpdir_factory</span><span class="s2">.</span><span class="s1">getbasetemp</span><span class="s2">() / </span><span class="s4">&quot;hello.f90&quot;</span>
+    <span class="s1">fn</span><span class="s2">.</span><span class="s1">write_text</span><span class="s2">(</span><span class="s1">fdat</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">&quot;ascii&quot;</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">fn</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">fixture</span><span class="s2">(</span><span class="s1">scope</span><span class="s2">=</span><span class="s4">&quot;session&quot;</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">gh23598_warn</span><span class="s2">(</span><span class="s1">tmpdir_factory</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;F90 file for testing warnings in gh23598&quot;&quot;&quot;</span>
+    <span class="s1">fdat </span><span class="s2">= </span><span class="s1">util</span><span class="s2">.</span><span class="s1">getpath</span><span class="s2">(</span><span class="s4">&quot;tests&quot;</span><span class="s2">, </span><span class="s4">&quot;src&quot;</span><span class="s2">, </span><span class="s4">&quot;crackfortran&quot;</span><span class="s2">, </span><span class="s4">&quot;gh23598Warn.f90&quot;</span><span class="s2">).</span><span class="s1">read_text</span><span class="s2">()</span>
+    <span class="s1">fn </span><span class="s2">= </span><span class="s1">tmpdir_factory</span><span class="s2">.</span><span class="s1">getbasetemp</span><span class="s2">() / </span><span class="s4">&quot;gh23598Warn.f90&quot;</span>
+    <span class="s1">fn</span><span class="s2">.</span><span class="s1">write_text</span><span class="s2">(</span><span class="s1">fdat</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">&quot;ascii&quot;</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">fn</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">fixture</span><span class="s2">(</span><span class="s1">scope</span><span class="s2">=</span><span class="s4">&quot;session&quot;</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">gh22819_cli</span><span class="s2">(</span><span class="s1">tmpdir_factory</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;F90 file for testing disallowed CLI arguments in ghff819&quot;&quot;&quot;</span>
+    <span class="s1">fdat </span><span class="s2">= </span><span class="s1">util</span><span class="s2">.</span><span class="s1">getpath</span><span class="s2">(</span><span class="s4">&quot;tests&quot;</span><span class="s2">, </span><span class="s4">&quot;src&quot;</span><span class="s2">, </span><span class="s4">&quot;cli&quot;</span><span class="s2">, </span><span class="s4">&quot;gh_22819.pyf&quot;</span><span class="s2">).</span><span class="s1">read_text</span><span class="s2">()</span>
+    <span class="s1">fn </span><span class="s2">= </span><span class="s1">tmpdir_factory</span><span class="s2">.</span><span class="s1">getbasetemp</span><span class="s2">() / </span><span class="s4">&quot;gh_22819.pyf&quot;</span>
+    <span class="s1">fn</span><span class="s2">.</span><span class="s1">write_text</span><span class="s2">(</span><span class="s1">fdat</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">&quot;ascii&quot;</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">fn</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">fixture</span><span class="s2">(</span><span class="s1">scope</span><span class="s2">=</span><span class="s4">&quot;session&quot;</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">hello_world_f77</span><span class="s2">(</span><span class="s1">tmpdir_factory</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Generates a single f77 file for testing&quot;&quot;&quot;</span>
+    <span class="s1">fdat </span><span class="s2">= </span><span class="s1">util</span><span class="s2">.</span><span class="s1">getpath</span><span class="s2">(</span><span class="s4">&quot;tests&quot;</span><span class="s2">, </span><span class="s4">&quot;src&quot;</span><span class="s2">, </span><span class="s4">&quot;cli&quot;</span><span class="s2">, </span><span class="s4">&quot;hi77.f&quot;</span><span class="s2">).</span><span class="s1">read_text</span><span class="s2">()</span>
+    <span class="s1">fn </span><span class="s2">= </span><span class="s1">tmpdir_factory</span><span class="s2">.</span><span class="s1">getbasetemp</span><span class="s2">() / </span><span class="s4">&quot;hello.f&quot;</span>
+    <span class="s1">fn</span><span class="s2">.</span><span class="s1">write_text</span><span class="s2">(</span><span class="s1">fdat</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">&quot;ascii&quot;</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">fn</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">fixture</span><span class="s2">(</span><span class="s1">scope</span><span class="s2">=</span><span class="s4">&quot;session&quot;</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">retreal_f77</span><span class="s2">(</span><span class="s1">tmpdir_factory</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Generates a single f77 file for testing&quot;&quot;&quot;</span>
+    <span class="s1">fdat </span><span class="s2">= </span><span class="s1">util</span><span class="s2">.</span><span class="s1">getpath</span><span class="s2">(</span><span class="s4">&quot;tests&quot;</span><span class="s2">, </span><span class="s4">&quot;src&quot;</span><span class="s2">, </span><span class="s4">&quot;return_real&quot;</span><span class="s2">, </span><span class="s4">&quot;foo77.f&quot;</span><span class="s2">).</span><span class="s1">read_text</span><span class="s2">()</span>
+    <span class="s1">fn </span><span class="s2">= </span><span class="s1">tmpdir_factory</span><span class="s2">.</span><span class="s1">getbasetemp</span><span class="s2">() / </span><span class="s4">&quot;foo.f&quot;</span>
+    <span class="s1">fn</span><span class="s2">.</span><span class="s1">write_text</span><span class="s2">(</span><span class="s1">fdat</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">&quot;ascii&quot;</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">fn</span>
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">fixture</span><span class="s2">(</span><span class="s1">scope</span><span class="s2">=</span><span class="s4">&quot;session&quot;</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">f2cmap_f90</span><span class="s2">(</span><span class="s1">tmpdir_factory</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Generates a single f90 file for testing&quot;&quot;&quot;</span>
+    <span class="s1">fdat </span><span class="s2">= </span><span class="s1">util</span><span class="s2">.</span><span class="s1">getpath</span><span class="s2">(</span><span class="s4">&quot;tests&quot;</span><span class="s2">, </span><span class="s4">&quot;src&quot;</span><span class="s2">, </span><span class="s4">&quot;f2cmap&quot;</span><span class="s2">, </span><span class="s4">&quot;isoFortranEnvMap.f90&quot;</span><span class="s2">).</span><span class="s1">read_text</span><span class="s2">()</span>
+    <span class="s1">f2cmap </span><span class="s2">= </span><span class="s1">util</span><span class="s2">.</span><span class="s1">getpath</span><span class="s2">(</span><span class="s4">&quot;tests&quot;</span><span class="s2">, </span><span class="s4">&quot;src&quot;</span><span class="s2">, </span><span class="s4">&quot;f2cmap&quot;</span><span class="s2">, </span><span class="s4">&quot;.f2py_f2cmap&quot;</span><span class="s2">).</span><span class="s1">read_text</span><span class="s2">()</span>
+    <span class="s1">fn </span><span class="s2">= </span><span class="s1">tmpdir_factory</span><span class="s2">.</span><span class="s1">getbasetemp</span><span class="s2">() / </span><span class="s4">&quot;f2cmap.f90&quot;</span>
+    <span class="s1">fmap </span><span class="s2">= </span><span class="s1">tmpdir_factory</span><span class="s2">.</span><span class="s1">getbasetemp</span><span class="s2">() / </span><span class="s4">&quot;mapfile&quot;</span>
+    <span class="s1">fn</span><span class="s2">.</span><span class="s1">write_text</span><span class="s2">(</span><span class="s1">fdat</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">&quot;ascii&quot;</span><span class="s2">)</span>
+    <span class="s1">fmap</span><span class="s2">.</span><span class="s1">write_text</span><span class="s2">(</span><span class="s1">f2cmap</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">&quot;ascii&quot;</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">fn</span>
+
+<span class="s3">#########</span>
+<span class="s3"># Tests #</span>
+<span class="s3">#########</span>
+
+<span class="s0">def </span><span class="s1">test_gh22819_cli</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">gh22819_cli</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Check that module names are handled correctly 
+    gh-22819 
+    Essentially, the -m name cannot be used to import the module, so the module 
+    named in the .pyf needs to be used instead 
+ 
+    CLI :: -m and a .pyf file 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">gh22819_cli</span><span class="s2">)</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, </span><span class="s4">f&quot;f2py -m blah </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">gen_paths </span><span class="s2">= [</span><span class="s1">item</span><span class="s2">.</span><span class="s1">name </span><span class="s0">for </span><span class="s1">item </span><span class="s0">in </span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">rglob</span><span class="s2">(</span><span class="s4">&quot;*&quot;</span><span class="s2">) </span><span class="s0">if </span><span class="s1">item</span><span class="s2">.</span><span class="s1">is_file</span><span class="s2">()]</span>
+        <span class="s0">assert </span><span class="s4">&quot;blahmodule.c&quot; </span><span class="s0">not in </span><span class="s1">gen_paths  </span><span class="s3"># shouldn't be generated</span>
+        <span class="s0">assert </span><span class="s4">&quot;blah-f2pywrappers.f&quot; </span><span class="s0">not in </span><span class="s1">gen_paths</span>
+        <span class="s0">assert </span><span class="s4">&quot;test_22819-f2pywrappers.f&quot; </span><span class="s0">in </span><span class="s1">gen_paths</span>
+        <span class="s0">assert </span><span class="s4">&quot;test_22819module.c&quot; </span><span class="s0">in </span><span class="s1">gen_paths</span>
+
+
+<span class="s0">def </span><span class="s1">test_gh22819_many_pyf</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">gh22819_cli</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Only one .pyf file allowed 
+    gh-22819 
+    CLI :: .pyf files 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">gh22819_cli</span><span class="s2">)</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, </span><span class="s4">f&quot;f2py -m blah </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">hello.pyf&quot;</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s4">&quot;Only one .pyf file per call&quot;</span><span class="s2">):</span>
+            <span class="s1">f2pycli</span><span class="s2">()</span>
+
+
+<span class="s0">def </span><span class="s1">test_gh23598_warn</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">gh23598_warn</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s1">foutl </span><span class="s2">= </span><span class="s1">get_io_paths</span><span class="s2">(</span><span class="s1">gh23598_warn</span><span class="s2">, </span><span class="s1">mname</span><span class="s2">=</span><span class="s4">&quot;test&quot;</span><span class="s2">)</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">foutl</span><span class="s2">.</span><span class="s1">f90inp</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span>
+        <span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+        <span class="s4">f'f2py </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">-m test'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()  </span><span class="s3"># Generate files</span>
+        <span class="s1">wrapper </span><span class="s2">= </span><span class="s1">foutl</span><span class="s2">.</span><span class="s1">wrap90</span><span class="s2">.</span><span class="s1">read_text</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s4">&quot;intproductf2pywrap, intpr&quot; </span><span class="s0">not in </span><span class="s1">wrapper</span>
+
+
+<span class="s0">def </span><span class="s1">test_gen_pyf</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Ensures that a signature file is generated via the CLI 
+    CLI :: -h 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">opath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">).</span><span class="s1">stem </span><span class="s2">+ </span><span class="s4">&quot;.pyf&quot;</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, </span><span class="s4">f'f2py -h </span><span class="s0">{</span><span class="s1">opath</span><span class="s0">} {</span><span class="s1">ipath</span><span class="s0">}</span><span class="s4">'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()  </span><span class="s3"># Generate wrappers</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s4">&quot;Saving signatures to file&quot; </span><span class="s0">in </span><span class="s1">out</span>
+        <span class="s0">assert </span><span class="s1">Path</span><span class="s2">(</span><span class="s4">f'</span><span class="s0">{</span><span class="s1">opath</span><span class="s0">}</span><span class="s4">'</span><span class="s2">).</span><span class="s1">exists</span><span class="s2">()</span>
+
+
+<span class="s0">def </span><span class="s1">test_gen_pyf_stdout</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Ensures that a signature file can be dumped to stdout 
+    CLI :: -h 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, </span><span class="s4">f'f2py -h stdout </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">}</span><span class="s4">'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s4">&quot;Saving signatures to file&quot; </span><span class="s0">in </span><span class="s1">out</span>
+        <span class="s0">assert </span><span class="s4">&quot;function hi() ! in &quot; </span><span class="s0">in </span><span class="s1">out</span>
+
+
+<span class="s0">def </span><span class="s1">test_gen_pyf_no_overwrite</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Ensures that the CLI refuses to overwrite signature files 
+    CLI :: -h without --overwrite-signature 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, </span><span class="s4">f'f2py -h faker.pyf </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">}</span><span class="s4">'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">Path</span><span class="s2">(</span><span class="s4">&quot;faker.pyf&quot;</span><span class="s2">).</span><span class="s1">write_text</span><span class="s2">(</span><span class="s4">&quot;Fake news&quot;</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">&quot;ascii&quot;</span><span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">SystemExit</span><span class="s2">):</span>
+            <span class="s1">f2pycli</span><span class="s2">()  </span><span class="s3"># Refuse to overwrite</span>
+            <span class="s1">_</span><span class="s2">, </span><span class="s1">err </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+            <span class="s0">assert </span><span class="s4">&quot;Use --overwrite-signature to overwrite&quot; </span><span class="s0">in </span><span class="s1">err</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">version_info </span><span class="s2">&lt;= (</span><span class="s6">3</span><span class="s2">, </span><span class="s6">12</span><span class="s2">), </span><span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;Python 3.12 required&quot;</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">slow</span>
+<span class="s0">def </span><span class="s1">test_untitled_cli</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Check that modules are named correctly 
+ 
+    CLI :: defaults 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, </span><span class="s4">f&quot;f2py --backend meson -c </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">compiler_check_f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s4">&quot;untitledmodule.c&quot; </span><span class="s0">in </span><span class="s1">out</span>
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">slow</span>
+<span class="s0">def </span><span class="s1">test_no_distutils_backend</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Check that distutils backend and related options fail 
+    CLI :: --fcompiler --help-link --backend distutils 
+    &quot;&quot;&quot;</span>
+    <span class="s1">MNAME </span><span class="s2">= </span><span class="s4">&quot;hi&quot;</span>
+    <span class="s1">foutl </span><span class="s2">= </span><span class="s1">get_io_paths</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">mname</span><span class="s2">=</span><span class="s1">MNAME</span><span class="s2">)</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">foutl</span><span class="s2">.</span><span class="s1">f90inp</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span>
+        <span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, </span><span class="s4">f&quot;f2py </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">-c --fcompiler=gfortran -m </span><span class="s0">{</span><span class="s1">MNAME</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">.</span><span class="s1">split</span><span class="s2">()</span>
+    <span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">compiler_check_f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s4">&quot;--fcompiler cannot be used with meson&quot; </span><span class="s0">in </span><span class="s1">out</span>
+
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span>
+        <span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, [</span><span class="s4">&quot;f2py&quot;</span><span class="s2">, </span><span class="s4">&quot;--help-link&quot;</span><span class="s2">]</span>
+    <span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">SystemExit</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s4">&quot;Unknown option --help-link&quot; </span><span class="s0">in </span><span class="s1">out</span>
+
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span>
+        <span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, [</span><span class="s4">&quot;f2py&quot;</span><span class="s2">, </span><span class="s4">&quot;--backend&quot;</span><span class="s2">, </span><span class="s4">&quot;distutils&quot;</span><span class="s2">]</span>
+    <span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">SystemExit</span><span class="s2">):</span>
+        <span class="s1">compiler_check_f2pycli</span><span class="s2">()</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s4">&quot;'distutils' backend was removed&quot; </span><span class="s0">in </span><span class="s1">out</span>
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">xfail</span>
+<span class="s0">def </span><span class="s1">test_f2py_skip</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">retreal_f77</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Tests that functions can be skipped 
+    CLI :: skip: 
+    &quot;&quot;&quot;</span>
+    <span class="s1">foutl </span><span class="s2">= </span><span class="s1">get_io_paths</span><span class="s2">(</span><span class="s1">retreal_f77</span><span class="s2">, </span><span class="s1">mname</span><span class="s2">=</span><span class="s4">&quot;test&quot;</span><span class="s2">)</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">foutl</span><span class="s2">.</span><span class="s1">finp</span>
+    <span class="s1">toskip </span><span class="s2">= </span><span class="s4">&quot;t0 t4 t8 sd s8 s4&quot;</span>
+    <span class="s1">remaining </span><span class="s2">= </span><span class="s4">&quot;td s0&quot;</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span>
+        <span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+        <span class="s4">f'f2py </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">-m test skip: </span><span class="s0">{</span><span class="s1">toskip</span><span class="s0">}</span><span class="s4">'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">err </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">for </span><span class="s1">skey </span><span class="s0">in </span><span class="s1">toskip</span><span class="s2">.</span><span class="s1">split</span><span class="s2">():</span>
+            <span class="s0">assert </span><span class="s2">(</span>
+                <span class="s4">f'buildmodule: Could not found the body of interfaced routine &quot;</span><span class="s0">{</span><span class="s1">skey</span><span class="s0">}</span><span class="s4">&quot;. Skipping.'</span>
+                <span class="s0">in </span><span class="s1">err</span><span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">rkey </span><span class="s0">in </span><span class="s1">remaining</span><span class="s2">.</span><span class="s1">split</span><span class="s2">():</span>
+            <span class="s0">assert </span><span class="s4">f'Constructing wrapper function &quot;</span><span class="s0">{</span><span class="s1">rkey</span><span class="s0">}</span><span class="s4">&quot;' </span><span class="s0">in </span><span class="s1">out</span>
+
+
+<span class="s0">def </span><span class="s1">test_f2py_only</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">retreal_f77</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Test that functions can be kept by only: 
+    CLI :: only: 
+    &quot;&quot;&quot;</span>
+    <span class="s1">foutl </span><span class="s2">= </span><span class="s1">get_io_paths</span><span class="s2">(</span><span class="s1">retreal_f77</span><span class="s2">, </span><span class="s1">mname</span><span class="s2">=</span><span class="s4">&quot;test&quot;</span><span class="s2">)</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">foutl</span><span class="s2">.</span><span class="s1">finp</span>
+    <span class="s1">toskip </span><span class="s2">= </span><span class="s4">&quot;t0 t4 t8 sd s8 s4&quot;</span>
+    <span class="s1">tokeep </span><span class="s2">= </span><span class="s4">&quot;td s0&quot;</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span>
+        <span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+        <span class="s4">f'f2py </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">-m test only: </span><span class="s0">{</span><span class="s1">tokeep</span><span class="s0">}</span><span class="s4">'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">err </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">for </span><span class="s1">skey </span><span class="s0">in </span><span class="s1">toskip</span><span class="s2">.</span><span class="s1">split</span><span class="s2">():</span>
+            <span class="s0">assert </span><span class="s2">(</span>
+                <span class="s4">f'buildmodule: Could not find the body of interfaced routine &quot;</span><span class="s0">{</span><span class="s1">skey</span><span class="s0">}</span><span class="s4">&quot;. Skipping.'</span>
+                <span class="s0">in </span><span class="s1">err</span><span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">rkey </span><span class="s0">in </span><span class="s1">tokeep</span><span class="s2">.</span><span class="s1">split</span><span class="s2">():</span>
+            <span class="s0">assert </span><span class="s4">f'Constructing wrapper function &quot;</span><span class="s0">{</span><span class="s1">rkey</span><span class="s0">}</span><span class="s4">&quot;' </span><span class="s0">in </span><span class="s1">out</span>
+
+
+<span class="s0">def </span><span class="s1">test_file_processing_switch</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">retreal_f77</span><span class="s2">,</span>
+                                <span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Tests that it is possible to return to file processing mode 
+    CLI :: : 
+    BUG: numpy-gh #20520 
+    &quot;&quot;&quot;</span>
+    <span class="s1">foutl </span><span class="s2">= </span><span class="s1">get_io_paths</span><span class="s2">(</span><span class="s1">retreal_f77</span><span class="s2">, </span><span class="s1">mname</span><span class="s2">=</span><span class="s4">&quot;test&quot;</span><span class="s2">)</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">foutl</span><span class="s2">.</span><span class="s1">finp</span>
+    <span class="s1">toskip </span><span class="s2">= </span><span class="s4">&quot;t0 t4 t8 sd s8 s4&quot;</span>
+    <span class="s1">ipath2 </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">tokeep </span><span class="s2">= </span><span class="s4">&quot;td s0 hi&quot;  </span><span class="s3"># hi is in ipath2</span>
+    <span class="s1">mname </span><span class="s2">= </span><span class="s4">&quot;blah&quot;</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span>
+        <span class="s1">sys</span><span class="s2">,</span>
+        <span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+        <span class="s4">f'f2py </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">-m </span><span class="s0">{</span><span class="s1">mname</span><span class="s0">} </span><span class="s4">only: </span><span class="s0">{</span><span class="s1">tokeep</span><span class="s0">} </span><span class="s4">: </span><span class="s0">{</span><span class="s1">ipath2</span><span class="s0">}</span><span class="s4">'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span>
+        <span class="s2">),</span>
+    <span class="s2">)</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">err </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">for </span><span class="s1">skey </span><span class="s0">in </span><span class="s1">toskip</span><span class="s2">.</span><span class="s1">split</span><span class="s2">():</span>
+            <span class="s0">assert </span><span class="s2">(</span>
+                <span class="s4">f'buildmodule: Could not find the body of interfaced routine &quot;</span><span class="s0">{</span><span class="s1">skey</span><span class="s0">}</span><span class="s4">&quot;. Skipping.'</span>
+                <span class="s0">in </span><span class="s1">err</span><span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">rkey </span><span class="s0">in </span><span class="s1">tokeep</span><span class="s2">.</span><span class="s1">split</span><span class="s2">():</span>
+            <span class="s0">assert </span><span class="s4">f'Constructing wrapper function &quot;</span><span class="s0">{</span><span class="s1">rkey</span><span class="s0">}</span><span class="s4">&quot;' </span><span class="s0">in </span><span class="s1">out</span>
+
+
+<span class="s0">def </span><span class="s1">test_mod_gen_f77</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Checks the generation of files based on a module name 
+    CLI :: -m 
+    &quot;&quot;&quot;</span>
+    <span class="s1">MNAME </span><span class="s2">= </span><span class="s4">&quot;hi&quot;</span>
+    <span class="s1">foutl </span><span class="s2">= </span><span class="s1">get_io_paths</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">mname</span><span class="s2">=</span><span class="s1">MNAME</span><span class="s2">)</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">foutl</span><span class="s2">.</span><span class="s1">f90inp</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, </span><span class="s4">f'f2py </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">-m </span><span class="s0">{</span><span class="s1">MNAME</span><span class="s0">}</span><span class="s4">'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+
+    <span class="s3"># Always generate C module</span>
+    <span class="s0">assert </span><span class="s1">Path</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">(</span><span class="s1">foutl</span><span class="s2">.</span><span class="s1">cmodf</span><span class="s2">)</span>
+    <span class="s3"># File contains a function, check for F77 wrappers</span>
+    <span class="s0">assert </span><span class="s1">Path</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">(</span><span class="s1">foutl</span><span class="s2">.</span><span class="s1">wrap77</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_mod_gen_gh25263</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f77</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Check that pyf files are correctly generated with module structure 
+    CLI :: -m &lt;name&gt; -h pyf_file 
+    BUG: numpy-gh #20520 
+    &quot;&quot;&quot;</span>
+    <span class="s1">MNAME </span><span class="s2">= </span><span class="s4">&quot;hi&quot;</span>
+    <span class="s1">foutl </span><span class="s2">= </span><span class="s1">get_io_paths</span><span class="s2">(</span><span class="s1">hello_world_f77</span><span class="s2">, </span><span class="s1">mname</span><span class="s2">=</span><span class="s1">MNAME</span><span class="s2">)</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">foutl</span><span class="s2">.</span><span class="s1">finp</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, </span><span class="s4">f'f2py </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">-m </span><span class="s0">{</span><span class="s1">MNAME</span><span class="s0">} </span><span class="s4">-h hi.pyf'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s0">with </span><span class="s1">Path</span><span class="s2">(</span><span class="s4">'hi.pyf'</span><span class="s2">).</span><span class="s1">open</span><span class="s2">() </span><span class="s0">as </span><span class="s1">hipyf</span><span class="s2">:</span>
+            <span class="s1">pyfdat </span><span class="s2">= </span><span class="s1">hipyf</span><span class="s2">.</span><span class="s1">read</span><span class="s2">()</span>
+            <span class="s0">assert </span><span class="s4">&quot;python module hi&quot; </span><span class="s0">in </span><span class="s1">pyfdat</span>
+
+
+<span class="s0">def </span><span class="s1">test_lower_cmod</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f77</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Lowers cases by flag or when -h is present 
+ 
+    CLI :: --[no-]lower 
+    &quot;&quot;&quot;</span>
+    <span class="s1">foutl </span><span class="s2">= </span><span class="s1">get_io_paths</span><span class="s2">(</span><span class="s1">hello_world_f77</span><span class="s2">, </span><span class="s1">mname</span><span class="s2">=</span><span class="s4">&quot;test&quot;</span><span class="s2">)</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">foutl</span><span class="s2">.</span><span class="s1">finp</span>
+    <span class="s1">capshi </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">compile</span><span class="s2">(</span><span class="s4">r&quot;HI\(\)&quot;</span><span class="s2">)</span>
+    <span class="s1">capslo </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">compile</span><span class="s2">(</span><span class="s4">r&quot;hi\(\)&quot;</span><span class="s2">)</span>
+    <span class="s3"># Case I: --lower is passed</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, </span><span class="s4">f'f2py </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">-m test --lower'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">capslo</span><span class="s2">.</span><span class="s1">search</span><span class="s2">(</span><span class="s1">out</span><span class="s2">) </span><span class="s0">is not None</span>
+        <span class="s0">assert </span><span class="s1">capshi</span><span class="s2">.</span><span class="s1">search</span><span class="s2">(</span><span class="s1">out</span><span class="s2">) </span><span class="s0">is None</span>
+    <span class="s3"># Case II: --no-lower is passed</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+                        <span class="s4">f'f2py </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">-m test --no-lower'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">capslo</span><span class="s2">.</span><span class="s1">search</span><span class="s2">(</span><span class="s1">out</span><span class="s2">) </span><span class="s0">is None</span>
+        <span class="s0">assert </span><span class="s1">capshi</span><span class="s2">.</span><span class="s1">search</span><span class="s2">(</span><span class="s1">out</span><span class="s2">) </span><span class="s0">is not None</span>
+
+
+<span class="s0">def </span><span class="s1">test_lower_sig</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f77</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Lowers cases in signature files by flag or when -h is present 
+ 
+    CLI :: --[no-]lower -h 
+    &quot;&quot;&quot;</span>
+    <span class="s1">foutl </span><span class="s2">= </span><span class="s1">get_io_paths</span><span class="s2">(</span><span class="s1">hello_world_f77</span><span class="s2">, </span><span class="s1">mname</span><span class="s2">=</span><span class="s4">&quot;test&quot;</span><span class="s2">)</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">foutl</span><span class="s2">.</span><span class="s1">finp</span>
+    <span class="s3"># Signature files</span>
+    <span class="s1">capshi </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">compile</span><span class="s2">(</span><span class="s4">r&quot;Block: HI&quot;</span><span class="s2">)</span>
+    <span class="s1">capslo </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">compile</span><span class="s2">(</span><span class="s4">r&quot;Block: hi&quot;</span><span class="s2">)</span>
+    <span class="s3"># Case I: --lower is implied by -h</span>
+    <span class="s3"># TODO: Clean up to prevent passing --overwrite-signature</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span>
+        <span class="s1">sys</span><span class="s2">,</span>
+        <span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+        <span class="s4">f'f2py </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">-h </span><span class="s0">{</span><span class="s1">foutl</span><span class="s2">.</span><span class="s1">pyf</span><span class="s0">} </span><span class="s4">-m test --overwrite-signature'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(),</span>
+    <span class="s2">)</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">capslo</span><span class="s2">.</span><span class="s1">search</span><span class="s2">(</span><span class="s1">out</span><span class="s2">) </span><span class="s0">is not None</span>
+        <span class="s0">assert </span><span class="s1">capshi</span><span class="s2">.</span><span class="s1">search</span><span class="s2">(</span><span class="s1">out</span><span class="s2">) </span><span class="s0">is None</span>
+
+    <span class="s3"># Case II: --no-lower overrides -h</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span>
+        <span class="s1">sys</span><span class="s2">,</span>
+        <span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+        <span class="s4">f'f2py </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">-h </span><span class="s0">{</span><span class="s1">foutl</span><span class="s2">.</span><span class="s1">pyf</span><span class="s0">} </span><span class="s4">-m test --overwrite-signature --no-lower'</span>
+        <span class="s2">.</span><span class="s1">split</span><span class="s2">(),</span>
+    <span class="s2">)</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">capslo</span><span class="s2">.</span><span class="s1">search</span><span class="s2">(</span><span class="s1">out</span><span class="s2">) </span><span class="s0">is None</span>
+        <span class="s0">assert </span><span class="s1">capshi</span><span class="s2">.</span><span class="s1">search</span><span class="s2">(</span><span class="s1">out</span><span class="s2">) </span><span class="s0">is not None</span>
+
+
+<span class="s0">def </span><span class="s1">test_build_dir</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Ensures that the build directory can be specified 
+ 
+    CLI :: --build-dir 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">mname </span><span class="s2">= </span><span class="s4">&quot;blah&quot;</span>
+    <span class="s1">odir </span><span class="s2">= </span><span class="s4">&quot;tttmp&quot;</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+                        <span class="s4">f'f2py -m </span><span class="s0">{</span><span class="s1">mname</span><span class="s0">} {</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">--build-dir </span><span class="s0">{</span><span class="s1">odir</span><span class="s0">}</span><span class="s4">'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s4">f&quot;Wrote C/API module </span><span class="s0">\&quot;{</span><span class="s1">mname</span><span class="s0">}\&quot;</span><span class="s4">&quot; </span><span class="s0">in </span><span class="s1">out</span>
+
+
+<span class="s0">def </span><span class="s1">test_overwrite</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Ensures that the build directory can be specified 
+ 
+    CLI :: --overwrite-signature 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span>
+        <span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+        <span class="s4">f'f2py -h faker.pyf </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">--overwrite-signature'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">Path</span><span class="s2">(</span><span class="s4">&quot;faker.pyf&quot;</span><span class="s2">).</span><span class="s1">write_text</span><span class="s2">(</span><span class="s4">&quot;Fake news&quot;</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">&quot;ascii&quot;</span><span class="s2">)</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s4">&quot;Saving signatures to file&quot; </span><span class="s0">in </span><span class="s1">out</span>
+
+
+<span class="s0">def </span><span class="s1">test_latexdoc</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Ensures that TeX documentation is written out 
+ 
+    CLI :: --latex-doc 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">mname </span><span class="s2">= </span><span class="s4">&quot;blah&quot;</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+                        <span class="s4">f'f2py -m </span><span class="s0">{</span><span class="s1">mname</span><span class="s0">} {</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">--latex-doc'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s4">&quot;Documentation is saved to file&quot; </span><span class="s0">in </span><span class="s1">out</span>
+        <span class="s0">with </span><span class="s1">Path</span><span class="s2">(</span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">mname</span><span class="s0">}</span><span class="s4">module.tex&quot;</span><span class="s2">).</span><span class="s1">open</span><span class="s2">() </span><span class="s0">as </span><span class="s1">otex</span><span class="s2">:</span>
+            <span class="s0">assert </span><span class="s4">&quot;</span><span class="s0">\\</span><span class="s4">documentclass&quot; </span><span class="s0">in </span><span class="s1">otex</span><span class="s2">.</span><span class="s1">read</span><span class="s2">()</span>
+
+
+<span class="s0">def </span><span class="s1">test_nolatexdoc</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Ensures that TeX documentation is written out 
+ 
+    CLI :: --no-latex-doc 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">mname </span><span class="s2">= </span><span class="s4">&quot;blah&quot;</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+                        <span class="s4">f'f2py -m </span><span class="s0">{</span><span class="s1">mname</span><span class="s0">} {</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">--no-latex-doc'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s4">&quot;Documentation is saved to file&quot; </span><span class="s0">not in </span><span class="s1">out</span>
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">slow</span>
+<span class="s0">def </span><span class="s1">test_latex_doc_gh30268</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">):</span>
+
+    <span class="s0">if not </span><span class="s1">util</span><span class="s2">.</span><span class="s1">has_fortran_compiler</span><span class="s2">():</span>
+        <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span><span class="s4">&quot;No Fortran compiler found&quot;</span><span class="s2">)</span>
+
+    <span class="s1">fsource </span><span class="s2">= </span><span class="s1">textwrap</span><span class="s2">.</span><span class="s1">dedent</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot; 
+        subroutine foo 
+        end 
+    &quot;&quot;&quot;</span><span class="s2">)</span>
+
+    <span class="s1">fpath </span><span class="s2">= </span><span class="s1">tmp_path </span><span class="s2">/ </span><span class="s4">&quot;test_latex.f90&quot;</span>
+    <span class="s0">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">fpath</span><span class="s2">, </span><span class="s4">&quot;w&quot;</span><span class="s2">) </span><span class="s0">as </span><span class="s1">f</span><span class="s2">:</span>
+        <span class="s1">f</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s1">fsource</span><span class="s2">)</span>
+
+    <span class="s1">cmd </span><span class="s2">= [</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">executable</span><span class="s2">, </span><span class="s4">&quot;-m&quot;</span><span class="s2">, </span><span class="s4">&quot;numpy.f2py&quot;</span><span class="s2">, </span><span class="s4">&quot;-c&quot;</span><span class="s2">, </span><span class="s1">str</span><span class="s2">(</span><span class="s1">fpath</span><span class="s2">), </span><span class="s4">&quot;-m&quot;</span><span class="s2">, </span><span class="s4">&quot;test_latex&quot;</span><span class="s2">, </span><span class="s4">&quot;--latex-doc&quot;</span><span class="s2">]</span>
+    <span class="s1">subprocess</span><span class="s2">.</span><span class="s1">check_call</span><span class="s2">(</span><span class="s1">cmd</span><span class="s2">, </span><span class="s1">cwd</span><span class="s2">=</span><span class="s1">tmp_path</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_shortlatex</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Ensures that truncated documentation is written out 
+ 
+    TODO: Test to ensure this has no effect without --latex-doc 
+    CLI :: --latex-doc --short-latex 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">mname </span><span class="s2">= </span><span class="s4">&quot;blah&quot;</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span>
+        <span class="s1">sys</span><span class="s2">,</span>
+        <span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+        <span class="s4">f'f2py -m </span><span class="s0">{</span><span class="s1">mname</span><span class="s0">} {</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">--latex-doc --short-latex'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(),</span>
+    <span class="s2">)</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s4">&quot;Documentation is saved to file&quot; </span><span class="s0">in </span><span class="s1">out</span>
+        <span class="s0">with </span><span class="s1">Path</span><span class="s2">(</span><span class="s4">f&quot;./</span><span class="s0">{</span><span class="s1">mname</span><span class="s0">}</span><span class="s4">module.tex&quot;</span><span class="s2">).</span><span class="s1">open</span><span class="s2">() </span><span class="s0">as </span><span class="s1">otex</span><span class="s2">:</span>
+            <span class="s0">assert </span><span class="s4">&quot;</span><span class="s0">\\</span><span class="s4">documentclass&quot; </span><span class="s0">not in </span><span class="s1">otex</span><span class="s2">.</span><span class="s1">read</span><span class="s2">()</span>
+
+
+<span class="s0">def </span><span class="s1">test_restdoc</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Ensures that RsT documentation is written out 
+ 
+    CLI :: --rest-doc 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">mname </span><span class="s2">= </span><span class="s4">&quot;blah&quot;</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+                        <span class="s4">f'f2py -m </span><span class="s0">{</span><span class="s1">mname</span><span class="s0">} {</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">--rest-doc'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s4">&quot;ReST Documentation is saved to file&quot; </span><span class="s0">in </span><span class="s1">out</span>
+        <span class="s0">with </span><span class="s1">Path</span><span class="s2">(</span><span class="s4">f&quot;./</span><span class="s0">{</span><span class="s1">mname</span><span class="s0">}</span><span class="s4">module.rest&quot;</span><span class="s2">).</span><span class="s1">open</span><span class="s2">() </span><span class="s0">as </span><span class="s1">orst</span><span class="s2">:</span>
+            <span class="s0">assert </span><span class="s4">r&quot;.. -*- rest -*-&quot; </span><span class="s0">in </span><span class="s1">orst</span><span class="s2">.</span><span class="s1">read</span><span class="s2">()</span>
+
+
+<span class="s0">def </span><span class="s1">test_norestexdoc</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Ensures that TeX documentation is written out 
+ 
+    CLI :: --no-rest-doc 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">mname </span><span class="s2">= </span><span class="s4">&quot;blah&quot;</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+                        <span class="s4">f'f2py -m </span><span class="s0">{</span><span class="s1">mname</span><span class="s0">} {</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">--no-rest-doc'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s4">&quot;ReST Documentation is saved to file&quot; </span><span class="s0">not in </span><span class="s1">out</span>
+
+
+<span class="s0">def </span><span class="s1">test_debugcapi</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Ensures that debugging wrappers are written 
+ 
+    CLI :: --debug-capi 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">mname </span><span class="s2">= </span><span class="s4">&quot;blah&quot;</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+                        <span class="s4">f'f2py -m </span><span class="s0">{</span><span class="s1">mname</span><span class="s0">} {</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">--debug-capi'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s0">with </span><span class="s1">Path</span><span class="s2">(</span><span class="s4">f&quot;./</span><span class="s0">{</span><span class="s1">mname</span><span class="s0">}</span><span class="s4">module.c&quot;</span><span class="s2">).</span><span class="s1">open</span><span class="s2">() </span><span class="s0">as </span><span class="s1">ocmod</span><span class="s2">:</span>
+            <span class="s0">assert </span><span class="s4">r&quot;#define DEBUGCFUNCS&quot; </span><span class="s0">in </span><span class="s1">ocmod</span><span class="s2">.</span><span class="s1">read</span><span class="s2">()</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span><span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;Consistently fails on CI; noisy so skip not xfail.&quot;</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_debugcapi_bld</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Ensures that debugging wrappers work 
+ 
+    CLI :: --debug-capi -c 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">mname </span><span class="s2">= </span><span class="s4">&quot;blah&quot;</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+                        <span class="s4">f'f2py -m </span><span class="s0">{</span><span class="s1">mname</span><span class="s0">} {</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">-c --debug-capi'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">cmd_run </span><span class="s2">= </span><span class="s1">shlex</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">executable</span><span class="s0">} </span><span class="s4">-c </span><span class="s0">\&quot;</span><span class="s4">import blah; blah.hi()</span><span class="s0">\&quot;</span><span class="s4">&quot;</span><span class="s2">)</span>
+        <span class="s1">rout </span><span class="s2">= </span><span class="s1">subprocess</span><span class="s2">.</span><span class="s1">run</span><span class="s2">(</span><span class="s1">cmd_run</span><span class="s2">, </span><span class="s1">capture_output</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">'UTF-8'</span><span class="s2">)</span>
+        <span class="s1">eout </span><span class="s2">= </span><span class="s4">' Hello World</span><span class="s0">\n</span><span class="s4">'</span>
+        <span class="s1">eerr </span><span class="s2">= </span><span class="s1">textwrap</span><span class="s2">.</span><span class="s1">dedent</span><span class="s2">(</span><span class="s4">&quot;&quot;&quot;</span><span class="s0">\ 
+</span><span class="s4">debug-capi:Python C/API function blah.hi() 
+debug-capi:float hi=:output,hidden,scalar 
+debug-capi:hi=0 
+debug-capi:Fortran subroutine `f2pywraphi(&amp;hi)' 
+debug-capi:hi=0 
+debug-capi:Building return value. 
+debug-capi:Python C/API function blah.hi: successful. 
+debug-capi:Freeing memory. 
+        &quot;&quot;&quot;</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">rout</span><span class="s2">.</span><span class="s1">stdout </span><span class="s2">== </span><span class="s1">eout</span>
+        <span class="s0">assert </span><span class="s1">rout</span><span class="s2">.</span><span class="s1">stderr </span><span class="s2">== </span><span class="s1">eerr</span>
+
+
+<span class="s0">def </span><span class="s1">test_wrapfunc_def</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Ensures that fortran subroutine wrappers for F77 are included by default 
+ 
+    CLI :: --[no]-wrap-functions 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># Implied</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">mname </span><span class="s2">= </span><span class="s4">&quot;blah&quot;</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, </span><span class="s4">f'f2py -m </span><span class="s0">{</span><span class="s1">mname</span><span class="s0">} {</span><span class="s1">ipath</span><span class="s0">}</span><span class="s4">'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+    <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+    <span class="s0">assert </span><span class="s4">r&quot;Fortran 77 wrappers are saved to&quot; </span><span class="s0">in </span><span class="s1">out</span>
+
+    <span class="s3"># Explicit</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+                        <span class="s4">f'f2py -m </span><span class="s0">{</span><span class="s1">mname</span><span class="s0">} {</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">--wrap-functions'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s4">r&quot;Fortran 77 wrappers are saved to&quot; </span><span class="s0">in </span><span class="s1">out</span>
+
+
+<span class="s0">def </span><span class="s1">test_nowrapfunc</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Ensures that fortran subroutine wrappers for F77 can be disabled 
+ 
+    CLI :: --no-wrap-functions 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">mname </span><span class="s2">= </span><span class="s4">&quot;blah&quot;</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+                        <span class="s4">f'f2py -m </span><span class="s0">{</span><span class="s1">mname</span><span class="s0">} {</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">--no-wrap-functions'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s4">r&quot;Fortran 77 wrappers are saved to&quot; </span><span class="s0">not in </span><span class="s1">out</span>
+
+
+<span class="s0">def </span><span class="s1">test_inclheader</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Add to the include directories 
+ 
+    CLI :: -include 
+    TODO: Document this in the help string 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">mname </span><span class="s2">= </span><span class="s4">&quot;blah&quot;</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span>
+        <span class="s1">sys</span><span class="s2">,</span>
+        <span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+        <span class="s4">f'f2py -m </span><span class="s0">{</span><span class="s1">mname</span><span class="s0">} {</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">-include&lt;stdbool.h&gt; -include&lt;stdio.h&gt; '</span><span class="s2">.</span>
+        <span class="s1">split</span><span class="s2">(),</span>
+    <span class="s2">)</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s0">with </span><span class="s1">Path</span><span class="s2">(</span><span class="s4">f&quot;./</span><span class="s0">{</span><span class="s1">mname</span><span class="s0">}</span><span class="s4">module.c&quot;</span><span class="s2">).</span><span class="s1">open</span><span class="s2">() </span><span class="s0">as </span><span class="s1">ocmod</span><span class="s2">:</span>
+            <span class="s1">ocmr </span><span class="s2">= </span><span class="s1">ocmod</span><span class="s2">.</span><span class="s1">read</span><span class="s2">()</span>
+            <span class="s0">assert </span><span class="s4">&quot;#include &lt;stdbool.h&gt;&quot; </span><span class="s0">in </span><span class="s1">ocmr</span>
+            <span class="s0">assert </span><span class="s4">&quot;#include &lt;stdio.h&gt;&quot; </span><span class="s0">in </span><span class="s1">ocmr</span>
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">((</span><span class="s1">platform</span><span class="s2">.</span><span class="s1">system</span><span class="s2">() != </span><span class="s4">'Linux'</span><span class="s2">), </span><span class="s1">reason</span><span class="s2">=</span><span class="s4">'Compiler required'</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">slow</span>
+<span class="s0">def </span><span class="s1">test_cli_obj</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Ensures that the extra object can be specified when using meson backend 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">mname </span><span class="s2">= </span><span class="s4">&quot;blah&quot;</span>
+    <span class="s1">odir </span><span class="s2">= </span><span class="s4">&quot;tttmp&quot;</span>
+    <span class="s1">obj </span><span class="s2">= </span><span class="s4">&quot;extra.o&quot;</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">,</span>
+                        <span class="s4">f'f2py --backend meson --build-dir </span><span class="s0">{</span><span class="s1">odir</span><span class="s0">} </span><span class="s4">-m </span><span class="s0">{</span><span class="s1">mname</span><span class="s0">} </span><span class="s4">-c </span><span class="s0">{</span><span class="s1">obj</span><span class="s0">} {</span><span class="s1">ipath</span><span class="s0">}</span><span class="s4">'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">Path</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">).</span><span class="s1">touch</span><span class="s2">()</span>
+        <span class="s1">compiler_check_f2pycli</span><span class="s2">()</span>
+        <span class="s0">with </span><span class="s1">Path</span><span class="s2">(</span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">odir</span><span class="s0">}</span><span class="s4">/meson.build&quot;</span><span class="s2">).</span><span class="s1">open</span><span class="s2">() </span><span class="s0">as </span><span class="s1">mesonbuild</span><span class="s2">:</span>
+            <span class="s1">mbld </span><span class="s2">= </span><span class="s1">mesonbuild</span><span class="s2">.</span><span class="s1">read</span><span class="s2">()</span>
+            <span class="s0">assert </span><span class="s4">&quot;objects:&quot; </span><span class="s0">in </span><span class="s1">mbld</span>
+            <span class="s0">assert </span><span class="s4">f&quot;'''</span><span class="s0">{</span><span class="s1">obj</span><span class="s0">}</span><span class="s4">'''&quot; </span><span class="s0">in </span><span class="s1">mbld</span>
+
+
+<span class="s0">def </span><span class="s1">test_inclpath</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot;Add to the include directories 
+ 
+    CLI :: --include-paths 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">test_hlink</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot;Add to the include directories 
+ 
+    CLI :: --help-link 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">test_f2cmap</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">f2cmap_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Check that Fortran-to-Python KIND specs can be passed 
+ 
+    CLI :: --f2cmap 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">f2cmap_f90</span><span class="s2">)</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, </span><span class="s4">f'f2py -m blah </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">--f2cmap mapfile'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s4">&quot;Reading f2cmap from 'mapfile' ...&quot; </span><span class="s0">in </span><span class="s1">out</span>
+        <span class="s0">assert </span><span class="s4">&quot;Mapping </span><span class="s0">\&quot;</span><span class="s4">real(kind=real32)</span><span class="s0">\&quot; </span><span class="s4">to </span><span class="s0">\&quot;</span><span class="s4">float</span><span class="s0">\&quot;</span><span class="s4">&quot; </span><span class="s0">in </span><span class="s1">out</span>
+        <span class="s0">assert </span><span class="s4">&quot;Mapping </span><span class="s0">\&quot;</span><span class="s4">real(kind=real64)</span><span class="s0">\&quot; </span><span class="s4">to </span><span class="s0">\&quot;</span><span class="s4">double</span><span class="s0">\&quot;</span><span class="s4">&quot; </span><span class="s0">in </span><span class="s1">out</span>
+        <span class="s0">assert </span><span class="s4">&quot;Mapping </span><span class="s0">\&quot;</span><span class="s4">integer(kind=int64)</span><span class="s0">\&quot; </span><span class="s4">to </span><span class="s0">\&quot;</span><span class="s4">long_long</span><span class="s0">\&quot;</span><span class="s4">&quot; </span><span class="s0">in </span><span class="s1">out</span>
+        <span class="s0">assert </span><span class="s4">&quot;Successfully applied user defined f2cmap changes&quot; </span><span class="s0">in </span><span class="s1">out</span>
+
+
+<span class="s0">def </span><span class="s1">test_quiet</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Reduce verbosity 
+ 
+    CLI :: --quiet 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, </span><span class="s4">f'f2py -m blah </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">--quiet'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">out</span><span class="s2">) == </span><span class="s6">0</span>
+
+
+<span class="s0">def </span><span class="s1">test_verbose</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Increase verbosity 
+ 
+    CLI :: --verbose 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, </span><span class="s4">f'f2py -m blah </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">--verbose'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s4">&quot;analyzeline&quot; </span><span class="s0">in </span><span class="s1">out</span>
+
+
+<span class="s0">def </span><span class="s1">test_version</span><span class="s2">(</span><span class="s1">capfd</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Ensure version 
+ 
+    CLI :: -v 
+    &quot;&quot;&quot;</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, [</span><span class="s4">&quot;f2py&quot;</span><span class="s2">, </span><span class="s4">&quot;-v&quot;</span><span class="s2">])</span>
+    <span class="s3"># TODO: f2py2e should not call sys.exit() after printing the version</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">SystemExit</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">out</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">capfd</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+        <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">__version__ </span><span class="s2">== </span><span class="s1">out</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">()</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span><span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;Consistently fails on CI; noisy so skip not xfail.&quot;</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_npdistop</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: -c 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, </span><span class="s4">f'f2py -m blah </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">-c'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">f2pycli</span><span class="s2">()</span>
+        <span class="s1">cmd_run </span><span class="s2">= </span><span class="s1">shlex</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">executable</span><span class="s0">} </span><span class="s4">-c </span><span class="s0">\&quot;</span><span class="s4">import blah; blah.hi()</span><span class="s0">\&quot;</span><span class="s4">&quot;</span><span class="s2">)</span>
+        <span class="s1">rout </span><span class="s2">= </span><span class="s1">subprocess</span><span class="s2">.</span><span class="s1">run</span><span class="s2">(</span><span class="s1">cmd_run</span><span class="s2">, </span><span class="s1">capture_output</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">'UTF-8'</span><span class="s2">)</span>
+        <span class="s1">eout </span><span class="s2">= </span><span class="s4">' Hello World</span><span class="s0">\n</span><span class="s4">'</span>
+        <span class="s0">assert </span><span class="s1">rout</span><span class="s2">.</span><span class="s1">stdout </span><span class="s2">== </span><span class="s1">eout</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">((</span><span class="s1">platform</span><span class="s2">.</span><span class="s1">system</span><span class="s2">() != </span><span class="s4">'Linux'</span><span class="s2">) </span><span class="s0">or </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">version_info </span><span class="s2">&lt;= (</span><span class="s6">3</span><span class="s2">, </span><span class="s6">12</span><span class="s2">),</span>
+                    <span class="s1">reason</span><span class="s2">=</span><span class="s4">'Compiler and Python 3.12 or newer required'</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">slow</span>
+<span class="s0">def </span><span class="s1">test_no_freethreading_compatible</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: --no-freethreading-compatible 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, </span><span class="s4">f'f2py -m blah </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">-c --no-freethreading-compatible'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">compiler_check_f2pycli</span><span class="s2">()</span>
+        <span class="s1">cmd </span><span class="s2">= </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">executable</span><span class="s0">} </span><span class="s4">-c </span><span class="s0">\&quot;</span><span class="s4">import blah; blah.hi();&quot;</span>
+        <span class="s0">if </span><span class="s1">NOGIL_BUILD</span><span class="s2">:</span>
+            <span class="s1">cmd </span><span class="s2">+= </span><span class="s4">&quot;import sys; assert sys._is_gil_enabled() is True</span><span class="s0">\&quot;</span><span class="s4">&quot;</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">cmd </span><span class="s2">+= </span><span class="s4">&quot;</span><span class="s0">\&quot;</span><span class="s4">&quot;</span>
+        <span class="s1">cmd_run </span><span class="s2">= </span><span class="s1">shlex</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s1">cmd</span><span class="s2">)</span>
+        <span class="s1">rout </span><span class="s2">= </span><span class="s1">subprocess</span><span class="s2">.</span><span class="s1">run</span><span class="s2">(</span><span class="s1">cmd_run</span><span class="s2">, </span><span class="s1">capture_output</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">'UTF-8'</span><span class="s2">)</span>
+        <span class="s1">eout </span><span class="s2">= </span><span class="s4">' Hello World</span><span class="s0">\n</span><span class="s4">'</span>
+        <span class="s0">assert </span><span class="s1">rout</span><span class="s2">.</span><span class="s1">stdout </span><span class="s2">== </span><span class="s1">eout</span>
+        <span class="s0">if </span><span class="s1">NOGIL_BUILD</span><span class="s2">:</span>
+            <span class="s0">assert </span><span class="s4">&quot;The global interpreter lock (GIL) has been enabled to load module 'blah'&quot; </span><span class="s0">in </span><span class="s1">rout</span><span class="s2">.</span><span class="s1">stderr</span>
+        <span class="s0">assert </span><span class="s1">rout</span><span class="s2">.</span><span class="s1">returncode </span><span class="s2">== </span><span class="s6">0</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">((</span><span class="s1">platform</span><span class="s2">.</span><span class="s1">system</span><span class="s2">() != </span><span class="s4">'Linux'</span><span class="s2">) </span><span class="s0">or </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">version_info </span><span class="s2">&lt;= (</span><span class="s6">3</span><span class="s2">, </span><span class="s6">12</span><span class="s2">),</span>
+                    <span class="s1">reason</span><span class="s2">=</span><span class="s4">'Compiler and Python 3.12 or newer required'</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_freethreading_compatible</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: --freethreading_compatible 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ipath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">hello_world_f90</span><span class="s2">)</span>
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">&quot;argv&quot;</span><span class="s2">, </span><span class="s4">f'f2py -m blah </span><span class="s0">{</span><span class="s1">ipath</span><span class="s0">} </span><span class="s4">-c --freethreading-compatible'</span><span class="s2">.</span><span class="s1">split</span><span class="s2">())</span>
+
+    <span class="s0">with </span><span class="s1">util</span><span class="s2">.</span><span class="s1">switchdir</span><span class="s2">(</span><span class="s1">ipath</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">):</span>
+        <span class="s1">compiler_check_f2pycli</span><span class="s2">()</span>
+        <span class="s1">cmd </span><span class="s2">= </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">executable</span><span class="s0">} </span><span class="s4">-c </span><span class="s0">\&quot;</span><span class="s4">import blah; blah.hi();&quot;</span>
+        <span class="s0">if </span><span class="s1">NOGIL_BUILD</span><span class="s2">:</span>
+            <span class="s1">cmd </span><span class="s2">+= </span><span class="s4">&quot;import sys; assert sys._is_gil_enabled() is False</span><span class="s0">\&quot;</span><span class="s4">&quot;</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">cmd </span><span class="s2">+= </span><span class="s4">&quot;</span><span class="s0">\&quot;</span><span class="s4">&quot;</span>
+        <span class="s1">cmd_run </span><span class="s2">= </span><span class="s1">shlex</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s1">cmd</span><span class="s2">)</span>
+        <span class="s1">rout </span><span class="s2">= </span><span class="s1">subprocess</span><span class="s2">.</span><span class="s1">run</span><span class="s2">(</span><span class="s1">cmd_run</span><span class="s2">, </span><span class="s1">capture_output</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">'UTF-8'</span><span class="s2">)</span>
+        <span class="s1">eout </span><span class="s2">= </span><span class="s4">' Hello World</span><span class="s0">\n</span><span class="s4">'</span>
+        <span class="s0">assert </span><span class="s1">rout</span><span class="s2">.</span><span class="s1">stdout </span><span class="s2">== </span><span class="s1">eout</span>
+        <span class="s0">if </span><span class="s4">&quot;LSAN_OPTIONS&quot; </span><span class="s0">not in </span><span class="s1">os</span><span class="s2">.</span><span class="s1">environ</span><span class="s2">:</span>
+            <span class="s0">assert </span><span class="s1">rout</span><span class="s2">.</span><span class="s1">stderr </span><span class="s2">== </span><span class="s4">&quot;&quot;</span>
+        <span class="s0">assert </span><span class="s1">rout</span><span class="s2">.</span><span class="s1">returncode </span><span class="s2">== </span><span class="s6">0</span>
+
+
+<span class="s3"># Numpy distutils flags</span>
+<span class="s3"># TODO: These should be tested separately</span>
+
+<span class="s0">def </span><span class="s1">test_npd_fcompiler</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: -c --fcompiler 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">test_npd_compiler</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: -c --compiler 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">test_npd_help_fcompiler</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: -c --help-fcompiler 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">test_npd_f77exec</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: -c --f77exec 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">test_npd_f90exec</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: -c --f90exec 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">test_npd_f77flags</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: -c --f77flags 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">test_npd_f90flags</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: -c --f90flags 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">test_npd_opt</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: -c --opt 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">test_npd_arch</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: -c --arch 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">test_npd_noopt</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: -c --noopt 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">test_npd_noarch</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: -c --noarch 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">test_npd_debug</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: -c --debug 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">test_npd_link_auto</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: -c --link-&lt;resource&gt; 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">test_npd_lib</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: -c -L/path/to/lib/ -l&lt;libname&gt; 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">test_npd_define</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: -D&lt;define&gt; 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">test_npd_undefine</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: -U&lt;name&gt; 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">test_npd_incl</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: -I/path/to/include/ 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">test_npd_linker</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot; 
+    CLI :: &lt;filename&gt;.o &lt;filename&gt;.so &lt;filename&gt;.a 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># TODO: populate</span>
+    <span class="s0">pass</span>
+</pre>
+</body>
+</html>

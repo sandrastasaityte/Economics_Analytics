@@ -1,0 +1,672 @@
+<html>
+<head>
+<title>cb_rules.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #7a7e85;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+cb_rules.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Build call-back mechanism for f2py2e. 
+ 
+Copyright 1999 -- 2011 Pearu Peterson all rights reserved. 
+Copyright 2011 -- present NumPy Developers. 
+Permission to use, modify, and distribute this software is given under the 
+terms of the NumPy License. 
+ 
+NO WARRANTY IS EXPRESSED OR IMPLIED.  USE AT YOUR OWN RISK. 
+&quot;&quot;&quot;</span>
+<span class="s2">from </span><span class="s3">. </span><span class="s2">import </span><span class="s1">__version__</span><span class="s3">, </span><span class="s1">cfuncs</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">auxfuncs </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">applyrules</span><span class="s3">,</span>
+    <span class="s1">debugcapi</span><span class="s3">,</span>
+    <span class="s1">dictappend</span><span class="s3">,</span>
+    <span class="s1">errmess</span><span class="s3">,</span>
+    <span class="s1">getargs</span><span class="s3">,</span>
+    <span class="s1">hasnote</span><span class="s3">,</span>
+    <span class="s1">isarray</span><span class="s3">,</span>
+    <span class="s1">iscomplex</span><span class="s3">,</span>
+    <span class="s1">iscomplexarray</span><span class="s3">,</span>
+    <span class="s1">iscomplexfunction</span><span class="s3">,</span>
+    <span class="s1">isfunction</span><span class="s3">,</span>
+    <span class="s1">isintent_c</span><span class="s3">,</span>
+    <span class="s1">isintent_hide</span><span class="s3">,</span>
+    <span class="s1">isintent_in</span><span class="s3">,</span>
+    <span class="s1">isintent_inout</span><span class="s3">,</span>
+    <span class="s1">isintent_nothide</span><span class="s3">,</span>
+    <span class="s1">isintent_out</span><span class="s3">,</span>
+    <span class="s1">isoptional</span><span class="s3">,</span>
+    <span class="s1">isrequired</span><span class="s3">,</span>
+    <span class="s1">isscalar</span><span class="s3">,</span>
+    <span class="s1">isstring</span><span class="s3">,</span>
+    <span class="s1">isstringfunction</span><span class="s3">,</span>
+    <span class="s1">issubroutine</span><span class="s3">,</span>
+    <span class="s1">l_and</span><span class="s3">,</span>
+    <span class="s1">l_not</span><span class="s3">,</span>
+    <span class="s1">l_or</span><span class="s3">,</span>
+    <span class="s1">outmess</span><span class="s3">,</span>
+    <span class="s1">replace</span><span class="s3">,</span>
+    <span class="s1">stripcomma</span><span class="s3">,</span>
+    <span class="s1">throw_error</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s1">f2py_version </span><span class="s3">= </span><span class="s1">__version__</span><span class="s3">.</span><span class="s1">version</span>
+
+
+<span class="s4">################## Rules for callback function ##############</span>
+
+<span class="s1">cb_routine_rules </span><span class="s3">= {</span>
+    <span class="s5">'cbtypedefs'</span><span class="s3">: </span><span class="s5">'typedef #rctype#(*#name#_typedef)(#optargs_td##args_td##strarglens_td##noargs#);'</span><span class="s3">,</span>
+    <span class="s5">'body'</span><span class="s3">: </span><span class="s5">&quot;&quot;&quot; 
+#begintitle# 
+typedef struct { 
+    PyObject *capi; 
+    PyTupleObject *args_capi; 
+    int nofargs; 
+    jmp_buf jmpbuf; 
+} #name#_t; 
+ 
+#if defined(F2PY_THREAD_LOCAL_DECL) &amp;&amp; !defined(F2PY_USE_PYTHON_TLS) 
+ 
+static F2PY_THREAD_LOCAL_DECL #name#_t *_active_#name# = NULL; 
+ 
+static #name#_t *swap_active_#name#(#name#_t *ptr) { 
+    #name#_t *prev = _active_#name#; 
+    _active_#name# = ptr; 
+    return prev; 
+} 
+ 
+static #name#_t *get_active_#name#(void) { 
+    return _active_#name#; 
+} 
+ 
+#else 
+ 
+static #name#_t *swap_active_#name#(#name#_t *ptr) { 
+    char *key = &quot;__f2py_cb_#name#&quot;; 
+    return (#name#_t *)F2PySwapThreadLocalCallbackPtr(key, ptr); 
+} 
+ 
+static #name#_t *get_active_#name#(void) { 
+    char *key = &quot;__f2py_cb_#name#&quot;; 
+    return (#name#_t *)F2PyGetThreadLocalCallbackPtr(key); 
+} 
+ 
+#endif 
+ 
+/*typedef #rctype#(*#name#_typedef)(#optargs_td##args_td##strarglens_td##noargs#);*/ 
+#static# #rctype# #callbackname# (#optargs##args##strarglens##noargs#) { 
+    #name#_t cb_local = { NULL, NULL, 0 }; 
+    #name#_t *cb = NULL; 
+    PyTupleObject *capi_arglist = NULL; 
+    PyObject *capi_return = NULL; 
+    PyObject *capi_tmp = NULL; 
+    PyObject *capi_arglist_list = NULL; 
+    int capi_j,capi_i = 0; 
+    int capi_longjmp_ok = 1; 
+#decl# 
+#ifdef F2PY_REPORT_ATEXIT 
+f2py_cb_start_clock(); 
+#endif 
+    cb = get_active_#name#(); 
+    if (cb == NULL) { 
+        capi_longjmp_ok = 0; 
+        cb = &amp;cb_local; 
+    } 
+    capi_arglist = cb-&gt;args_capi; 
+    CFUNCSMESS(</span><span class="s2">\&quot;</span><span class="s5">cb:Call-back function #name# (maxnofargs=#maxnofargs#(-#nofoptargs#))</span><span class="s2">\\</span><span class="s5">n</span><span class="s2">\&quot;</span><span class="s5">); 
+    CFUNCSMESSPY(</span><span class="s2">\&quot;</span><span class="s5">cb:#name#_capi=</span><span class="s2">\&quot;</span><span class="s5">,cb-&gt;capi); 
+    if (cb-&gt;capi==NULL) { 
+        capi_longjmp_ok = 0; 
+        cb-&gt;capi = PyObject_GetAttrString(#modulename#_module,</span><span class="s2">\&quot;</span><span class="s5">#argname#</span><span class="s2">\&quot;</span><span class="s5">); 
+        CFUNCSMESSPY(</span><span class="s2">\&quot;</span><span class="s5">cb:#name#_capi=</span><span class="s2">\&quot;</span><span class="s5">,cb-&gt;capi); 
+    } 
+    if (cb-&gt;capi==NULL) { 
+        PyErr_SetString(#modulename#_error,</span><span class="s2">\&quot;</span><span class="s5">cb: Callback #argname# not defined (as an argument or module #modulename# attribute).</span><span class="s2">\\</span><span class="s5">n</span><span class="s2">\&quot;</span><span class="s5">); 
+        goto capi_fail; 
+    } 
+    if (F2PyCapsule_Check(cb-&gt;capi)) { 
+    #name#_typedef #name#_cptr; 
+    #name#_cptr = F2PyCapsule_AsVoidPtr(cb-&gt;capi); 
+    #returncptr#(*#name#_cptr)(#optargs_nm##args_nm##strarglens_nm#); 
+    #return# 
+    } 
+    if (capi_arglist==NULL) { 
+        capi_longjmp_ok = 0; 
+        capi_tmp = PyObject_GetAttrString(#modulename#_module,</span><span class="s2">\&quot;</span><span class="s5">#argname#_extra_args</span><span class="s2">\&quot;</span><span class="s5">); 
+        if (capi_tmp) { 
+            capi_arglist = (PyTupleObject *)PySequence_Tuple(capi_tmp); 
+            Py_DECREF(capi_tmp); 
+            if (capi_arglist==NULL) { 
+                PyErr_SetString(#modulename#_error,</span><span class="s2">\&quot;</span><span class="s5">Failed to convert #modulename#.#argname#_extra_args to tuple.</span><span class="s2">\\</span><span class="s5">n</span><span class="s2">\&quot;</span><span class="s5">); 
+                goto capi_fail; 
+            } 
+        } else { 
+            PyErr_Clear(); 
+            capi_arglist = (PyTupleObject *)Py_BuildValue(</span><span class="s2">\&quot;</span><span class="s5">()</span><span class="s2">\&quot;</span><span class="s5">); 
+        } 
+    } 
+    if (capi_arglist == NULL) { 
+        PyErr_SetString(#modulename#_error,</span><span class="s2">\&quot;</span><span class="s5">Callback #argname# argument list is not set.</span><span class="s2">\\</span><span class="s5">n</span><span class="s2">\&quot;</span><span class="s5">); 
+        goto capi_fail; 
+    } 
+#setdims# 
+#define CAPI_ARGLIST_SETITEM(idx, value) PyTuple_SetItem((PyObject *)capi_arglist, idx, value) 
+#pyobjfrom# 
+#undef CAPI_ARGLIST_SETITEM 
+CFUNCSMESSPY(</span><span class="s2">\&quot;</span><span class="s5">cb:capi_arglist=</span><span class="s2">\&quot;</span><span class="s5">,capi_arglist); 
+CFUNCSMESS(</span><span class="s2">\&quot;</span><span class="s5">cb:Call-back calling Python function #argname#.</span><span class="s2">\\</span><span class="s5">n</span><span class="s2">\&quot;</span><span class="s5">); 
+#ifdef F2PY_REPORT_ATEXIT 
+f2py_cb_start_call_clock(); 
+#endif 
+capi_return = PyObject_CallObject(cb-&gt;capi,(PyObject *)capi_arglist); 
+#ifdef F2PY_REPORT_ATEXIT 
+f2py_cb_stop_call_clock(); 
+#endif 
+    CFUNCSMESSPY(</span><span class="s2">\&quot;</span><span class="s5">cb:capi_return=</span><span class="s2">\&quot;</span><span class="s5">,capi_return); 
+    if (capi_return == NULL) { 
+        fprintf(stderr,</span><span class="s2">\&quot;</span><span class="s5">capi_return is NULL</span><span class="s2">\\</span><span class="s5">n</span><span class="s2">\&quot;</span><span class="s5">); 
+        goto capi_fail; 
+    } 
+    if (capi_return == Py_None) { 
+        Py_DECREF(capi_return); 
+        capi_return = Py_BuildValue(</span><span class="s2">\&quot;</span><span class="s5">()</span><span class="s2">\&quot;</span><span class="s5">); 
+    } 
+    else if (!PyTuple_Check(capi_return)) { 
+        capi_return = Py_BuildValue(</span><span class="s2">\&quot;</span><span class="s5">(N)</span><span class="s2">\&quot;</span><span class="s5">,capi_return); 
+    } 
+    capi_j = PyTuple_Size(capi_return); 
+    capi_i = 0; 
+#frompyobj# 
+    CFUNCSMESS(</span><span class="s2">\&quot;</span><span class="s5">cb:#name#:successful</span><span class="s2">\\</span><span class="s5">n</span><span class="s2">\&quot;</span><span class="s5">); 
+    Py_DECREF(capi_return); 
+#ifdef F2PY_REPORT_ATEXIT 
+f2py_cb_stop_clock(); 
+#endif 
+    goto capi_return_pt; 
+capi_fail: 
+    fprintf(stderr,</span><span class="s2">\&quot;</span><span class="s5">Call-back #name# failed.</span><span class="s2">\\</span><span class="s5">n</span><span class="s2">\&quot;</span><span class="s5">); 
+    Py_XDECREF(capi_return); 
+    Py_XDECREF(capi_arglist_list); 
+    if (capi_longjmp_ok) { 
+        longjmp(cb-&gt;jmpbuf,-1); 
+    } 
+capi_return_pt: 
+    ; 
+#return# 
+} 
+#endtitle# 
+&quot;&quot;&quot;</span><span class="s3">,</span>
+    <span class="s5">'need'</span><span class="s3">: [</span><span class="s5">'setjmp.h'</span><span class="s3">, </span><span class="s5">'CFUNCSMESS'</span><span class="s3">, </span><span class="s5">'F2PY_THREAD_LOCAL_DECL'</span><span class="s3">],</span>
+    <span class="s5">'maxnofargs'</span><span class="s3">: </span><span class="s5">'#maxnofargs#'</span><span class="s3">,</span>
+    <span class="s5">'nofoptargs'</span><span class="s3">: </span><span class="s5">'#nofoptargs#'</span><span class="s3">,</span>
+    <span class="s5">'docstr'</span><span class="s3">: </span><span class="s5">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s5">def #argname#(#docsignature#): return #docreturn#</span><span class="s2">\\</span><span class="s5">n</span><span class="s2">\\</span>
+<span class="s5">#docstrsigns#&quot;&quot;&quot;</span><span class="s3">,</span>
+    <span class="s5">'latexdocstr'</span><span class="s3">: </span><span class="s5">&quot;&quot;&quot; 
+{{}</span><span class="s2">\\</span><span class="s5">verb@def #argname#(#latexdocsignature#): return #docreturn#@{}} 
+#routnote# 
+ 
+#latexdocstrsigns#&quot;&quot;&quot;</span><span class="s3">,</span>
+    <span class="s5">'docstrshort'</span><span class="s3">: </span><span class="s5">'def #argname#(#docsignature#): return #docreturn#'</span>
+<span class="s3">}</span>
+<span class="s1">cb_rout_rules </span><span class="s3">= [</span>
+    <span class="s3">{  </span><span class="s4"># Init</span>
+        <span class="s5">'separatorsfor'</span><span class="s3">: {</span><span class="s5">'decl'</span><span class="s3">: </span><span class="s5">'</span><span class="s2">\n</span><span class="s5">'</span><span class="s3">,</span>
+                          <span class="s5">'args'</span><span class="s3">: </span><span class="s5">','</span><span class="s3">, </span><span class="s5">'optargs'</span><span class="s3">: </span><span class="s5">''</span><span class="s3">, </span><span class="s5">'pyobjfrom'</span><span class="s3">: </span><span class="s5">'</span><span class="s2">\n</span><span class="s5">'</span><span class="s3">, </span><span class="s5">'freemem'</span><span class="s3">: </span><span class="s5">'</span><span class="s2">\n</span><span class="s5">'</span><span class="s3">,</span>
+                          <span class="s5">'args_td'</span><span class="s3">: </span><span class="s5">','</span><span class="s3">, </span><span class="s5">'optargs_td'</span><span class="s3">: </span><span class="s5">''</span><span class="s3">,</span>
+                          <span class="s5">'args_nm'</span><span class="s3">: </span><span class="s5">','</span><span class="s3">, </span><span class="s5">'optargs_nm'</span><span class="s3">: </span><span class="s5">''</span><span class="s3">,</span>
+                          <span class="s5">'frompyobj'</span><span class="s3">: </span><span class="s5">'</span><span class="s2">\n</span><span class="s5">'</span><span class="s3">, </span><span class="s5">'setdims'</span><span class="s3">: </span><span class="s5">'</span><span class="s2">\n</span><span class="s5">'</span><span class="s3">,</span>
+                          <span class="s5">'docstrsigns'</span><span class="s3">: </span><span class="s5">'</span><span class="s2">\\</span><span class="s5">n&quot;</span><span class="s2">\n</span><span class="s5">&quot;'</span><span class="s3">,</span>
+                          <span class="s5">'latexdocstrsigns'</span><span class="s3">: </span><span class="s5">'</span><span class="s2">\n</span><span class="s5">'</span><span class="s3">,</span>
+                          <span class="s5">'latexdocstrreq'</span><span class="s3">: </span><span class="s5">'</span><span class="s2">\n</span><span class="s5">'</span><span class="s3">, </span><span class="s5">'latexdocstropt'</span><span class="s3">: </span><span class="s5">'</span><span class="s2">\n</span><span class="s5">'</span><span class="s3">,</span>
+                          <span class="s5">'latexdocstrout'</span><span class="s3">: </span><span class="s5">'</span><span class="s2">\n</span><span class="s5">'</span><span class="s3">, </span><span class="s5">'latexdocstrcbs'</span><span class="s3">: </span><span class="s5">'</span><span class="s2">\n</span><span class="s5">'</span><span class="s3">,</span>
+                          <span class="s3">},</span>
+        <span class="s5">'decl'</span><span class="s3">: </span><span class="s5">'/*decl*/'</span><span class="s3">, </span><span class="s5">'pyobjfrom'</span><span class="s3">: </span><span class="s5">'/*pyobjfrom*/'</span><span class="s3">, </span><span class="s5">'frompyobj'</span><span class="s3">: </span><span class="s5">'/*frompyobj*/'</span><span class="s3">,</span>
+        <span class="s5">'args'</span><span class="s3">: [], </span><span class="s5">'optargs'</span><span class="s3">: </span><span class="s5">''</span><span class="s3">, </span><span class="s5">'return'</span><span class="s3">: </span><span class="s5">''</span><span class="s3">, </span><span class="s5">'strarglens'</span><span class="s3">: </span><span class="s5">''</span><span class="s3">, </span><span class="s5">'freemem'</span><span class="s3">: </span><span class="s5">'/*freemem*/'</span><span class="s3">,</span>
+        <span class="s5">'args_td'</span><span class="s3">: [], </span><span class="s5">'optargs_td'</span><span class="s3">: </span><span class="s5">''</span><span class="s3">, </span><span class="s5">'strarglens_td'</span><span class="s3">: </span><span class="s5">''</span><span class="s3">,</span>
+        <span class="s5">'args_nm'</span><span class="s3">: [], </span><span class="s5">'optargs_nm'</span><span class="s3">: </span><span class="s5">''</span><span class="s3">, </span><span class="s5">'strarglens_nm'</span><span class="s3">: </span><span class="s5">''</span><span class="s3">,</span>
+        <span class="s5">'noargs'</span><span class="s3">: </span><span class="s5">''</span><span class="s3">,</span>
+        <span class="s5">'setdims'</span><span class="s3">: </span><span class="s5">'/*setdims*/'</span><span class="s3">,</span>
+        <span class="s5">'docstrsigns'</span><span class="s3">: </span><span class="s5">''</span><span class="s3">, </span><span class="s5">'latexdocstrsigns'</span><span class="s3">: </span><span class="s5">''</span><span class="s3">,</span>
+        <span class="s5">'docstrreq'</span><span class="s3">: </span><span class="s5">'    Required arguments:'</span><span class="s3">,</span>
+        <span class="s5">'docstropt'</span><span class="s3">: </span><span class="s5">'    Optional arguments:'</span><span class="s3">,</span>
+        <span class="s5">'docstrout'</span><span class="s3">: </span><span class="s5">'    Return objects:'</span><span class="s3">,</span>
+        <span class="s5">'docstrcbs'</span><span class="s3">: </span><span class="s5">'    Call-back functions:'</span><span class="s3">,</span>
+        <span class="s5">'docreturn'</span><span class="s3">: </span><span class="s5">''</span><span class="s3">, </span><span class="s5">'docsign'</span><span class="s3">: </span><span class="s5">''</span><span class="s3">, </span><span class="s5">'docsignopt'</span><span class="s3">: </span><span class="s5">''</span><span class="s3">,</span>
+        <span class="s5">'latexdocstrreq'</span><span class="s3">: </span><span class="s5">'</span><span class="s2">\\</span><span class="s5">noindent Required arguments:'</span><span class="s3">,</span>
+        <span class="s5">'latexdocstropt'</span><span class="s3">: </span><span class="s5">'</span><span class="s2">\\</span><span class="s5">noindent Optional arguments:'</span><span class="s3">,</span>
+        <span class="s5">'latexdocstrout'</span><span class="s3">: </span><span class="s5">'</span><span class="s2">\\</span><span class="s5">noindent Return objects:'</span><span class="s3">,</span>
+        <span class="s5">'latexdocstrcbs'</span><span class="s3">: </span><span class="s5">'</span><span class="s2">\\</span><span class="s5">noindent Call-back functions:'</span><span class="s3">,</span>
+        <span class="s5">'routnote'</span><span class="s3">: {</span><span class="s1">hasnote</span><span class="s3">: </span><span class="s5">'--- #note#'</span><span class="s3">, </span><span class="s1">l_not</span><span class="s3">(</span><span class="s1">hasnote</span><span class="s3">): </span><span class="s5">''</span><span class="s3">},</span>
+    <span class="s3">}, {  </span><span class="s4"># Function</span>
+        <span class="s5">'decl'</span><span class="s3">: </span><span class="s5">'    #ctype# return_value = 0;'</span><span class="s3">,</span>
+        <span class="s5">'frompyobj'</span><span class="s3">: [</span>
+            <span class="s3">{</span><span class="s1">debugcapi</span><span class="s3">: </span><span class="s5">'    CFUNCSMESS(&quot;cb:Getting return_value-&gt;&quot;);'</span><span class="s3">},</span>
+            <span class="s5">'''</span><span class="s2">\ 
+    </span><span class="s5">if (capi_j&gt;capi_i) { 
+        GETSCALARFROMPYTUPLE(capi_return,capi_i++,&amp;return_value,#ctype#, 
+          &quot;#ctype#_from_pyobj failed in converting return_value of&quot; 
+          &quot; call-back function #name# to C #ctype#</span><span class="s2">\\</span><span class="s5">n&quot;); 
+    } else { 
+        fprintf(stderr,&quot;Warning: call-back function #name# did not provide&quot; 
+                       &quot; return value (index=%d, type=#ctype#)</span><span class="s2">\\</span><span class="s5">n&quot;,capi_i); 
+    }'''</span><span class="s3">,</span>
+            <span class="s3">{</span><span class="s1">debugcapi</span><span class="s3">:</span>
+             <span class="s5">'    fprintf(stderr,&quot;#showvalueformat#.</span><span class="s2">\\</span><span class="s5">n&quot;,return_value);'</span><span class="s3">}</span>
+        <span class="s3">],</span>
+        <span class="s5">'need'</span><span class="s3">: [</span><span class="s5">'#ctype#_from_pyobj'</span><span class="s3">, {</span><span class="s1">debugcapi</span><span class="s3">: </span><span class="s5">'CFUNCSMESS'</span><span class="s3">}, </span><span class="s5">'GETSCALARFROMPYTUPLE'</span><span class="s3">],</span>
+        <span class="s5">'return'</span><span class="s3">: </span><span class="s5">'    return return_value;'</span><span class="s3">,</span>
+        <span class="s5">'_check'</span><span class="s3">: </span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">isfunction</span><span class="s3">, </span><span class="s1">l_not</span><span class="s3">(</span><span class="s1">isstringfunction</span><span class="s3">), </span><span class="s1">l_not</span><span class="s3">(</span><span class="s1">iscomplexfunction</span><span class="s3">))</span>
+    <span class="s3">},</span>
+    <span class="s3">{  </span><span class="s4"># String function</span>
+        <span class="s5">'pyobjfrom'</span><span class="s3">: {</span><span class="s1">debugcapi</span><span class="s3">: </span><span class="s5">'    fprintf(stderr,&quot;debug-capi:cb:#name#:%d:</span><span class="s2">\\</span><span class="s5">n&quot;,return_value_len);'</span><span class="s3">},</span>
+        <span class="s5">'args'</span><span class="s3">: </span><span class="s5">'#ctype# return_value,int return_value_len'</span><span class="s3">,</span>
+        <span class="s5">'args_nm'</span><span class="s3">: </span><span class="s5">'return_value,&amp;return_value_len'</span><span class="s3">,</span>
+        <span class="s5">'args_td'</span><span class="s3">: </span><span class="s5">'#ctype# ,int'</span><span class="s3">,</span>
+        <span class="s5">'frompyobj'</span><span class="s3">: [</span>
+            <span class="s3">{</span><span class="s1">debugcapi</span><span class="s3">: </span><span class="s5">'    CFUNCSMESS(&quot;cb:Getting return_value-&gt;</span><span class="s2">\\</span><span class="s5">&quot;&quot;);'</span><span class="s3">},</span>
+            <span class="s5">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s5">if (capi_j&gt;capi_i) { 
+        GETSTRFROMPYTUPLE(capi_return,capi_i++,return_value,return_value_len); 
+    } else { 
+        fprintf(stderr,&quot;Warning: call-back function #name# did not provide&quot; 
+                       &quot; return value (index=%d, type=#ctype#)</span><span class="s2">\\</span><span class="s5">n&quot;,capi_i); 
+    }&quot;&quot;&quot;</span><span class="s3">,</span>
+            <span class="s3">{</span><span class="s1">debugcapi</span><span class="s3">:</span>
+             <span class="s5">'    fprintf(stderr,&quot;#showvalueformat#</span><span class="s2">\\</span><span class="s5">&quot;.</span><span class="s2">\\</span><span class="s5">n&quot;,return_value);'</span><span class="s3">}</span>
+        <span class="s3">],</span>
+        <span class="s5">'need'</span><span class="s3">: [</span><span class="s5">'#ctype#_from_pyobj'</span><span class="s3">, {</span><span class="s1">debugcapi</span><span class="s3">: </span><span class="s5">'CFUNCSMESS'</span><span class="s3">},</span>
+                 <span class="s5">'string.h'</span><span class="s3">, </span><span class="s5">'GETSTRFROMPYTUPLE'</span><span class="s3">],</span>
+        <span class="s5">'return'</span><span class="s3">: </span><span class="s5">'return;'</span><span class="s3">,</span>
+        <span class="s5">'_check'</span><span class="s3">: </span><span class="s1">isstringfunction</span>
+    <span class="s3">},</span>
+    <span class="s3">{  </span><span class="s4"># Complex function</span>
+        <span class="s5">'optargs'</span><span class="s3">: </span><span class="s5">&quot;&quot;&quot; 
+#ifndef F2PY_CB_RETURNCOMPLEX 
+#ctype# *return_value 
+#endif 
+&quot;&quot;&quot;</span><span class="s3">,</span>
+        <span class="s5">'optargs_nm'</span><span class="s3">: </span><span class="s5">&quot;&quot;&quot; 
+#ifndef F2PY_CB_RETURNCOMPLEX 
+return_value 
+#endif 
+&quot;&quot;&quot;</span><span class="s3">,</span>
+        <span class="s5">'optargs_td'</span><span class="s3">: </span><span class="s5">&quot;&quot;&quot; 
+#ifndef F2PY_CB_RETURNCOMPLEX 
+#ctype# * 
+#endif 
+&quot;&quot;&quot;</span><span class="s3">,</span>
+        <span class="s5">'decl'</span><span class="s3">: </span><span class="s5">&quot;&quot;&quot; 
+#ifdef F2PY_CB_RETURNCOMPLEX 
+    #ctype# return_value = {0, 0}; 
+#endif 
+&quot;&quot;&quot;</span><span class="s3">,</span>
+        <span class="s5">'frompyobj'</span><span class="s3">: [</span>
+            <span class="s3">{</span><span class="s1">debugcapi</span><span class="s3">: </span><span class="s5">'    CFUNCSMESS(&quot;cb:Getting return_value-&gt;&quot;);'</span><span class="s3">},</span>
+            <span class="s5">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s5">if (capi_j&gt;capi_i) { 
+#ifdef F2PY_CB_RETURNCOMPLEX 
+        GETSCALARFROMPYTUPLE(capi_return,capi_i++,&amp;return_value,#ctype#, 
+          </span><span class="s2">\&quot;</span><span class="s5">#ctype#_from_pyobj failed in converting return_value of call-back</span><span class="s2">\&quot;</span>
+          <span class="s2">\&quot; </span><span class="s5">function #name# to C #ctype#</span><span class="s2">\\</span><span class="s5">n</span><span class="s2">\&quot;</span><span class="s5">); 
+#else 
+        GETSCALARFROMPYTUPLE(capi_return,capi_i++,return_value,#ctype#, 
+          </span><span class="s2">\&quot;</span><span class="s5">#ctype#_from_pyobj failed in converting return_value of call-back</span><span class="s2">\&quot;</span>
+          <span class="s2">\&quot; </span><span class="s5">function #name# to C #ctype#</span><span class="s2">\\</span><span class="s5">n</span><span class="s2">\&quot;</span><span class="s5">); 
+#endif 
+    } else { 
+        fprintf(stderr, 
+                </span><span class="s2">\&quot;</span><span class="s5">Warning: call-back function #name# did not provide</span><span class="s2">\&quot;</span>
+                <span class="s2">\&quot; </span><span class="s5">return value (index=%d, type=#ctype#)</span><span class="s2">\\</span><span class="s5">n</span><span class="s2">\&quot;</span><span class="s5">,capi_i); 
+    }&quot;&quot;&quot;</span><span class="s3">,</span>
+            <span class="s3">{</span><span class="s1">debugcapi</span><span class="s3">: </span><span class="s5">&quot;&quot;&quot;</span><span class="s2">\ 
+</span><span class="s5">#ifdef F2PY_CB_RETURNCOMPLEX 
+    fprintf(stderr,</span><span class="s2">\&quot;</span><span class="s5">#showvalueformat#.</span><span class="s2">\\</span><span class="s5">n</span><span class="s2">\&quot;</span><span class="s5">,(return_value).r,(return_value).i); 
+#else 
+    fprintf(stderr,</span><span class="s2">\&quot;</span><span class="s5">#showvalueformat#.</span><span class="s2">\\</span><span class="s5">n</span><span class="s2">\&quot;</span><span class="s5">,(*return_value).r,(*return_value).i); 
+#endif 
+&quot;&quot;&quot;</span><span class="s3">}</span>
+        <span class="s3">],</span>
+        <span class="s5">'return'</span><span class="s3">: </span><span class="s5">&quot;&quot;&quot; 
+#ifdef F2PY_CB_RETURNCOMPLEX 
+    return return_value; 
+#else 
+    return; 
+#endif 
+&quot;&quot;&quot;</span><span class="s3">,</span>
+        <span class="s5">'need'</span><span class="s3">: [</span><span class="s5">'#ctype#_from_pyobj'</span><span class="s3">, {</span><span class="s1">debugcapi</span><span class="s3">: </span><span class="s5">'CFUNCSMESS'</span><span class="s3">},</span>
+                 <span class="s5">'string.h'</span><span class="s3">, </span><span class="s5">'GETSCALARFROMPYTUPLE'</span><span class="s3">, </span><span class="s5">'#ctype#'</span><span class="s3">],</span>
+        <span class="s5">'_check'</span><span class="s3">: </span><span class="s1">iscomplexfunction</span>
+    <span class="s3">},</span>
+    <span class="s3">{</span><span class="s5">'docstrout'</span><span class="s3">: </span><span class="s5">'        #pydocsignout#'</span><span class="s3">,</span>
+     <span class="s5">'latexdocstrout'</span><span class="s3">: [</span><span class="s5">'</span><span class="s2">\\</span><span class="s5">item[]{{}</span><span class="s2">\\</span><span class="s5">verb@#pydocsignout#@{}}'</span><span class="s3">,</span>
+                        <span class="s3">{</span><span class="s1">hasnote</span><span class="s3">: </span><span class="s5">'--- #note#'</span><span class="s3">}],</span>
+     <span class="s5">'docreturn'</span><span class="s3">: </span><span class="s5">'#rname#,'</span><span class="s3">,</span>
+     <span class="s5">'_check'</span><span class="s3">: </span><span class="s1">isfunction</span><span class="s3">},</span>
+    <span class="s3">{</span><span class="s5">'_check'</span><span class="s3">: </span><span class="s1">issubroutine</span><span class="s3">, </span><span class="s5">'return'</span><span class="s3">: </span><span class="s5">'return;'</span><span class="s3">}</span>
+<span class="s3">]</span>
+
+<span class="s1">cb_arg_rules </span><span class="s3">= [</span>
+    <span class="s3">{  </span><span class="s4"># Doc</span>
+        <span class="s5">'docstropt'</span><span class="s3">: {</span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">isoptional</span><span class="s3">, </span><span class="s1">isintent_nothide</span><span class="s3">): </span><span class="s5">'        #pydocsign#'</span><span class="s3">},</span>
+        <span class="s5">'docstrreq'</span><span class="s3">: {</span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">isrequired</span><span class="s3">, </span><span class="s1">isintent_nothide</span><span class="s3">): </span><span class="s5">'        #pydocsign#'</span><span class="s3">},</span>
+        <span class="s5">'docstrout'</span><span class="s3">: {</span><span class="s1">isintent_out</span><span class="s3">: </span><span class="s5">'        #pydocsignout#'</span><span class="s3">},</span>
+        <span class="s5">'latexdocstropt'</span><span class="s3">: {</span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">isoptional</span><span class="s3">, </span><span class="s1">isintent_nothide</span><span class="s3">): [</span><span class="s5">'</span><span class="s2">\\</span><span class="s5">item[]{{}</span><span class="s2">\\</span><span class="s5">verb@#pydocsign#@{}}'</span><span class="s3">,</span>
+                                                                 <span class="s3">{</span><span class="s1">hasnote</span><span class="s3">: </span><span class="s5">'--- #note#'</span><span class="s3">}]},</span>
+        <span class="s5">'latexdocstrreq'</span><span class="s3">: {</span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">isrequired</span><span class="s3">, </span><span class="s1">isintent_nothide</span><span class="s3">): [</span><span class="s5">'</span><span class="s2">\\</span><span class="s5">item[]{{}</span><span class="s2">\\</span><span class="s5">verb@#pydocsign#@{}}'</span><span class="s3">,</span>
+                                                                 <span class="s3">{</span><span class="s1">hasnote</span><span class="s3">: </span><span class="s5">'--- #note#'</span><span class="s3">}]},</span>
+        <span class="s5">'latexdocstrout'</span><span class="s3">: {</span><span class="s1">isintent_out</span><span class="s3">: [</span><span class="s5">'</span><span class="s2">\\</span><span class="s5">item[]{{}</span><span class="s2">\\</span><span class="s5">verb@#pydocsignout#@{}}'</span><span class="s3">,</span>
+                                          <span class="s3">{</span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">hasnote</span><span class="s3">, </span><span class="s1">isintent_hide</span><span class="s3">): </span><span class="s5">'--- #note#'</span><span class="s3">,</span>
+                                           <span class="s1">l_and</span><span class="s3">(</span><span class="s1">hasnote</span><span class="s3">, </span><span class="s1">isintent_nothide</span><span class="s3">): </span><span class="s5">'--- See above.'</span><span class="s3">}]},</span>
+        <span class="s5">'docsign'</span><span class="s3">: {</span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">isrequired</span><span class="s3">, </span><span class="s1">isintent_nothide</span><span class="s3">): </span><span class="s5">'#varname#,'</span><span class="s3">},</span>
+        <span class="s5">'docsignopt'</span><span class="s3">: {</span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">isoptional</span><span class="s3">, </span><span class="s1">isintent_nothide</span><span class="s3">): </span><span class="s5">'#varname#,'</span><span class="s3">},</span>
+        <span class="s5">'depend'</span><span class="s3">: </span><span class="s5">''</span>
+    <span class="s3">},</span>
+    <span class="s3">{</span>
+        <span class="s5">'args'</span><span class="s3">: {</span>
+            <span class="s1">l_and</span><span class="s3">(</span><span class="s1">isscalar</span><span class="s3">, </span><span class="s1">isintent_c</span><span class="s3">): </span><span class="s5">'#ctype# #varname_i#'</span><span class="s3">,</span>
+            <span class="s1">l_and</span><span class="s3">(</span><span class="s1">isscalar</span><span class="s3">, </span><span class="s1">l_not</span><span class="s3">(</span><span class="s1">isintent_c</span><span class="s3">)): </span><span class="s5">'#ctype# *#varname_i#_cb_capi'</span><span class="s3">,</span>
+            <span class="s1">isarray</span><span class="s3">: </span><span class="s5">'#ctype# *#varname_i#'</span><span class="s3">,</span>
+            <span class="s1">isstring</span><span class="s3">: </span><span class="s5">'#ctype# #varname_i#'</span>
+        <span class="s3">},</span>
+        <span class="s5">'args_nm'</span><span class="s3">: {</span>
+            <span class="s1">l_and</span><span class="s3">(</span><span class="s1">isscalar</span><span class="s3">, </span><span class="s1">isintent_c</span><span class="s3">): </span><span class="s5">'#varname_i#'</span><span class="s3">,</span>
+            <span class="s1">l_and</span><span class="s3">(</span><span class="s1">isscalar</span><span class="s3">, </span><span class="s1">l_not</span><span class="s3">(</span><span class="s1">isintent_c</span><span class="s3">)): </span><span class="s5">'#varname_i#_cb_capi'</span><span class="s3">,</span>
+            <span class="s1">isarray</span><span class="s3">: </span><span class="s5">'#varname_i#'</span><span class="s3">,</span>
+            <span class="s1">isstring</span><span class="s3">: </span><span class="s5">'#varname_i#'</span>
+        <span class="s3">},</span>
+        <span class="s5">'args_td'</span><span class="s3">: {</span>
+            <span class="s1">l_and</span><span class="s3">(</span><span class="s1">isscalar</span><span class="s3">, </span><span class="s1">isintent_c</span><span class="s3">): </span><span class="s5">'#ctype#'</span><span class="s3">,</span>
+            <span class="s1">l_and</span><span class="s3">(</span><span class="s1">isscalar</span><span class="s3">, </span><span class="s1">l_not</span><span class="s3">(</span><span class="s1">isintent_c</span><span class="s3">)): </span><span class="s5">'#ctype# *'</span><span class="s3">,</span>
+            <span class="s1">isarray</span><span class="s3">: </span><span class="s5">'#ctype# *'</span><span class="s3">,</span>
+            <span class="s1">isstring</span><span class="s3">: </span><span class="s5">'#ctype#'</span>
+        <span class="s3">},</span>
+        <span class="s5">'need'</span><span class="s3">: {</span><span class="s1">l_or</span><span class="s3">(</span><span class="s1">isscalar</span><span class="s3">, </span><span class="s1">isarray</span><span class="s3">, </span><span class="s1">isstring</span><span class="s3">): </span><span class="s5">'#ctype#'</span><span class="s3">},</span>
+        <span class="s4"># untested with multiple args</span>
+        <span class="s5">'strarglens'</span><span class="s3">: {</span><span class="s1">isstring</span><span class="s3">: </span><span class="s5">',int #varname_i#_cb_len'</span><span class="s3">},</span>
+        <span class="s5">'strarglens_td'</span><span class="s3">: {</span><span class="s1">isstring</span><span class="s3">: </span><span class="s5">',int'</span><span class="s3">},  </span><span class="s4"># untested with multiple args</span>
+        <span class="s4"># untested with multiple args</span>
+        <span class="s5">'strarglens_nm'</span><span class="s3">: {</span><span class="s1">isstring</span><span class="s3">: </span><span class="s5">',#varname_i#_cb_len'</span><span class="s3">},</span>
+    <span class="s3">},</span>
+    <span class="s3">{  </span><span class="s4"># Scalars</span>
+        <span class="s5">'decl'</span><span class="s3">: {</span><span class="s1">l_not</span><span class="s3">(</span><span class="s1">isintent_c</span><span class="s3">): </span><span class="s5">'    #ctype# #varname_i#=(*#varname_i#_cb_capi);'</span><span class="s3">},</span>
+        <span class="s5">'error'</span><span class="s3">: {</span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">isintent_c</span><span class="s3">, </span><span class="s1">isintent_out</span><span class="s3">,</span>
+                        <span class="s1">throw_error</span><span class="s3">(</span><span class="s5">'intent(c,out) is forbidden for callback scalar arguments'</span><span class="s3">)):</span>
+                  <span class="s5">''</span><span class="s3">},</span>
+        <span class="s5">'frompyobj'</span><span class="s3">: [{</span><span class="s1">debugcapi</span><span class="s3">: </span><span class="s5">'    CFUNCSMESS(&quot;cb:Getting #varname#-&gt;&quot;);'</span><span class="s3">},</span>
+                      <span class="s3">{</span><span class="s1">isintent_out</span><span class="s3">:</span>
+                       <span class="s5">'    if (capi_j&gt;capi_i)</span><span class="s2">\n        </span><span class="s5">GETSCALARFROMPYTUPLE(capi_return,capi_i++,#varname_i#_cb_capi,#ctype#,&quot;#ctype#_from_pyobj failed in converting argument #varname# of call-back function #name# to C #ctype#</span><span class="s2">\\</span><span class="s5">n&quot;);'</span><span class="s3">},</span>
+                      <span class="s3">{</span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">debugcapi</span><span class="s3">, </span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">l_not</span><span class="s3">(</span><span class="s1">iscomplex</span><span class="s3">), </span><span class="s1">isintent_c</span><span class="s3">)):</span>
+                          <span class="s5">'    fprintf(stderr,&quot;#showvalueformat#.</span><span class="s2">\\</span><span class="s5">n&quot;,#varname_i#);'</span><span class="s3">},</span>
+                      <span class="s3">{</span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">debugcapi</span><span class="s3">, </span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">l_not</span><span class="s3">(</span><span class="s1">iscomplex</span><span class="s3">), </span><span class="s1">l_not</span><span class="s3">(</span><span class="s1">isintent_c</span><span class="s3">))):</span>
+                          <span class="s5">'    fprintf(stderr,&quot;#showvalueformat#.</span><span class="s2">\\</span><span class="s5">n&quot;,*#varname_i#_cb_capi);'</span><span class="s3">},</span>
+                      <span class="s3">{</span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">debugcapi</span><span class="s3">, </span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">iscomplex</span><span class="s3">, </span><span class="s1">isintent_c</span><span class="s3">)):</span>
+                          <span class="s5">'    fprintf(stderr,&quot;#showvalueformat#.</span><span class="s2">\\</span><span class="s5">n&quot;,(#varname_i#).r,(#varname_i#).i);'</span><span class="s3">},</span>
+                      <span class="s3">{</span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">debugcapi</span><span class="s3">, </span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">iscomplex</span><span class="s3">, </span><span class="s1">l_not</span><span class="s3">(</span><span class="s1">isintent_c</span><span class="s3">))):</span>
+                          <span class="s5">'    fprintf(stderr,&quot;#showvalueformat#.</span><span class="s2">\\</span><span class="s5">n&quot;,(*#varname_i#_cb_capi).r,(*#varname_i#_cb_capi).i);'</span><span class="s3">},</span>
+                      <span class="s3">],</span>
+        <span class="s5">'need'</span><span class="s3">: [{</span><span class="s1">isintent_out</span><span class="s3">: [</span><span class="s5">'#ctype#_from_pyobj'</span><span class="s3">, </span><span class="s5">'GETSCALARFROMPYTUPLE'</span><span class="s3">]},</span>
+                 <span class="s3">{</span><span class="s1">debugcapi</span><span class="s3">: </span><span class="s5">'CFUNCSMESS'</span><span class="s3">}],</span>
+        <span class="s5">'_check'</span><span class="s3">: </span><span class="s1">isscalar</span>
+    <span class="s3">}, {</span>
+        <span class="s5">'pyobjfrom'</span><span class="s3">: [{</span><span class="s1">isintent_in</span><span class="s3">: </span><span class="s5">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s5">if (cb-&gt;nofargs&gt;capi_i) 
+        if (CAPI_ARGLIST_SETITEM(capi_i++,pyobj_from_#ctype#1(#varname_i#))) 
+            goto capi_fail;&quot;&quot;&quot;</span><span class="s3">},</span>
+                      <span class="s3">{</span><span class="s1">isintent_inout</span><span class="s3">: </span><span class="s5">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s5">if (cb-&gt;nofargs&gt;capi_i) 
+        if (CAPI_ARGLIST_SETITEM(capi_i++,pyarr_from_p_#ctype#1(#varname_i#_cb_capi))) 
+            goto capi_fail;&quot;&quot;&quot;</span><span class="s3">}],</span>
+        <span class="s5">'need'</span><span class="s3">: [{</span><span class="s1">isintent_in</span><span class="s3">: </span><span class="s5">'pyobj_from_#ctype#1'</span><span class="s3">},</span>
+                 <span class="s3">{</span><span class="s1">isintent_inout</span><span class="s3">: </span><span class="s5">'pyarr_from_p_#ctype#1'</span><span class="s3">},</span>
+                 <span class="s3">{</span><span class="s1">iscomplex</span><span class="s3">: </span><span class="s5">'#ctype#'</span><span class="s3">}],</span>
+        <span class="s5">'_check'</span><span class="s3">: </span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">isscalar</span><span class="s3">, </span><span class="s1">isintent_nothide</span><span class="s3">),</span>
+        <span class="s5">'_optional'</span><span class="s3">: </span><span class="s5">''</span>
+    <span class="s3">}, {  </span><span class="s4"># String</span>
+        <span class="s5">'frompyobj'</span><span class="s3">: [{</span><span class="s1">debugcapi</span><span class="s3">: </span><span class="s5">'    CFUNCSMESS(&quot;cb:Getting #varname#-&gt;</span><span class="s2">\\</span><span class="s5">&quot;&quot;);'</span><span class="s3">},</span>
+                      <span class="s5">&quot;&quot;&quot;    if (capi_j&gt;capi_i) 
+        GETSTRFROMPYTUPLE(capi_return,capi_i++,#varname_i#,#varname_i#_cb_len);&quot;&quot;&quot;</span><span class="s3">,</span>
+                      <span class="s3">{</span><span class="s1">debugcapi</span><span class="s3">:</span>
+                       <span class="s5">'    fprintf(stderr,&quot;#showvalueformat#</span><span class="s2">\\</span><span class="s5">&quot;:%d:.</span><span class="s2">\\</span><span class="s5">n&quot;,#varname_i#,#varname_i#_cb_len);'</span><span class="s3">},</span>
+                      <span class="s3">],</span>
+        <span class="s5">'need'</span><span class="s3">: [</span><span class="s5">'#ctype#'</span><span class="s3">, </span><span class="s5">'GETSTRFROMPYTUPLE'</span><span class="s3">,</span>
+                 <span class="s3">{</span><span class="s1">debugcapi</span><span class="s3">: </span><span class="s5">'CFUNCSMESS'</span><span class="s3">}, </span><span class="s5">'string.h'</span><span class="s3">],</span>
+        <span class="s5">'_check'</span><span class="s3">: </span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">isstring</span><span class="s3">, </span><span class="s1">isintent_out</span><span class="s3">)</span>
+    <span class="s3">}, {</span>
+        <span class="s5">'pyobjfrom'</span><span class="s3">: [</span>
+            <span class="s3">{</span><span class="s1">debugcapi</span><span class="s3">:</span>
+             <span class="s3">(</span><span class="s5">'    fprintf(stderr,&quot;debug-capi:cb:#varname#=#showvalueformat#:'</span>
+              <span class="s5">'%d:</span><span class="s2">\\</span><span class="s5">n&quot;,#varname_i#,#varname_i#_cb_len);'</span><span class="s3">)},</span>
+            <span class="s3">{</span><span class="s1">isintent_in</span><span class="s3">: </span><span class="s5">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s5">if (cb-&gt;nofargs&gt;capi_i) 
+        if (CAPI_ARGLIST_SETITEM(capi_i++,pyobj_from_#ctype#1size(#varname_i#,#varname_i#_cb_len))) 
+            goto capi_fail;&quot;&quot;&quot;</span><span class="s3">},</span>
+                      <span class="s3">{</span><span class="s1">isintent_inout</span><span class="s3">: </span><span class="s5">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s5">if (cb-&gt;nofargs&gt;capi_i) { 
+        int #varname_i#_cb_dims[] = {#varname_i#_cb_len}; 
+        if (CAPI_ARGLIST_SETITEM(capi_i++,pyarr_from_p_#ctype#1(#varname_i#,#varname_i#_cb_dims))) 
+            goto capi_fail; 
+    }&quot;&quot;&quot;</span><span class="s3">}],</span>
+        <span class="s5">'need'</span><span class="s3">: [{</span><span class="s1">isintent_in</span><span class="s3">: </span><span class="s5">'pyobj_from_#ctype#1size'</span><span class="s3">},</span>
+                 <span class="s3">{</span><span class="s1">isintent_inout</span><span class="s3">: </span><span class="s5">'pyarr_from_p_#ctype#1'</span><span class="s3">}],</span>
+        <span class="s5">'_check'</span><span class="s3">: </span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">isstring</span><span class="s3">, </span><span class="s1">isintent_nothide</span><span class="s3">),</span>
+        <span class="s5">'_optional'</span><span class="s3">: </span><span class="s5">''</span>
+    <span class="s3">},</span>
+    <span class="s4"># Array ...</span>
+    <span class="s3">{</span>
+        <span class="s5">'decl'</span><span class="s3">: </span><span class="s5">'    npy_intp #varname_i#_Dims[#rank#] = {#rank*[-1]#};'</span><span class="s3">,</span>
+        <span class="s5">'setdims'</span><span class="s3">: </span><span class="s5">'    #cbsetdims#;'</span><span class="s3">,</span>
+        <span class="s5">'_check'</span><span class="s3">: </span><span class="s1">isarray</span><span class="s3">,</span>
+        <span class="s5">'_depend'</span><span class="s3">: </span><span class="s5">''</span>
+    <span class="s3">},</span>
+    <span class="s3">{</span>
+        <span class="s5">'pyobjfrom'</span><span class="s3">: [{</span><span class="s1">debugcapi</span><span class="s3">: </span><span class="s5">'    fprintf(stderr,&quot;debug-capi:cb:#varname#</span><span class="s2">\\</span><span class="s5">n&quot;);'</span><span class="s3">},</span>
+                      <span class="s3">{</span><span class="s1">isintent_c</span><span class="s3">: </span><span class="s5">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s5">if (cb-&gt;nofargs&gt;capi_i) { 
+        /* tmp_arr will be inserted to capi_arglist_list that will be 
+           destroyed when leaving callback function wrapper together 
+           with tmp_arr. */ 
+        PyArrayObject *tmp_arr = (PyArrayObject *)PyArray_New(&amp;PyArray_Type, 
+          #rank#,#varname_i#_Dims,#atype#,NULL,(char*)#varname_i#,#elsize#, 
+          NPY_ARRAY_CARRAY,NULL); 
+&quot;&quot;&quot;</span><span class="s3">,</span>
+                       <span class="s1">l_not</span><span class="s3">(</span><span class="s1">isintent_c</span><span class="s3">): </span><span class="s5">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s5">if (cb-&gt;nofargs&gt;capi_i) { 
+        /* tmp_arr will be inserted to capi_arglist_list that will be 
+           destroyed when leaving callback function wrapper together 
+           with tmp_arr. */ 
+        PyArrayObject *tmp_arr = (PyArrayObject *)PyArray_New(&amp;PyArray_Type, 
+          #rank#,#varname_i#_Dims,#atype#,NULL,(char*)#varname_i#,#elsize#, 
+          NPY_ARRAY_FARRAY,NULL); 
+&quot;&quot;&quot;</span><span class="s3">,</span>
+                       <span class="s3">},</span>
+                      <span class="s5">&quot;&quot;&quot; 
+        if (tmp_arr==NULL) 
+            goto capi_fail; 
+        if (CAPI_ARGLIST_SETITEM(capi_i++,(PyObject *)tmp_arr)) 
+            goto capi_fail; 
+}&quot;&quot;&quot;</span><span class="s3">],</span>
+        <span class="s5">'_check'</span><span class="s3">: </span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">isarray</span><span class="s3">, </span><span class="s1">isintent_nothide</span><span class="s3">, </span><span class="s1">l_or</span><span class="s3">(</span><span class="s1">isintent_in</span><span class="s3">, </span><span class="s1">isintent_inout</span><span class="s3">)),</span>
+        <span class="s5">'_optional'</span><span class="s3">: </span><span class="s5">''</span><span class="s3">,</span>
+    <span class="s3">}, {</span>
+        <span class="s5">'frompyobj'</span><span class="s3">: [{</span><span class="s1">debugcapi</span><span class="s3">: </span><span class="s5">'    CFUNCSMESS(&quot;cb:Getting #varname#-&gt;&quot;);'</span><span class="s3">},</span>
+                      <span class="s5">&quot;&quot;&quot;    if (capi_j&gt;capi_i) { 
+        PyArrayObject *rv_cb_arr = NULL; 
+        if ((capi_tmp = PyTuple_GetItem(capi_return,capi_i++))==NULL) goto capi_fail; 
+        rv_cb_arr =  array_from_pyobj(#atype#,#varname_i#_Dims,#rank#,F2PY_INTENT_IN&quot;&quot;&quot;</span><span class="s3">,</span>
+                      <span class="s3">{</span><span class="s1">isintent_c</span><span class="s3">: </span><span class="s5">'|F2PY_INTENT_C'</span><span class="s3">},</span>
+                      <span class="s5">&quot;&quot;&quot;,capi_tmp); 
+        if (rv_cb_arr == NULL) { 
+            fprintf(stderr,</span><span class="s2">\&quot;</span><span class="s5">rv_cb_arr is NULL</span><span class="s2">\\</span><span class="s5">n</span><span class="s2">\&quot;</span><span class="s5">); 
+            goto capi_fail; 
+        } 
+        MEMCOPY(#varname_i#,PyArray_DATA(rv_cb_arr),PyArray_NBYTES(rv_cb_arr)); 
+        if (capi_tmp != (PyObject *)rv_cb_arr) { 
+            Py_DECREF(rv_cb_arr); 
+        } 
+    }&quot;&quot;&quot;</span><span class="s3">,</span>
+                      <span class="s3">{</span><span class="s1">debugcapi</span><span class="s3">: </span><span class="s5">'    fprintf(stderr,&quot;&lt;-.</span><span class="s2">\\</span><span class="s5">n&quot;);'</span><span class="s3">},</span>
+                      <span class="s3">],</span>
+        <span class="s5">'need'</span><span class="s3">: [</span><span class="s5">'MEMCOPY'</span><span class="s3">, {</span><span class="s1">iscomplexarray</span><span class="s3">: </span><span class="s5">'#ctype#'</span><span class="s3">}],</span>
+        <span class="s5">'_check'</span><span class="s3">: </span><span class="s1">l_and</span><span class="s3">(</span><span class="s1">isarray</span><span class="s3">, </span><span class="s1">isintent_out</span><span class="s3">)</span>
+    <span class="s3">}, {</span>
+        <span class="s5">'docreturn'</span><span class="s3">: </span><span class="s5">'#varname#,'</span><span class="s3">,</span>
+        <span class="s5">'_check'</span><span class="s3">: </span><span class="s1">isintent_out</span>
+    <span class="s3">}</span>
+<span class="s3">]</span>
+
+<span class="s4">################## Build call-back module #############</span>
+<span class="s1">cb_map </span><span class="s3">= {}</span>
+
+
+<span class="s2">def </span><span class="s1">buildcallbacks</span><span class="s3">(</span><span class="s1">m</span><span class="s3">):</span>
+    <span class="s1">cb_map</span><span class="s3">[</span><span class="s1">m</span><span class="s3">[</span><span class="s5">'name'</span><span class="s3">]] = []</span>
+    <span class="s2">for </span><span class="s1">bi </span><span class="s2">in </span><span class="s1">m</span><span class="s3">[</span><span class="s5">'body'</span><span class="s3">]:</span>
+        <span class="s2">if </span><span class="s1">bi</span><span class="s3">[</span><span class="s5">'block'</span><span class="s3">] == </span><span class="s5">'interface'</span><span class="s3">:</span>
+            <span class="s2">for </span><span class="s1">b </span><span class="s2">in </span><span class="s1">bi</span><span class="s3">[</span><span class="s5">'body'</span><span class="s3">]:</span>
+                <span class="s2">if </span><span class="s1">b</span><span class="s3">:</span>
+                    <span class="s1">buildcallback</span><span class="s3">(</span><span class="s1">b</span><span class="s3">, </span><span class="s1">m</span><span class="s3">[</span><span class="s5">'name'</span><span class="s3">])</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s1">errmess</span><span class="s3">(</span><span class="s5">f&quot;warning: empty body for </span><span class="s2">{</span><span class="s1">m</span><span class="s3">[</span><span class="s5">'name'</span><span class="s3">]</span><span class="s2">}\n</span><span class="s5">&quot;</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">buildcallback</span><span class="s3">(</span><span class="s1">rout</span><span class="s3">, </span><span class="s1">um</span><span class="s3">):</span>
+    <span class="s2">from </span><span class="s3">. </span><span class="s2">import </span><span class="s1">capi_maps</span>
+
+    <span class="s1">outmess</span><span class="s3">(</span><span class="s5">f&quot;    Constructing call-back function </span><span class="s2">\&quot;</span><span class="s5">cb_</span><span class="s2">{</span><span class="s1">rout</span><span class="s3">[</span><span class="s5">'name'</span><span class="s3">]</span><span class="s2">}</span><span class="s5">_in_</span><span class="s2">{</span><span class="s1">um</span><span class="s2">}\&quot;\n</span><span class="s5">&quot;</span><span class="s3">)</span>
+    <span class="s1">args</span><span class="s3">, </span><span class="s1">depargs </span><span class="s3">= </span><span class="s1">getargs</span><span class="s3">(</span><span class="s1">rout</span><span class="s3">)</span>
+    <span class="s1">capi_maps</span><span class="s3">.</span><span class="s1">depargs </span><span class="s3">= </span><span class="s1">depargs</span>
+    <span class="s1">var </span><span class="s3">= </span><span class="s1">rout</span><span class="s3">[</span><span class="s5">'vars'</span><span class="s3">]</span>
+    <span class="s1">vrd </span><span class="s3">= </span><span class="s1">capi_maps</span><span class="s3">.</span><span class="s1">cb_routsign2map</span><span class="s3">(</span><span class="s1">rout</span><span class="s3">, </span><span class="s1">um</span><span class="s3">)</span>
+    <span class="s1">rd </span><span class="s3">= </span><span class="s1">dictappend</span><span class="s3">({}, </span><span class="s1">vrd</span><span class="s3">)</span>
+    <span class="s1">cb_map</span><span class="s3">[</span><span class="s1">um</span><span class="s3">].</span><span class="s1">append</span><span class="s3">([</span><span class="s1">rout</span><span class="s3">[</span><span class="s5">'name'</span><span class="s3">], </span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'name'</span><span class="s3">]])</span>
+    <span class="s2">for </span><span class="s1">r </span><span class="s2">in </span><span class="s1">cb_rout_rules</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s3">(</span><span class="s5">'_check' </span><span class="s2">in </span><span class="s1">r </span><span class="s2">and </span><span class="s1">r</span><span class="s3">[</span><span class="s5">'_check'</span><span class="s3">](</span><span class="s1">rout</span><span class="s3">)) </span><span class="s2">or </span><span class="s3">(</span><span class="s5">'_check' </span><span class="s2">not in </span><span class="s1">r</span><span class="s3">):</span>
+            <span class="s1">ar </span><span class="s3">= </span><span class="s1">applyrules</span><span class="s3">(</span><span class="s1">r</span><span class="s3">, </span><span class="s1">vrd</span><span class="s3">, </span><span class="s1">rout</span><span class="s3">)</span>
+            <span class="s1">rd </span><span class="s3">= </span><span class="s1">dictappend</span><span class="s3">(</span><span class="s1">rd</span><span class="s3">, </span><span class="s1">ar</span><span class="s3">)</span>
+    <span class="s1">savevrd </span><span class="s3">= {}</span>
+    <span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">a </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">args</span><span class="s3">):</span>
+        <span class="s1">vrd </span><span class="s3">= </span><span class="s1">capi_maps</span><span class="s3">.</span><span class="s1">cb_sign2map</span><span class="s3">(</span><span class="s1">a</span><span class="s3">, </span><span class="s1">var</span><span class="s3">[</span><span class="s1">a</span><span class="s3">], </span><span class="s1">index</span><span class="s3">=</span><span class="s1">i</span><span class="s3">)</span>
+        <span class="s1">savevrd</span><span class="s3">[</span><span class="s1">a</span><span class="s3">] = </span><span class="s1">vrd</span>
+        <span class="s2">for </span><span class="s1">r </span><span class="s2">in </span><span class="s1">cb_arg_rules</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s5">'_depend' </span><span class="s2">in </span><span class="s1">r</span><span class="s3">:</span>
+                <span class="s2">continue</span>
+            <span class="s2">if </span><span class="s5">'_optional' </span><span class="s2">in </span><span class="s1">r </span><span class="s2">and </span><span class="s1">isoptional</span><span class="s3">(</span><span class="s1">var</span><span class="s3">[</span><span class="s1">a</span><span class="s3">]):</span>
+                <span class="s2">continue</span>
+            <span class="s2">if </span><span class="s3">(</span><span class="s5">'_check' </span><span class="s2">in </span><span class="s1">r </span><span class="s2">and </span><span class="s1">r</span><span class="s3">[</span><span class="s5">'_check'</span><span class="s3">](</span><span class="s1">var</span><span class="s3">[</span><span class="s1">a</span><span class="s3">])) </span><span class="s2">or </span><span class="s3">(</span><span class="s5">'_check' </span><span class="s2">not in </span><span class="s1">r</span><span class="s3">):</span>
+                <span class="s1">ar </span><span class="s3">= </span><span class="s1">applyrules</span><span class="s3">(</span><span class="s1">r</span><span class="s3">, </span><span class="s1">vrd</span><span class="s3">, </span><span class="s1">var</span><span class="s3">[</span><span class="s1">a</span><span class="s3">])</span>
+                <span class="s1">rd </span><span class="s3">= </span><span class="s1">dictappend</span><span class="s3">(</span><span class="s1">rd</span><span class="s3">, </span><span class="s1">ar</span><span class="s3">)</span>
+                <span class="s2">if </span><span class="s5">'_break' </span><span class="s2">in </span><span class="s1">r</span><span class="s3">:</span>
+                    <span class="s2">break</span>
+    <span class="s2">for </span><span class="s1">a </span><span class="s2">in </span><span class="s1">args</span><span class="s3">:</span>
+        <span class="s1">vrd </span><span class="s3">= </span><span class="s1">savevrd</span><span class="s3">[</span><span class="s1">a</span><span class="s3">]</span>
+        <span class="s2">for </span><span class="s1">r </span><span class="s2">in </span><span class="s1">cb_arg_rules</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s5">'_depend' </span><span class="s2">in </span><span class="s1">r</span><span class="s3">:</span>
+                <span class="s2">continue</span>
+            <span class="s2">if </span><span class="s3">(</span><span class="s5">'_optional' </span><span class="s2">not in </span><span class="s1">r</span><span class="s3">) </span><span class="s2">or </span><span class="s3">(</span><span class="s5">'_optional' </span><span class="s2">in </span><span class="s1">r </span><span class="s2">and </span><span class="s1">isrequired</span><span class="s3">(</span><span class="s1">var</span><span class="s3">[</span><span class="s1">a</span><span class="s3">])):</span>
+                <span class="s2">continue</span>
+            <span class="s2">if </span><span class="s3">(</span><span class="s5">'_check' </span><span class="s2">in </span><span class="s1">r </span><span class="s2">and </span><span class="s1">r</span><span class="s3">[</span><span class="s5">'_check'</span><span class="s3">](</span><span class="s1">var</span><span class="s3">[</span><span class="s1">a</span><span class="s3">])) </span><span class="s2">or </span><span class="s3">(</span><span class="s5">'_check' </span><span class="s2">not in </span><span class="s1">r</span><span class="s3">):</span>
+                <span class="s1">ar </span><span class="s3">= </span><span class="s1">applyrules</span><span class="s3">(</span><span class="s1">r</span><span class="s3">, </span><span class="s1">vrd</span><span class="s3">, </span><span class="s1">var</span><span class="s3">[</span><span class="s1">a</span><span class="s3">])</span>
+                <span class="s1">rd </span><span class="s3">= </span><span class="s1">dictappend</span><span class="s3">(</span><span class="s1">rd</span><span class="s3">, </span><span class="s1">ar</span><span class="s3">)</span>
+                <span class="s2">if </span><span class="s5">'_break' </span><span class="s2">in </span><span class="s1">r</span><span class="s3">:</span>
+                    <span class="s2">break</span>
+    <span class="s2">for </span><span class="s1">a </span><span class="s2">in </span><span class="s1">depargs</span><span class="s3">:</span>
+        <span class="s1">vrd </span><span class="s3">= </span><span class="s1">savevrd</span><span class="s3">[</span><span class="s1">a</span><span class="s3">]</span>
+        <span class="s2">for </span><span class="s1">r </span><span class="s2">in </span><span class="s1">cb_arg_rules</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s5">'_depend' </span><span class="s2">not in </span><span class="s1">r</span><span class="s3">:</span>
+                <span class="s2">continue</span>
+            <span class="s2">if </span><span class="s5">'_optional' </span><span class="s2">in </span><span class="s1">r</span><span class="s3">:</span>
+                <span class="s2">continue</span>
+            <span class="s2">if </span><span class="s3">(</span><span class="s5">'_check' </span><span class="s2">in </span><span class="s1">r </span><span class="s2">and </span><span class="s1">r</span><span class="s3">[</span><span class="s5">'_check'</span><span class="s3">](</span><span class="s1">var</span><span class="s3">[</span><span class="s1">a</span><span class="s3">])) </span><span class="s2">or </span><span class="s3">(</span><span class="s5">'_check' </span><span class="s2">not in </span><span class="s1">r</span><span class="s3">):</span>
+                <span class="s1">ar </span><span class="s3">= </span><span class="s1">applyrules</span><span class="s3">(</span><span class="s1">r</span><span class="s3">, </span><span class="s1">vrd</span><span class="s3">, </span><span class="s1">var</span><span class="s3">[</span><span class="s1">a</span><span class="s3">])</span>
+                <span class="s1">rd </span><span class="s3">= </span><span class="s1">dictappend</span><span class="s3">(</span><span class="s1">rd</span><span class="s3">, </span><span class="s1">ar</span><span class="s3">)</span>
+                <span class="s2">if </span><span class="s5">'_break' </span><span class="s2">in </span><span class="s1">r</span><span class="s3">:</span>
+                    <span class="s2">break</span>
+    <span class="s2">if </span><span class="s5">'args' </span><span class="s2">in </span><span class="s1">rd </span><span class="s2">and </span><span class="s5">'optargs' </span><span class="s2">in </span><span class="s1">rd</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'optargs'</span><span class="s3">], </span><span class="s1">list</span><span class="s3">):</span>
+            <span class="s1">rd</span><span class="s3">[</span><span class="s5">'optargs'</span><span class="s3">] = </span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'optargs'</span><span class="s3">] + [</span><span class="s5">&quot;&quot;&quot; 
+#ifndef F2PY_CB_RETURNCOMPLEX 
+, 
+#endif 
+&quot;&quot;&quot;</span><span class="s3">]</span>
+            <span class="s1">rd</span><span class="s3">[</span><span class="s5">'optargs_nm'</span><span class="s3">] = </span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'optargs_nm'</span><span class="s3">] + [</span><span class="s5">&quot;&quot;&quot; 
+#ifndef F2PY_CB_RETURNCOMPLEX 
+, 
+#endif 
+&quot;&quot;&quot;</span><span class="s3">]</span>
+            <span class="s1">rd</span><span class="s3">[</span><span class="s5">'optargs_td'</span><span class="s3">] = </span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'optargs_td'</span><span class="s3">] + [</span><span class="s5">&quot;&quot;&quot; 
+#ifndef F2PY_CB_RETURNCOMPLEX 
+, 
+#endif 
+&quot;&quot;&quot;</span><span class="s3">]</span>
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'docreturn'</span><span class="s3">], </span><span class="s1">list</span><span class="s3">):</span>
+        <span class="s1">rd</span><span class="s3">[</span><span class="s5">'docreturn'</span><span class="s3">] = </span><span class="s1">stripcomma</span><span class="s3">(</span>
+            <span class="s1">replace</span><span class="s3">(</span><span class="s5">'#docreturn#'</span><span class="s3">, {</span><span class="s5">'docreturn'</span><span class="s3">: </span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'docreturn'</span><span class="s3">]}))</span>
+    <span class="s1">optargs </span><span class="s3">= </span><span class="s1">stripcomma</span><span class="s3">(</span><span class="s1">replace</span><span class="s3">(</span><span class="s5">'#docsignopt#'</span><span class="s3">,</span>
+                                 <span class="s3">{</span><span class="s5">'docsignopt'</span><span class="s3">: </span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'docsignopt'</span><span class="s3">]}</span>
+                                 <span class="s3">))</span>
+    <span class="s2">if </span><span class="s1">optargs </span><span class="s3">== </span><span class="s5">''</span><span class="s3">:</span>
+        <span class="s1">rd</span><span class="s3">[</span><span class="s5">'docsignature'</span><span class="s3">] = </span><span class="s1">stripcomma</span><span class="s3">(</span>
+            <span class="s1">replace</span><span class="s3">(</span><span class="s5">'#docsign#'</span><span class="s3">, {</span><span class="s5">'docsign'</span><span class="s3">: </span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'docsign'</span><span class="s3">]}))</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">rd</span><span class="s3">[</span><span class="s5">'docsignature'</span><span class="s3">] = </span><span class="s1">replace</span><span class="s3">(</span><span class="s5">'#docsign#[#docsignopt#]'</span><span class="s3">,</span>
+                                     <span class="s3">{</span><span class="s5">'docsign'</span><span class="s3">: </span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'docsign'</span><span class="s3">],</span>
+                                      <span class="s5">'docsignopt'</span><span class="s3">: </span><span class="s1">optargs</span><span class="s3">,</span>
+                                      <span class="s3">})</span>
+    <span class="s1">rd</span><span class="s3">[</span><span class="s5">'latexdocsignature'</span><span class="s3">] = </span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'docsignature'</span><span class="s3">].</span><span class="s1">replace</span><span class="s3">(</span><span class="s5">'_'</span><span class="s3">, </span><span class="s5">'</span><span class="s2">\\</span><span class="s5">_'</span><span class="s3">)</span>
+    <span class="s1">rd</span><span class="s3">[</span><span class="s5">'latexdocsignature'</span><span class="s3">] = </span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'latexdocsignature'</span><span class="s3">].</span><span class="s1">replace</span><span class="s3">(</span><span class="s5">','</span><span class="s3">, </span><span class="s5">', '</span><span class="s3">)</span>
+    <span class="s1">rd</span><span class="s3">[</span><span class="s5">'docstrsigns'</span><span class="s3">] = []</span>
+    <span class="s1">rd</span><span class="s3">[</span><span class="s5">'latexdocstrsigns'</span><span class="s3">] = []</span>
+    <span class="s2">for </span><span class="s1">k </span><span class="s2">in </span><span class="s3">[</span><span class="s5">'docstrreq'</span><span class="s3">, </span><span class="s5">'docstropt'</span><span class="s3">, </span><span class="s5">'docstrout'</span><span class="s3">, </span><span class="s5">'docstrcbs'</span><span class="s3">]:</span>
+        <span class="s2">if </span><span class="s1">k </span><span class="s2">in </span><span class="s1">rd </span><span class="s2">and </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">rd</span><span class="s3">[</span><span class="s1">k</span><span class="s3">], </span><span class="s1">list</span><span class="s3">):</span>
+            <span class="s1">rd</span><span class="s3">[</span><span class="s5">'docstrsigns'</span><span class="s3">] = </span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'docstrsigns'</span><span class="s3">] + </span><span class="s1">rd</span><span class="s3">[</span><span class="s1">k</span><span class="s3">]</span>
+        <span class="s1">k </span><span class="s3">= </span><span class="s5">'latex' </span><span class="s3">+ </span><span class="s1">k</span>
+        <span class="s2">if </span><span class="s1">k </span><span class="s2">in </span><span class="s1">rd </span><span class="s2">and </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">rd</span><span class="s3">[</span><span class="s1">k</span><span class="s3">], </span><span class="s1">list</span><span class="s3">):</span>
+            <span class="s1">rd</span><span class="s3">[</span><span class="s5">'latexdocstrsigns'</span><span class="s3">] = </span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'latexdocstrsigns'</span><span class="s3">] + </span><span class="s1">rd</span><span class="s3">[</span><span class="s1">k</span><span class="s3">][</span><span class="s6">0</span><span class="s3">:</span><span class="s6">1</span><span class="s3">] +</span><span class="s1">\</span>
+                <span class="s3">[</span><span class="s5">'</span><span class="s2">\\</span><span class="s5">begin{description}'</span><span class="s3">] + </span><span class="s1">rd</span><span class="s3">[</span><span class="s1">k</span><span class="s3">][</span><span class="s6">1</span><span class="s3">:] +</span><span class="s1">\</span>
+                <span class="s3">[</span><span class="s5">'</span><span class="s2">\\</span><span class="s5">end{description}'</span><span class="s3">]</span>
+    <span class="s2">if </span><span class="s5">'args' </span><span class="s2">not in </span><span class="s1">rd</span><span class="s3">:</span>
+        <span class="s1">rd</span><span class="s3">[</span><span class="s5">'args'</span><span class="s3">] = </span><span class="s5">''</span>
+        <span class="s1">rd</span><span class="s3">[</span><span class="s5">'args_td'</span><span class="s3">] = </span><span class="s5">''</span>
+        <span class="s1">rd</span><span class="s3">[</span><span class="s5">'args_nm'</span><span class="s3">] = </span><span class="s5">''</span>
+    <span class="s2">if not </span><span class="s3">(</span><span class="s1">rd</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s5">'args'</span><span class="s3">) </span><span class="s2">or </span><span class="s1">rd</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s5">'optargs'</span><span class="s3">) </span><span class="s2">or </span><span class="s1">rd</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s5">'strarglens'</span><span class="s3">)):</span>
+        <span class="s1">rd</span><span class="s3">[</span><span class="s5">'noargs'</span><span class="s3">] = </span><span class="s5">'void'</span>
+
+    <span class="s1">ar </span><span class="s3">= </span><span class="s1">applyrules</span><span class="s3">(</span><span class="s1">cb_routine_rules</span><span class="s3">, </span><span class="s1">rd</span><span class="s3">)</span>
+    <span class="s1">cfuncs</span><span class="s3">.</span><span class="s1">callbacks</span><span class="s3">[</span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'name'</span><span class="s3">]] = </span><span class="s1">ar</span><span class="s3">[</span><span class="s5">'body'</span><span class="s3">]</span>
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">ar</span><span class="s3">[</span><span class="s5">'need'</span><span class="s3">], </span><span class="s1">str</span><span class="s3">):</span>
+        <span class="s1">ar</span><span class="s3">[</span><span class="s5">'need'</span><span class="s3">] = [</span><span class="s1">ar</span><span class="s3">[</span><span class="s5">'need'</span><span class="s3">]]</span>
+
+    <span class="s2">if </span><span class="s5">'need' </span><span class="s2">in </span><span class="s1">rd</span><span class="s3">:</span>
+        <span class="s2">for </span><span class="s1">t </span><span class="s2">in </span><span class="s1">cfuncs</span><span class="s3">.</span><span class="s1">typedefs</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">():</span>
+            <span class="s2">if </span><span class="s1">t </span><span class="s2">in </span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'need'</span><span class="s3">]:</span>
+                <span class="s1">ar</span><span class="s3">[</span><span class="s5">'need'</span><span class="s3">].</span><span class="s1">append</span><span class="s3">(</span><span class="s1">t</span><span class="s3">)</span>
+
+    <span class="s1">cfuncs</span><span class="s3">.</span><span class="s1">typedefs_generated</span><span class="s3">[</span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'name'</span><span class="s3">] + </span><span class="s5">'_typedef'</span><span class="s3">] = </span><span class="s1">ar</span><span class="s3">[</span><span class="s5">'cbtypedefs'</span><span class="s3">]</span>
+    <span class="s1">ar</span><span class="s3">[</span><span class="s5">'need'</span><span class="s3">].</span><span class="s1">append</span><span class="s3">(</span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'name'</span><span class="s3">] + </span><span class="s5">'_typedef'</span><span class="s3">)</span>
+    <span class="s1">cfuncs</span><span class="s3">.</span><span class="s1">needs</span><span class="s3">[</span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'name'</span><span class="s3">]] = </span><span class="s1">ar</span><span class="s3">[</span><span class="s5">'need'</span><span class="s3">]</span>
+
+    <span class="s1">capi_maps</span><span class="s3">.</span><span class="s1">lcb2_map</span><span class="s3">[</span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'name'</span><span class="s3">]] = {</span><span class="s5">'maxnofargs'</span><span class="s3">: </span><span class="s1">ar</span><span class="s3">[</span><span class="s5">'maxnofargs'</span><span class="s3">],</span>
+                                      <span class="s5">'nofoptargs'</span><span class="s3">: </span><span class="s1">ar</span><span class="s3">[</span><span class="s5">'nofoptargs'</span><span class="s3">],</span>
+                                      <span class="s5">'docstr'</span><span class="s3">: </span><span class="s1">ar</span><span class="s3">[</span><span class="s5">'docstr'</span><span class="s3">],</span>
+                                      <span class="s5">'latexdocstr'</span><span class="s3">: </span><span class="s1">ar</span><span class="s3">[</span><span class="s5">'latexdocstr'</span><span class="s3">],</span>
+                                      <span class="s5">'argname'</span><span class="s3">: </span><span class="s1">rd</span><span class="s3">[</span><span class="s5">'argname'</span><span class="s3">]</span>
+                                      <span class="s3">}</span>
+    <span class="s1">outmess</span><span class="s3">(</span><span class="s5">f&quot;      </span><span class="s2">{</span><span class="s1">ar</span><span class="s3">[</span><span class="s5">'docstrshort'</span><span class="s3">]</span><span class="s2">}\n</span><span class="s5">&quot;</span><span class="s3">)</span>
+<span class="s4">################## Build call-back function #############</span>
+</pre>
+</body>
+</html>

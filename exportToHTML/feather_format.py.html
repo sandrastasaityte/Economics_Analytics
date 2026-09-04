@@ -1,0 +1,227 @@
+<html>
+<head>
+<title>feather_format.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+feather_format.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;feather-format compat&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s3">,</span>
+    <span class="s1">Any</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">import </span><span class="s1">warnings</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_config </span><span class="s2">import </span><span class="s1">using_string_dtype</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs </span><span class="s2">import </span><span class="s1">lib</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">compat</span><span class="s3">.</span><span class="s1">_optional </span><span class="s2">import </span><span class="s1">import_optional_dependency</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">errors </span><span class="s2">import </span><span class="s1">Pandas4Warning</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">_decorators </span><span class="s2">import </span><span class="s1">set_module</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">_validators </span><span class="s2">import </span><span class="s1">check_dtype_backend</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">api </span><span class="s2">import </span><span class="s1">DataFrame</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">arrays</span><span class="s3">.</span><span class="s1">string_ </span><span class="s2">import </span><span class="s1">StringDtype</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">_util </span><span class="s2">import </span><span class="s1">arrow_table_to_pandas</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">common </span><span class="s2">import </span><span class="s1">get_handle</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">collections</span><span class="s3">.</span><span class="s1">abc </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">Hashable</span><span class="s3">,</span>
+        <span class="s1">Sequence</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_typing </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">DtypeBackend</span><span class="s3">,</span>
+        <span class="s1">FilePath</span><span class="s3">,</span>
+        <span class="s1">ReadBuffer</span><span class="s3">,</span>
+        <span class="s1">StorageOptions</span><span class="s3">,</span>
+        <span class="s1">WriteBuffer</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">to_feather</span><span class="s3">(</span>
+    <span class="s1">df</span><span class="s3">: </span><span class="s1">DataFrame</span><span class="s3">,</span>
+    <span class="s1">path</span><span class="s3">: </span><span class="s1">FilePath </span><span class="s3">| </span><span class="s1">WriteBuffer</span><span class="s3">[</span><span class="s1">bytes</span><span class="s3">],</span>
+    <span class="s1">storage_options</span><span class="s3">: </span><span class="s1">StorageOptions </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">**</span><span class="s1">kwargs</span><span class="s3">: </span><span class="s1">Any</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Write a DataFrame to the binary Feather format. 
+ 
+    Parameters 
+    ---------- 
+    df : DataFrame 
+    path : str, path object, or file-like object 
+    storage_options : dict, optional 
+        Extra options that make sense for a particular storage connection, e.g. 
+        host, port, username, password, etc. For HTTP(S) URLs the key-value pairs 
+        are forwarded to ``urllib.request.Request`` as header options. For other 
+        URLs (e.g. starting with &quot;s3://&quot;, and &quot;gcs://&quot;) the key-value pairs are 
+        forwarded to ``fsspec.open``. Please see ``fsspec`` and ``urllib`` for more 
+        details, and for more examples on storage options refer `here 
+        &lt;https://pandas.pydata.org/docs/user_guide/io.html? 
+        highlight=storage_options#reading-writing-remote-files&gt;`_. 
+    **kwargs : 
+        Additional keywords passed to `pyarrow.feather.write_feather`. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">import_optional_dependency</span><span class="s3">(</span><span class="s4">&quot;pyarrow&quot;</span><span class="s3">)</span>
+    <span class="s2">from </span><span class="s1">pyarrow </span><span class="s2">import </span><span class="s1">feather</span>
+
+    <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">df</span><span class="s3">, </span><span class="s1">DataFrame</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;feather only support IO with DataFrames&quot;</span><span class="s3">)</span>
+
+    <span class="s2">with </span><span class="s1">get_handle</span><span class="s3">(</span>
+        <span class="s1">path</span><span class="s3">, </span><span class="s4">&quot;wb&quot;</span><span class="s3">, </span><span class="s1">storage_options</span><span class="s3">=</span><span class="s1">storage_options</span><span class="s3">, </span><span class="s1">is_text</span><span class="s3">=</span><span class="s2">False</span>
+    <span class="s3">) </span><span class="s2">as </span><span class="s1">handles</span><span class="s3">:</span>
+        <span class="s5"># pyarrow&gt;=24 deprecates feather.write_feather in favor of pyarrow.ipc;</span>
+        <span class="s5"># suppress until we migrate the implementation (GH#66169)</span>
+        <span class="s2">with </span><span class="s1">warnings</span><span class="s3">.</span><span class="s1">catch_warnings</span><span class="s3">():</span>
+            <span class="s1">warnings</span><span class="s3">.</span><span class="s1">filterwarnings</span><span class="s3">(</span>
+                <span class="s4">&quot;ignore&quot;</span><span class="s3">,</span>
+                <span class="s4">&quot;pyarrow.feather.write_feather is deprecated&quot;</span><span class="s3">,</span>
+                <span class="s1">FutureWarning</span><span class="s3">,</span>
+            <span class="s3">)</span>
+            <span class="s1">feather</span><span class="s3">.</span><span class="s1">write_feather</span><span class="s3">(</span><span class="s1">df</span><span class="s3">, </span><span class="s1">handles</span><span class="s3">.</span><span class="s1">handle</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;pandas&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">read_feather</span><span class="s3">(</span>
+    <span class="s1">path</span><span class="s3">: </span><span class="s1">FilePath </span><span class="s3">| </span><span class="s1">ReadBuffer</span><span class="s3">[</span><span class="s1">bytes</span><span class="s3">],</span>
+    <span class="s1">columns</span><span class="s3">: </span><span class="s1">Sequence</span><span class="s3">[</span><span class="s1">Hashable</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">use_threads</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">storage_options</span><span class="s3">: </span><span class="s1">StorageOptions </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">dtype_backend</span><span class="s3">: </span><span class="s1">DtypeBackend </span><span class="s3">| </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">NoDefault </span><span class="s3">= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">no_default</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; DataFrame</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Load a feather-format object from the file path. 
+ 
+    Feather is particularly useful for scenarios that require efficient 
+    serialization and deserialization of tabular data. It supports 
+    schema preservation, making it a reliable choice for use cases 
+    such as sharing data between Python and R, or persisting intermediate 
+    results during data processing pipelines. This method provides additional 
+    flexibility with options for selective column reading, thread parallelism, 
+    and choosing the backend for data types. 
+ 
+    Parameters 
+    ---------- 
+    path : str, path object, or file-like object 
+        String, path object (implementing ``os.PathLike[str]``), or file-like 
+        object implementing a binary ``read()`` function. The string could be a URL. 
+        Valid URL schemes include http, ftp, s3, gs and file. For file URLs, a host is 
+        expected. A local file could be: ``file://localhost/path/to/table.feather``. 
+    columns : sequence, default None 
+        If not provided, all columns are read. 
+    use_threads : bool, default True 
+        Whether to parallelize reading using multiple threads. 
+    storage_options : dict, optional 
+        Extra options that make sense for a particular storage connection, e.g. 
+        host, port, username, password, etc. For HTTP(S) URLs the key-value pairs 
+        are forwarded to ``urllib.request.Request`` as header options. For other 
+        URLs (e.g. starting with &quot;s3://&quot;, and &quot;gcs://&quot;) the key-value pairs are 
+        forwarded to ``fsspec.open``. Please see ``fsspec`` and ``urllib`` for more 
+        details, and for more examples on storage options refer `here 
+        &lt;https://pandas.pydata.org/docs/user_guide/io.html? 
+        highlight=storage_options#reading-writing-remote-files&gt;`_. 
+ 
+    dtype_backend : {'numpy_nullable', 'pyarrow'} 
+        Back-end data type applied to the resultant :class:`DataFrame` 
+        (still experimental). If not specified, the default behavior 
+        is to not use nullable data types. If specified, the behavior 
+        is as follows: 
+ 
+        * ``&quot;numpy_nullable&quot;``: returns nullable-dtype-backed :class:`DataFrame`. 
+        * ``&quot;pyarrow&quot;``: returns pyarrow-backed nullable 
+          :class:`ArrowDtype` :class:`DataFrame` 
+ 
+        .. versionadded:: 2.0 
+ 
+    Returns 
+    ------- 
+    type of object stored in file 
+        DataFrame object stored in the file. 
+ 
+    See Also 
+    -------- 
+    read_csv : Read a comma-separated values (csv) file into a pandas DataFrame. 
+    read_excel : Read an Excel file into a pandas DataFrame. 
+    read_spss : Read an SPSS file into a pandas DataFrame. 
+    read_orc : Load an ORC object into a pandas DataFrame. 
+    read_sas : Read SAS file into a pandas DataFrame. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; df = pd.read_feather(&quot;path/to/file.feather&quot;)  # doctest: +SKIP 
+    &quot;&quot;&quot;</span>
+    <span class="s1">import_optional_dependency</span><span class="s3">(</span><span class="s4">&quot;pyarrow&quot;</span><span class="s3">)</span>
+    <span class="s2">from </span><span class="s1">pyarrow </span><span class="s2">import </span><span class="s1">feather</span>
+
+    <span class="s5"># import utils to register the pyarrow extension types</span>
+    <span class="s2">import </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">arrays</span><span class="s3">.</span><span class="s1">arrow</span><span class="s3">.</span><span class="s1">extension_types  </span><span class="s5"># pyright: ignore[reportUnusedImport] # noqa: F401</span>
+
+    <span class="s1">check_dtype_backend</span><span class="s3">(</span><span class="s1">dtype_backend</span><span class="s3">)</span>
+
+    <span class="s2">with </span><span class="s1">get_handle</span><span class="s3">(</span>
+        <span class="s1">path</span><span class="s3">, </span><span class="s4">&quot;rb&quot;</span><span class="s3">, </span><span class="s1">storage_options</span><span class="s3">=</span><span class="s1">storage_options</span><span class="s3">, </span><span class="s1">is_text</span><span class="s3">=</span><span class="s2">False</span>
+    <span class="s3">) </span><span class="s2">as </span><span class="s1">handles</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">dtype_backend </span><span class="s2">is </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">no_default </span><span class="s2">and not </span><span class="s1">using_string_dtype</span><span class="s3">():</span>
+            <span class="s2">with </span><span class="s1">warnings</span><span class="s3">.</span><span class="s1">catch_warnings</span><span class="s3">():</span>
+                <span class="s1">warnings</span><span class="s3">.</span><span class="s1">filterwarnings</span><span class="s3">(</span>
+                    <span class="s4">&quot;ignore&quot;</span><span class="s3">,</span>
+                    <span class="s4">&quot;make_block is deprecated&quot;</span><span class="s3">,</span>
+                    <span class="s1">Pandas4Warning</span><span class="s3">,</span>
+                <span class="s3">)</span>
+                <span class="s5"># pyarrow&gt;=24 deprecates feather.read_feather in favor of</span>
+                <span class="s5"># pyarrow.ipc; suppress until we migrate the implementation</span>
+                <span class="s5"># (GH#66169)</span>
+                <span class="s1">warnings</span><span class="s3">.</span><span class="s1">filterwarnings</span><span class="s3">(</span>
+                    <span class="s4">&quot;ignore&quot;</span><span class="s3">,</span>
+                    <span class="s4">&quot;pyarrow.feather.read_feather is deprecated&quot;</span><span class="s3">,</span>
+                    <span class="s1">FutureWarning</span><span class="s3">,</span>
+                <span class="s3">)</span>
+
+                <span class="s1">df </span><span class="s3">= </span><span class="s1">feather</span><span class="s3">.</span><span class="s1">read_feather</span><span class="s3">(</span>
+                    <span class="s1">handles</span><span class="s3">.</span><span class="s1">handle</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">=</span><span class="s1">columns</span><span class="s3">, </span><span class="s1">use_threads</span><span class="s3">=</span><span class="s1">bool</span><span class="s3">(</span><span class="s1">use_threads</span><span class="s3">)</span>
+                <span class="s3">)</span>
+                <span class="s5"># Convert any StringDtype columns to object dtype (pyarrow always</span>
+                <span class="s5"># uses string dtype even when the infer_string option is False)</span>
+                <span class="s2">for </span><span class="s1">col</span><span class="s3">, </span><span class="s1">dtype </span><span class="s2">in </span><span class="s1">zip</span><span class="s3">(</span><span class="s1">df</span><span class="s3">.</span><span class="s1">columns</span><span class="s3">, </span><span class="s1">df</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">, </span><span class="s1">strict</span><span class="s3">=</span><span class="s2">True</span><span class="s3">):</span>
+                    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">StringDtype</span><span class="s3">) </span><span class="s2">and </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">na_value </span><span class="s2">is </span><span class="s1">np</span><span class="s3">.</span><span class="s1">nan</span><span class="s3">:</span>
+                        <span class="s1">df</span><span class="s3">[</span><span class="s1">col</span><span class="s3">] = </span><span class="s1">df</span><span class="s3">[</span><span class="s1">col</span><span class="s3">].</span><span class="s1">astype</span><span class="s3">(</span><span class="s4">&quot;object&quot;</span><span class="s3">)</span>
+                <span class="s2">return </span><span class="s1">df</span>
+
+        <span class="s5"># pyarrow&gt;=24 deprecates feather.read_table in favor of pyarrow.ipc;</span>
+        <span class="s5"># suppress until we migrate the implementation (GH#66169)</span>
+        <span class="s2">with </span><span class="s1">warnings</span><span class="s3">.</span><span class="s1">catch_warnings</span><span class="s3">():</span>
+            <span class="s1">warnings</span><span class="s3">.</span><span class="s1">filterwarnings</span><span class="s3">(</span>
+                <span class="s4">&quot;ignore&quot;</span><span class="s3">,</span>
+                <span class="s4">&quot;pyarrow.feather.read_table is deprecated&quot;</span><span class="s3">,</span>
+                <span class="s1">FutureWarning</span><span class="s3">,</span>
+            <span class="s3">)</span>
+            <span class="s1">pa_table </span><span class="s3">= </span><span class="s1">feather</span><span class="s3">.</span><span class="s1">read_table</span><span class="s3">(</span>
+                <span class="s1">handles</span><span class="s3">.</span><span class="s1">handle</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">=</span><span class="s1">columns</span><span class="s3">, </span><span class="s1">use_threads</span><span class="s3">=</span><span class="s1">bool</span><span class="s3">(</span><span class="s1">use_threads</span><span class="s3">)</span>
+            <span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">arrow_table_to_pandas</span><span class="s3">(</span><span class="s1">pa_table</span><span class="s3">, </span><span class="s1">dtype_backend</span><span class="s3">=</span><span class="s1">dtype_backend</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

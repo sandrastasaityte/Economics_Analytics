@@ -1,0 +1,1499 @@
+<html>
+<head>
+<title>_json.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+.s6 { color: #5f826b; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_json.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s1">abc </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">ABC</span><span class="s2">,</span>
+    <span class="s1">abstractmethod</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">collections </span><span class="s0">import </span><span class="s1">abc</span>
+<span class="s0">from </span><span class="s1">itertools </span><span class="s0">import </span><span class="s1">islice</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s2">,</span>
+    <span class="s1">Any</span><span class="s2">,</span>
+    <span class="s1">Generic</span><span class="s2">,</span>
+    <span class="s1">Literal</span><span class="s2">,</span>
+    <span class="s1">Self</span><span class="s2">,</span>
+    <span class="s1">TypeVar</span><span class="s2">,</span>
+    <span class="s1">final</span><span class="s2">,</span>
+    <span class="s1">overload</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">import </span><span class="s1">warnings</span>
+
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_config </span><span class="s0">import </span><span class="s1">option_context</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_libs </span><span class="s0">import </span><span class="s1">lib</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_libs</span><span class="s2">.</span><span class="s1">json </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">ujson_dumps</span><span class="s2">,</span>
+    <span class="s1">ujson_loads</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_libs</span><span class="s2">.</span><span class="s1">tslibs </span><span class="s0">import </span><span class="s1">iNaT</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">compat</span><span class="s2">.</span><span class="s1">_optional </span><span class="s0">import </span><span class="s1">import_optional_dependency</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">errors </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">AbstractMethodError</span><span class="s2">,</span>
+    <span class="s1">OutOfBoundsDatetime</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">util</span><span class="s2">.</span><span class="s1">_decorators </span><span class="s0">import </span><span class="s1">set_module</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">util</span><span class="s2">.</span><span class="s1">_validators </span><span class="s0">import </span><span class="s1">check_dtype_backend</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">dtypes</span><span class="s2">.</span><span class="s1">common </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">ensure_str</span><span class="s2">,</span>
+    <span class="s1">is_string_dtype</span><span class="s2">,</span>
+    <span class="s1">pandas_dtype</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">dtypes</span><span class="s2">.</span><span class="s1">dtypes </span><span class="s0">import </span><span class="s1">PeriodDtype</span>
+
+<span class="s0">from </span><span class="s1">pandas </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">ArrowDtype</span><span class="s2">,</span>
+    <span class="s1">DataFrame</span><span class="s2">,</span>
+    <span class="s1">Index</span><span class="s2">,</span>
+    <span class="s1">MultiIndex</span><span class="s2">,</span>
+    <span class="s1">Series</span><span class="s2">,</span>
+    <span class="s1">isna</span><span class="s2">,</span>
+    <span class="s1">notna</span><span class="s2">,</span>
+    <span class="s1">to_datetime</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">reshape</span><span class="s2">.</span><span class="s1">concat </span><span class="s0">import </span><span class="s1">concat</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">io</span><span class="s2">.</span><span class="s1">_util </span><span class="s0">import </span><span class="s1">arrow_table_to_pandas</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">io</span><span class="s2">.</span><span class="s1">common </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">IOHandles</span><span class="s2">,</span>
+    <span class="s1">dedup_names</span><span class="s2">,</span>
+    <span class="s1">get_handle</span><span class="s2">,</span>
+    <span class="s1">is_potential_multi_index</span><span class="s2">,</span>
+    <span class="s1">stringify_path</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">io</span><span class="s2">.</span><span class="s1">json</span><span class="s2">.</span><span class="s1">_normalize </span><span class="s0">import </span><span class="s1">convert_to_line_delimits</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">io</span><span class="s2">.</span><span class="s1">json</span><span class="s2">.</span><span class="s1">_table_schema </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">build_table_schema</span><span class="s2">,</span>
+    <span class="s1">parse_table_schema</span><span class="s2">,</span>
+    <span class="s1">set_default_names</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">io</span><span class="s2">.</span><span class="s1">parsers</span><span class="s2">.</span><span class="s1">readers </span><span class="s0">import </span><span class="s1">validate_integer</span>
+
+<span class="s0">if </span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">collections</span><span class="s2">.</span><span class="s1">abc </span><span class="s0">import </span><span class="s2">(</span>
+        <span class="s1">Callable</span><span class="s2">,</span>
+        <span class="s1">Hashable</span><span class="s2">,</span>
+        <span class="s1">Mapping</span><span class="s2">,</span>
+    <span class="s2">)</span>
+    <span class="s0">from </span><span class="s1">types </span><span class="s0">import </span><span class="s1">TracebackType</span>
+
+    <span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_typing </span><span class="s0">import </span><span class="s2">(</span>
+        <span class="s1">CompressionOptions</span><span class="s2">,</span>
+        <span class="s1">DtypeArg</span><span class="s2">,</span>
+        <span class="s1">DtypeBackend</span><span class="s2">,</span>
+        <span class="s1">FilePath</span><span class="s2">,</span>
+        <span class="s1">IndexLabel</span><span class="s2">,</span>
+        <span class="s1">JSONEngine</span><span class="s2">,</span>
+        <span class="s1">JSONSerializable</span><span class="s2">,</span>
+        <span class="s1">ReadBuffer</span><span class="s2">,</span>
+        <span class="s1">StorageOptions</span><span class="s2">,</span>
+        <span class="s1">WriteBuffer</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+    <span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">generic </span><span class="s0">import </span><span class="s1">NDFrame</span>
+
+<span class="s1">FrameSeriesStrT </span><span class="s2">= </span><span class="s1">TypeVar</span><span class="s2">(</span><span class="s3">&quot;FrameSeriesStrT&quot;</span><span class="s2">, </span><span class="s1">bound</span><span class="s2">=</span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;frame&quot;</span><span class="s2">, </span><span class="s3">&quot;series&quot;</span><span class="s2">])</span>
+
+
+<span class="s4"># interface to/from</span>
+<span class="s2">@</span><span class="s1">overload</span>
+<span class="s0">def </span><span class="s1">to_json</span><span class="s2">(</span>
+    <span class="s1">path_or_buf</span><span class="s2">: </span><span class="s1">FilePath </span><span class="s2">| </span><span class="s1">WriteBuffer</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] | </span><span class="s1">WriteBuffer</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">],</span>
+    <span class="s1">obj</span><span class="s2">: </span><span class="s1">NDFrame</span><span class="s2">,</span>
+    <span class="s1">orient</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">date_format</span><span class="s2">: </span><span class="s1">str </span><span class="s2">= ...,</span>
+    <span class="s1">double_precision</span><span class="s2">: </span><span class="s1">int </span><span class="s2">= ...,</span>
+    <span class="s1">force_ascii</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= ...,</span>
+    <span class="s1">date_unit</span><span class="s2">: </span><span class="s1">str </span><span class="s2">= ...,</span>
+    <span class="s1">default_handler</span><span class="s2">: </span><span class="s1">Callable</span><span class="s2">[[</span><span class="s1">Any</span><span class="s2">], </span><span class="s1">JSONSerializable</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">lines</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= ...,</span>
+    <span class="s1">compression</span><span class="s2">: </span><span class="s1">CompressionOptions </span><span class="s2">= ...,</span>
+    <span class="s1">index</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">indent</span><span class="s2">: </span><span class="s1">int </span><span class="s2">= ...,</span>
+    <span class="s1">storage_options</span><span class="s2">: </span><span class="s1">StorageOptions </span><span class="s2">= ...,</span>
+    <span class="s1">mode</span><span class="s2">: </span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;a&quot;</span><span class="s2">, </span><span class="s3">&quot;w&quot;</span><span class="s2">] = ...,</span>
+<span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+
+
+<span class="s2">@</span><span class="s1">overload</span>
+<span class="s0">def </span><span class="s1">to_json</span><span class="s2">(</span>
+    <span class="s1">path_or_buf</span><span class="s2">: </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">obj</span><span class="s2">: </span><span class="s1">NDFrame</span><span class="s2">,</span>
+    <span class="s1">orient</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">date_format</span><span class="s2">: </span><span class="s1">str </span><span class="s2">= ...,</span>
+    <span class="s1">double_precision</span><span class="s2">: </span><span class="s1">int </span><span class="s2">= ...,</span>
+    <span class="s1">force_ascii</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= ...,</span>
+    <span class="s1">date_unit</span><span class="s2">: </span><span class="s1">str </span><span class="s2">= ...,</span>
+    <span class="s1">default_handler</span><span class="s2">: </span><span class="s1">Callable</span><span class="s2">[[</span><span class="s1">Any</span><span class="s2">], </span><span class="s1">JSONSerializable</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">lines</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= ...,</span>
+    <span class="s1">compression</span><span class="s2">: </span><span class="s1">CompressionOptions </span><span class="s2">= ...,</span>
+    <span class="s1">index</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">indent</span><span class="s2">: </span><span class="s1">int </span><span class="s2">= ...,</span>
+    <span class="s1">storage_options</span><span class="s2">: </span><span class="s1">StorageOptions </span><span class="s2">= ...,</span>
+    <span class="s1">mode</span><span class="s2">: </span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;a&quot;</span><span class="s2">, </span><span class="s3">&quot;w&quot;</span><span class="s2">] = ...,</span>
+<span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">: ...</span>
+
+
+<span class="s0">def </span><span class="s1">to_json</span><span class="s2">(</span>
+    <span class="s1">path_or_buf</span><span class="s2">: </span><span class="s1">FilePath </span><span class="s2">| </span><span class="s1">WriteBuffer</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] | </span><span class="s1">WriteBuffer</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">] | </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">obj</span><span class="s2">: </span><span class="s1">NDFrame</span><span class="s2">,</span>
+    <span class="s1">orient</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">date_format</span><span class="s2">: </span><span class="s1">str </span><span class="s2">= </span><span class="s3">&quot;epoch&quot;</span><span class="s2">,</span>
+    <span class="s1">double_precision</span><span class="s2">: </span><span class="s1">int </span><span class="s2">= </span><span class="s5">10</span><span class="s2">,</span>
+    <span class="s1">force_ascii</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">True</span><span class="s2">,</span>
+    <span class="s1">date_unit</span><span class="s2">: </span><span class="s1">str </span><span class="s2">= </span><span class="s3">&quot;ms&quot;</span><span class="s2">,</span>
+    <span class="s1">default_handler</span><span class="s2">: </span><span class="s1">Callable</span><span class="s2">[[</span><span class="s1">Any</span><span class="s2">], </span><span class="s1">JSONSerializable</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">lines</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">,</span>
+    <span class="s1">compression</span><span class="s2">: </span><span class="s1">CompressionOptions </span><span class="s2">= </span><span class="s3">&quot;infer&quot;</span><span class="s2">,</span>
+    <span class="s1">index</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">indent</span><span class="s2">: </span><span class="s1">int </span><span class="s2">= </span><span class="s5">0</span><span class="s2">,</span>
+    <span class="s1">storage_options</span><span class="s2">: </span><span class="s1">StorageOptions </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">mode</span><span class="s2">: </span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;a&quot;</span><span class="s2">, </span><span class="s3">&quot;w&quot;</span><span class="s2">] = </span><span class="s3">&quot;w&quot;</span><span class="s2">,</span>
+<span class="s2">) </span><span class="s1">-&gt; str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">if </span><span class="s1">orient </span><span class="s0">in </span><span class="s2">[</span><span class="s3">&quot;records&quot;</span><span class="s2">, </span><span class="s3">&quot;values&quot;</span><span class="s2">] </span><span class="s0">and </span><span class="s1">index </span><span class="s0">is True</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span>
+            <span class="s3">&quot;'index=True' is only valid when 'orient' is 'split', 'table', &quot;</span>
+            <span class="s3">&quot;'index', or 'columns'.&quot;</span>
+        <span class="s2">)</span>
+    <span class="s0">elif </span><span class="s1">orient </span><span class="s0">in </span><span class="s2">[</span><span class="s3">&quot;index&quot;</span><span class="s2">, </span><span class="s3">&quot;columns&quot;</span><span class="s2">] </span><span class="s0">and </span><span class="s1">index </span><span class="s0">is False</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span>
+            <span class="s3">&quot;'index=False' is only valid when 'orient' is 'split', 'table', &quot;</span>
+            <span class="s3">&quot;'records', or 'values'.&quot;</span>
+        <span class="s2">)</span>
+    <span class="s0">elif </span><span class="s1">index </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s4"># will be ignored for orient='records' and 'values'</span>
+        <span class="s1">index </span><span class="s2">= </span><span class="s0">True</span>
+
+    <span class="s0">if </span><span class="s1">lines </span><span class="s0">and </span><span class="s1">orient </span><span class="s2">!= </span><span class="s3">&quot;records&quot;</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;'lines' keyword only valid when 'orient' is records&quot;</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">mode </span><span class="s0">not in </span><span class="s2">[</span><span class="s3">&quot;a&quot;</span><span class="s2">, </span><span class="s3">&quot;w&quot;</span><span class="s2">]:</span>
+        <span class="s1">msg </span><span class="s2">= (</span>
+            <span class="s3">f&quot;mode=</span><span class="s0">{</span><span class="s1">mode</span><span class="s0">} </span><span class="s3">is not a valid option.&quot;</span>
+            <span class="s3">&quot;Only 'w' and 'a' are currently supported.&quot;</span>
+        <span class="s2">)</span>
+        <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">mode </span><span class="s2">== </span><span class="s3">&quot;a&quot; </span><span class="s0">and </span><span class="s2">(</span><span class="s0">not </span><span class="s1">lines </span><span class="s0">or </span><span class="s1">orient </span><span class="s2">!= </span><span class="s3">&quot;records&quot;</span><span class="s2">):</span>
+        <span class="s1">msg </span><span class="s2">= (</span>
+            <span class="s3">&quot;mode='a' (append) is only supported when &quot;</span>
+            <span class="s3">&quot;lines is True and orient is 'records'&quot;</span>
+        <span class="s2">)</span>
+        <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">orient </span><span class="s2">== </span><span class="s3">&quot;table&quot; </span><span class="s0">and </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">Series</span><span class="s2">):</span>
+        <span class="s1">obj </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">to_frame</span><span class="s2">(</span><span class="s1">name</span><span class="s2">=</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">name </span><span class="s0">or </span><span class="s3">&quot;values&quot;</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">date_format </span><span class="s2">== </span><span class="s3">&quot;epoch&quot;</span><span class="s2">:</span>
+        <span class="s4"># for epoch (numeric) format, convert datetime-likes to the desired</span>
+        <span class="s4"># unit up front, such that the C ObjToJSON code can simply write out</span>
+        <span class="s4"># the integer values without worrying about conversion</span>
+        <span class="s0">if </span><span class="s1">date_unit </span><span class="s0">not in </span><span class="s2">[</span><span class="s3">&quot;s&quot;</span><span class="s2">, </span><span class="s3">&quot;ms&quot;</span><span class="s2">, </span><span class="s3">&quot;us&quot;</span><span class="s2">, </span><span class="s3">&quot;ns&quot;</span><span class="s2">]:</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">f&quot;Invalid value '</span><span class="s0">{</span><span class="s1">date_unit</span><span class="s0">}</span><span class="s3">' for option 'date_unit'&quot;</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">DataFrame</span><span class="s2">):</span>
+            <span class="s1">copied </span><span class="s2">= </span><span class="s0">False</span>
+            <span class="s1">cols </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nonzero</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">dtypes</span><span class="s2">.</span><span class="s1">map</span><span class="s2">(</span><span class="s0">lambda </span><span class="s1">dt</span><span class="s2">: </span><span class="s1">dt</span><span class="s2">.</span><span class="s1">kind </span><span class="s0">in </span><span class="s2">[</span><span class="s3">&quot;M&quot;</span><span class="s2">, </span><span class="s3">&quot;m&quot;</span><span class="s2">]))[</span><span class="s5">0</span><span class="s2">]</span>
+            <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">cols</span><span class="s2">):</span>
+                <span class="s1">obj </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">(</span><span class="s1">deep</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+                <span class="s1">copied </span><span class="s2">= </span><span class="s0">True</span>
+                <span class="s0">for </span><span class="s1">col </span><span class="s0">in </span><span class="s1">cols</span><span class="s2">:</span>
+                    <span class="s1">obj</span><span class="s2">.</span><span class="s1">isetitem</span><span class="s2">(</span><span class="s1">col</span><span class="s2">, </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[:, </span><span class="s1">col</span><span class="s2">].</span><span class="s1">dt</span><span class="s2">.</span><span class="s1">as_unit</span><span class="s2">(</span><span class="s1">date_unit</span><span class="s2">))</span>
+            <span class="s0">if </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">kind </span><span class="s0">in </span><span class="s3">&quot;Mm&quot;</span><span class="s2">:</span>
+                <span class="s0">if not </span><span class="s1">copied</span><span class="s2">:</span>
+                    <span class="s1">obj </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">(</span><span class="s1">deep</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+                    <span class="s1">copied </span><span class="s2">= </span><span class="s0">True</span>
+                <span class="s1">obj</span><span class="s2">.</span><span class="s1">index </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">index</span><span class="s2">).</span><span class="s1">dt</span><span class="s2">.</span><span class="s1">as_unit</span><span class="s2">(</span><span class="s1">date_unit</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">columns</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">kind </span><span class="s0">in </span><span class="s3">&quot;Mm&quot;</span><span class="s2">:</span>
+                <span class="s0">if not </span><span class="s1">copied</span><span class="s2">:</span>
+                    <span class="s1">obj </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">(</span><span class="s1">deep</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+                    <span class="s1">copied </span><span class="s2">= </span><span class="s0">True</span>
+                <span class="s1">obj</span><span class="s2">.</span><span class="s1">columns </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">columns</span><span class="s2">).</span><span class="s1">dt</span><span class="s2">.</span><span class="s1">as_unit</span><span class="s2">(</span><span class="s1">date_unit</span><span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">Series</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">kind </span><span class="s0">in </span><span class="s3">&quot;Mm&quot;</span><span class="s2">:</span>
+                <span class="s1">obj </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">(</span><span class="s1">deep</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+                <span class="s1">obj </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">dt</span><span class="s2">.</span><span class="s1">as_unit</span><span class="s2">(</span><span class="s1">date_unit</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">kind </span><span class="s0">in </span><span class="s3">&quot;Mm&quot;</span><span class="s2">:</span>
+                <span class="s1">obj </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">(</span><span class="s1">deep</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+                <span class="s1">obj</span><span class="s2">.</span><span class="s1">index </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">index</span><span class="s2">).</span><span class="s1">dt</span><span class="s2">.</span><span class="s1">as_unit</span><span class="s2">(</span><span class="s1">date_unit</span><span class="s2">)</span>
+
+    <span class="s1">writer</span><span class="s2">: </span><span class="s1">type</span><span class="s2">[</span><span class="s1">Writer</span><span class="s2">]</span>
+    <span class="s0">if </span><span class="s1">orient </span><span class="s2">== </span><span class="s3">&quot;table&quot; </span><span class="s0">and </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">DataFrame</span><span class="s2">):</span>
+        <span class="s1">writer </span><span class="s2">= </span><span class="s1">JSONTableWriter</span>
+    <span class="s0">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">Series</span><span class="s2">):</span>
+        <span class="s1">writer </span><span class="s2">= </span><span class="s1">SeriesWriter</span>
+    <span class="s0">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">DataFrame</span><span class="s2">):</span>
+        <span class="s1">writer </span><span class="s2">= </span><span class="s1">FrameWriter</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError</span><span class="s2">(</span><span class="s3">&quot;'obj' should be a Series or a DataFrame&quot;</span><span class="s2">)</span>
+
+    <span class="s1">s </span><span class="s2">= </span><span class="s1">writer</span><span class="s2">(</span>
+        <span class="s1">obj</span><span class="s2">,</span>
+        <span class="s1">orient</span><span class="s2">=</span><span class="s1">orient</span><span class="s2">,</span>
+        <span class="s1">date_format</span><span class="s2">=</span><span class="s1">date_format</span><span class="s2">,</span>
+        <span class="s1">double_precision</span><span class="s2">=</span><span class="s1">double_precision</span><span class="s2">,</span>
+        <span class="s1">ensure_ascii</span><span class="s2">=</span><span class="s1">force_ascii</span><span class="s2">,</span>
+        <span class="s1">date_unit</span><span class="s2">=</span><span class="s1">date_unit</span><span class="s2">,</span>
+        <span class="s1">default_handler</span><span class="s2">=</span><span class="s1">default_handler</span><span class="s2">,</span>
+        <span class="s1">index</span><span class="s2">=</span><span class="s1">index</span><span class="s2">,</span>
+        <span class="s1">indent</span><span class="s2">=</span><span class="s1">indent</span><span class="s2">,</span>
+    <span class="s2">).</span><span class="s1">write</span><span class="s2">()</span>
+
+    <span class="s0">if </span><span class="s1">lines</span><span class="s2">:</span>
+        <span class="s1">s </span><span class="s2">= </span><span class="s1">convert_to_line_delimits</span><span class="s2">(</span><span class="s1">s</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">path_or_buf </span><span class="s0">is not None</span><span class="s2">:</span>
+        <span class="s4"># apply compression and byte/text conversion</span>
+        <span class="s0">with </span><span class="s1">get_handle</span><span class="s2">(</span>
+            <span class="s1">path_or_buf</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">, </span><span class="s1">compression</span><span class="s2">=</span><span class="s1">compression</span><span class="s2">, </span><span class="s1">storage_options</span><span class="s2">=</span><span class="s1">storage_options</span>
+        <span class="s2">) </span><span class="s0">as </span><span class="s1">handles</span><span class="s2">:</span>
+            <span class="s1">handles</span><span class="s2">.</span><span class="s1">handle</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s1">s</span><span class="s2">)</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">s</span>
+    <span class="s0">return None</span>
+
+
+<span class="s0">class </span><span class="s1">Writer</span><span class="s2">(</span><span class="s1">ABC</span><span class="s2">):</span>
+    <span class="s1">_default_orient</span><span class="s2">: </span><span class="s1">str</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">obj</span><span class="s2">: </span><span class="s1">NDFrame</span><span class="s2">,</span>
+        <span class="s1">orient</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">date_format</span><span class="s2">: </span><span class="s1">str</span><span class="s2">,</span>
+        <span class="s1">double_precision</span><span class="s2">: </span><span class="s1">int</span><span class="s2">,</span>
+        <span class="s1">ensure_ascii</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+        <span class="s1">date_unit</span><span class="s2">: </span><span class="s1">str</span><span class="s2">,</span>
+        <span class="s1">index</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+        <span class="s1">default_handler</span><span class="s2">: </span><span class="s1">Callable</span><span class="s2">[[</span><span class="s1">Any</span><span class="s2">], </span><span class="s1">JSONSerializable</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">indent</span><span class="s2">: </span><span class="s1">int </span><span class="s2">= </span><span class="s5">0</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">obj </span><span class="s2">= </span><span class="s1">obj</span>
+
+        <span class="s0">if </span><span class="s1">orient </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">orient </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_default_orient</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">orient </span><span class="s2">= </span><span class="s1">orient</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">date_format </span><span class="s2">= </span><span class="s1">date_format</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">double_precision </span><span class="s2">= </span><span class="s1">double_precision</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">ensure_ascii </span><span class="s2">= </span><span class="s1">ensure_ascii</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">date_unit </span><span class="s2">= </span><span class="s1">date_unit</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">default_handler </span><span class="s2">= </span><span class="s1">default_handler</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">index </span><span class="s2">= </span><span class="s1">index</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">indent </span><span class="s2">= </span><span class="s1">indent</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_format_axes</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">_format_axes</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">AbstractMethodError</span><span class="s2">(</span><span class="s1">self</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">write</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s1">iso_dates </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">date_format </span><span class="s2">== </span><span class="s3">&quot;iso&quot;</span>
+        <span class="s0">return </span><span class="s1">ujson_dumps</span><span class="s2">(</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">obj_to_write</span><span class="s2">,</span>
+            <span class="s1">orient</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">orient</span><span class="s2">,</span>
+            <span class="s1">double_precision</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">double_precision</span><span class="s2">,</span>
+            <span class="s1">ensure_ascii</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">ensure_ascii</span><span class="s2">,</span>
+            <span class="s1">date_unit</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">date_unit</span><span class="s2">,</span>
+            <span class="s1">iso_dates</span><span class="s2">=</span><span class="s1">iso_dates</span><span class="s2">,</span>
+            <span class="s1">default_handler</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">default_handler</span><span class="s2">,</span>
+            <span class="s1">indent</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">indent</span><span class="s2">,</span>
+        <span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s2">@</span><span class="s1">abstractmethod</span>
+    <span class="s0">def </span><span class="s1">obj_to_write</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; NDFrame </span><span class="s2">| </span><span class="s1">Mapping</span><span class="s2">[</span><span class="s1">IndexLabel</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">]:</span>
+        <span class="s6">&quot;&quot;&quot;Object to write in JSON format.&quot;&quot;&quot;</span>
+
+
+<span class="s0">class </span><span class="s1">SeriesWriter</span><span class="s2">(</span><span class="s1">Writer</span><span class="s2">):</span>
+    <span class="s1">_default_orient </span><span class="s2">= </span><span class="s3">&quot;index&quot;</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">obj_to_write</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; NDFrame </span><span class="s2">| </span><span class="s1">Mapping</span><span class="s2">[</span><span class="s1">IndexLabel</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">]:</span>
+        <span class="s0">if not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">index </span><span class="s0">and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">orient </span><span class="s2">== </span><span class="s3">&quot;split&quot;</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s2">{</span><span class="s3">&quot;name&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">name</span><span class="s2">, </span><span class="s3">&quot;data&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">values</span><span class="s2">}</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">obj</span>
+
+    <span class="s0">def </span><span class="s1">_format_axes</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">if not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">is_unique </span><span class="s0">and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">orient </span><span class="s2">== </span><span class="s3">&quot;index&quot;</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">f&quot;Series index must be unique for orient='</span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">orient</span><span class="s0">}</span><span class="s3">'&quot;</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">FrameWriter</span><span class="s2">(</span><span class="s1">Writer</span><span class="s2">):</span>
+    <span class="s1">_default_orient </span><span class="s2">= </span><span class="s3">&quot;columns&quot;</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">obj_to_write</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; NDFrame </span><span class="s2">| </span><span class="s1">Mapping</span><span class="s2">[</span><span class="s1">IndexLabel</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">]:</span>
+        <span class="s0">if not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">index </span><span class="s0">and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">orient </span><span class="s2">== </span><span class="s3">&quot;split&quot;</span><span class="s2">:</span>
+            <span class="s1">obj_to_write </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">to_dict</span><span class="s2">(</span><span class="s1">orient</span><span class="s2">=</span><span class="s3">&quot;split&quot;</span><span class="s2">)</span>
+            <span class="s0">del </span><span class="s1">obj_to_write</span><span class="s2">[</span><span class="s3">&quot;index&quot;</span><span class="s2">]</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">obj_to_write </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">obj</span>
+        <span class="s0">return </span><span class="s1">obj_to_write</span>
+
+    <span class="s0">def </span><span class="s1">_format_axes</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Try to format axes if they are datelike. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">if not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">is_unique </span><span class="s0">and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">orient </span><span class="s0">in </span><span class="s2">(</span><span class="s3">&quot;index&quot;</span><span class="s2">, </span><span class="s3">&quot;columns&quot;</span><span class="s2">):</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span>
+                <span class="s3">f&quot;DataFrame index must be unique for orient='</span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">orient</span><span class="s0">}</span><span class="s3">'.&quot;</span>
+            <span class="s2">)</span>
+        <span class="s0">if not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">columns</span><span class="s2">.</span><span class="s1">is_unique </span><span class="s0">and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">orient </span><span class="s0">in </span><span class="s2">(</span>
+            <span class="s3">&quot;index&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;columns&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;records&quot;</span><span class="s2">,</span>
+        <span class="s2">):</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span>
+                <span class="s3">f&quot;DataFrame columns must be unique for orient='</span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">orient</span><span class="s0">}</span><span class="s3">'.&quot;</span>
+            <span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">JSONTableWriter</span><span class="s2">(</span><span class="s1">FrameWriter</span><span class="s2">):</span>
+    <span class="s1">_default_orient </span><span class="s2">= </span><span class="s3">&quot;records&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">obj</span><span class="s2">,</span>
+        <span class="s1">orient</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">date_format</span><span class="s2">: </span><span class="s1">str</span><span class="s2">,</span>
+        <span class="s1">double_precision</span><span class="s2">: </span><span class="s1">int</span><span class="s2">,</span>
+        <span class="s1">ensure_ascii</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+        <span class="s1">date_unit</span><span class="s2">: </span><span class="s1">str</span><span class="s2">,</span>
+        <span class="s1">index</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+        <span class="s1">default_handler</span><span class="s2">: </span><span class="s1">Callable</span><span class="s2">[[</span><span class="s1">Any</span><span class="s2">], </span><span class="s1">JSONSerializable</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">indent</span><span class="s2">: </span><span class="s1">int </span><span class="s2">= </span><span class="s5">0</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Adds a `schema` attribute with the Table Schema, resets 
+        the index (can't do in caller, because the schema inference needs 
+        to know what the index is, forces orient to records, and forces 
+        date_format to 'iso'. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span>
+            <span class="s1">obj</span><span class="s2">,</span>
+            <span class="s1">orient</span><span class="s2">,</span>
+            <span class="s1">date_format</span><span class="s2">,</span>
+            <span class="s1">double_precision</span><span class="s2">,</span>
+            <span class="s1">ensure_ascii</span><span class="s2">,</span>
+            <span class="s1">date_unit</span><span class="s2">,</span>
+            <span class="s1">index</span><span class="s2">,</span>
+            <span class="s1">default_handler</span><span class="s2">=</span><span class="s1">default_handler</span><span class="s2">,</span>
+            <span class="s1">indent</span><span class="s2">=</span><span class="s1">indent</span><span class="s2">,</span>
+        <span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">date_format </span><span class="s2">!= </span><span class="s3">&quot;iso&quot;</span><span class="s2">:</span>
+            <span class="s1">msg </span><span class="s2">= (</span>
+                <span class="s3">&quot;Trying to write with `orient='table'` and &quot;</span>
+                <span class="s3">f&quot;`date_format='</span><span class="s0">{</span><span class="s1">date_format</span><span class="s0">}</span><span class="s3">'`. Table Schema requires dates &quot;</span>
+                <span class="s3">&quot;to be formatted with `date_format='iso'`&quot;</span>
+            <span class="s2">)</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">schema </span><span class="s2">= </span><span class="s1">build_table_schema</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">index</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">index</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">index</span><span class="s2">:</span>
+            <span class="s1">obj </span><span class="s2">= </span><span class="s1">set_default_names</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">)</span>
+
+        <span class="s4"># NotImplemented on a column MultiIndex</span>
+        <span class="s0">if </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">ndim </span><span class="s2">== </span><span class="s5">2 </span><span class="s0">and </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">columns</span><span class="s2">, </span><span class="s1">MultiIndex</span><span class="s2">):</span>
+            <span class="s0">raise </span><span class="s1">NotImplementedError</span><span class="s2">(</span>
+                <span class="s3">&quot;orient='table' is not supported for MultiIndex columns&quot;</span>
+            <span class="s2">)</span>
+
+        <span class="s4"># TODO: Do this timedelta properly in objToJSON.c See GH #15137</span>
+        <span class="s0">if </span><span class="s2">((</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">ndim </span><span class="s2">== </span><span class="s5">1</span><span class="s2">) </span><span class="s0">and </span><span class="s2">(</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">name </span><span class="s0">in </span><span class="s1">set</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">names</span><span class="s2">))) </span><span class="s0">or </span><span class="s1">len</span><span class="s2">(</span>
+            <span class="s1">obj</span><span class="s2">.</span><span class="s1">columns</span><span class="s2">.</span><span class="s1">intersection</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">names</span><span class="s2">)</span>
+        <span class="s2">):</span>
+            <span class="s1">msg </span><span class="s2">= </span><span class="s3">&quot;Overlapping names between the index and columns&quot;</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">)</span>
+
+        <span class="s1">timedeltas </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">select_dtypes</span><span class="s2">(</span><span class="s1">include</span><span class="s2">=[</span><span class="s3">&quot;timedelta&quot;</span><span class="s2">]).</span><span class="s1">columns</span>
+        <span class="s1">copied </span><span class="s2">= </span><span class="s0">False</span>
+        <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">timedeltas</span><span class="s2">):</span>
+            <span class="s1">obj </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+            <span class="s1">copied </span><span class="s2">= </span><span class="s0">True</span>
+            <span class="s1">obj</span><span class="s2">[</span><span class="s1">timedeltas</span><span class="s2">] = </span><span class="s1">obj</span><span class="s2">[</span><span class="s1">timedeltas</span><span class="s2">].</span><span class="s1">map</span><span class="s2">(</span><span class="s0">lambda </span><span class="s1">x</span><span class="s2">: </span><span class="s1">x</span><span class="s2">.</span><span class="s1">isoformat</span><span class="s2">())</span>
+
+        <span class="s4"># exclude index from obj if index=False</span>
+        <span class="s0">if not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">index</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">obj </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">reset_index</span><span class="s2">(</span><span class="s1">drop</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s4"># Convert PeriodIndex to datetimes before serializing</span>
+            <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">PeriodDtype</span><span class="s2">):</span>
+                <span class="s0">if not </span><span class="s1">copied</span><span class="s2">:</span>
+                    <span class="s1">obj </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">(</span><span class="s1">deep</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+                <span class="s1">obj</span><span class="s2">.</span><span class="s1">index </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">to_timestamp</span><span class="s2">()</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">obj </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">reset_index</span><span class="s2">(</span><span class="s1">drop</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">date_format </span><span class="s2">= </span><span class="s3">&quot;iso&quot;</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">orient </span><span class="s2">= </span><span class="s3">&quot;records&quot;</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">index </span><span class="s2">= </span><span class="s1">index</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">obj_to_write</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; NDFrame </span><span class="s2">| </span><span class="s1">Mapping</span><span class="s2">[</span><span class="s1">IndexLabel</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">]:</span>
+        <span class="s0">return </span><span class="s2">{</span><span class="s3">&quot;schema&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">schema</span><span class="s2">, </span><span class="s3">&quot;data&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">obj</span><span class="s2">}</span>
+
+
+<span class="s2">@</span><span class="s1">overload</span>
+<span class="s0">def </span><span class="s1">read_json</span><span class="s2">(</span>
+    <span class="s1">path_or_buf</span><span class="s2">: </span><span class="s1">FilePath </span><span class="s2">| </span><span class="s1">ReadBuffer</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] | </span><span class="s1">ReadBuffer</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">],</span>
+    <span class="s2">*,</span>
+    <span class="s1">orient</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">typ</span><span class="s2">: </span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;frame&quot;</span><span class="s2">] = ...,</span>
+    <span class="s1">dtype</span><span class="s2">: </span><span class="s1">DtypeArg </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">convert_axes</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">convert_dates</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s1">list</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] = ...,</span>
+    <span class="s1">keep_default_dates</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= ...,</span>
+    <span class="s1">precise_float</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= ...,</span>
+    <span class="s1">date_unit</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">encoding</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">encoding_errors</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">lines</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= ...,</span>
+    <span class="s1">chunksize</span><span class="s2">: </span><span class="s1">int</span><span class="s2">,</span>
+    <span class="s1">compression</span><span class="s2">: </span><span class="s1">CompressionOptions </span><span class="s2">= ...,</span>
+    <span class="s1">nrows</span><span class="s2">: </span><span class="s1">int </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">storage_options</span><span class="s2">: </span><span class="s1">StorageOptions </span><span class="s2">= ...,</span>
+    <span class="s1">dtype_backend</span><span class="s2">: </span><span class="s1">DtypeBackend </span><span class="s2">| </span><span class="s1">lib</span><span class="s2">.</span><span class="s1">NoDefault </span><span class="s2">= ...,</span>
+    <span class="s1">engine</span><span class="s2">: </span><span class="s1">JSONEngine </span><span class="s2">= ...,</span>
+<span class="s2">) </span><span class="s1">-&gt; JsonReader</span><span class="s2">[</span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;frame&quot;</span><span class="s2">]]: ...</span>
+
+
+<span class="s2">@</span><span class="s1">overload</span>
+<span class="s0">def </span><span class="s1">read_json</span><span class="s2">(</span>
+    <span class="s1">path_or_buf</span><span class="s2">: </span><span class="s1">FilePath </span><span class="s2">| </span><span class="s1">ReadBuffer</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] | </span><span class="s1">ReadBuffer</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">],</span>
+    <span class="s2">*,</span>
+    <span class="s1">orient</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">typ</span><span class="s2">: </span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;series&quot;</span><span class="s2">],</span>
+    <span class="s1">dtype</span><span class="s2">: </span><span class="s1">DtypeArg </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">convert_axes</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">convert_dates</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s1">list</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] = ...,</span>
+    <span class="s1">keep_default_dates</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= ...,</span>
+    <span class="s1">precise_float</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= ...,</span>
+    <span class="s1">date_unit</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">encoding</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">encoding_errors</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">lines</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= ...,</span>
+    <span class="s1">chunksize</span><span class="s2">: </span><span class="s1">int</span><span class="s2">,</span>
+    <span class="s1">compression</span><span class="s2">: </span><span class="s1">CompressionOptions </span><span class="s2">= ...,</span>
+    <span class="s1">nrows</span><span class="s2">: </span><span class="s1">int </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">storage_options</span><span class="s2">: </span><span class="s1">StorageOptions </span><span class="s2">= ...,</span>
+    <span class="s1">dtype_backend</span><span class="s2">: </span><span class="s1">DtypeBackend </span><span class="s2">| </span><span class="s1">lib</span><span class="s2">.</span><span class="s1">NoDefault </span><span class="s2">= ...,</span>
+    <span class="s1">engine</span><span class="s2">: </span><span class="s1">JSONEngine </span><span class="s2">= ...,</span>
+<span class="s2">) </span><span class="s1">-&gt; JsonReader</span><span class="s2">[</span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;series&quot;</span><span class="s2">]]: ...</span>
+
+
+<span class="s2">@</span><span class="s1">overload</span>
+<span class="s0">def </span><span class="s1">read_json</span><span class="s2">(</span>
+    <span class="s1">path_or_buf</span><span class="s2">: </span><span class="s1">FilePath </span><span class="s2">| </span><span class="s1">ReadBuffer</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] | </span><span class="s1">ReadBuffer</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">],</span>
+    <span class="s2">*,</span>
+    <span class="s1">orient</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">typ</span><span class="s2">: </span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;series&quot;</span><span class="s2">],</span>
+    <span class="s1">dtype</span><span class="s2">: </span><span class="s1">DtypeArg </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">convert_axes</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">convert_dates</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s1">list</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] = ...,</span>
+    <span class="s1">keep_default_dates</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= ...,</span>
+    <span class="s1">precise_float</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= ...,</span>
+    <span class="s1">date_unit</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">encoding</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">encoding_errors</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">lines</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= ...,</span>
+    <span class="s1">chunksize</span><span class="s2">: </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">compression</span><span class="s2">: </span><span class="s1">CompressionOptions </span><span class="s2">= ...,</span>
+    <span class="s1">nrows</span><span class="s2">: </span><span class="s1">int </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">storage_options</span><span class="s2">: </span><span class="s1">StorageOptions </span><span class="s2">= ...,</span>
+    <span class="s1">dtype_backend</span><span class="s2">: </span><span class="s1">DtypeBackend </span><span class="s2">| </span><span class="s1">lib</span><span class="s2">.</span><span class="s1">NoDefault </span><span class="s2">= ...,</span>
+    <span class="s1">engine</span><span class="s2">: </span><span class="s1">JSONEngine </span><span class="s2">= ...,</span>
+<span class="s2">) </span><span class="s1">-&gt; Series</span><span class="s2">: ...</span>
+
+
+<span class="s2">@</span><span class="s1">overload</span>
+<span class="s0">def </span><span class="s1">read_json</span><span class="s2">(</span>
+    <span class="s1">path_or_buf</span><span class="s2">: </span><span class="s1">FilePath </span><span class="s2">| </span><span class="s1">ReadBuffer</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] | </span><span class="s1">ReadBuffer</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">],</span>
+    <span class="s2">*,</span>
+    <span class="s1">orient</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">typ</span><span class="s2">: </span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;frame&quot;</span><span class="s2">] = ...,</span>
+    <span class="s1">dtype</span><span class="s2">: </span><span class="s1">DtypeArg </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">convert_axes</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">convert_dates</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s1">list</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] = ...,</span>
+    <span class="s1">keep_default_dates</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= ...,</span>
+    <span class="s1">precise_float</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= ...,</span>
+    <span class="s1">date_unit</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">encoding</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">encoding_errors</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">lines</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= ...,</span>
+    <span class="s1">chunksize</span><span class="s2">: </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">compression</span><span class="s2">: </span><span class="s1">CompressionOptions </span><span class="s2">= ...,</span>
+    <span class="s1">nrows</span><span class="s2">: </span><span class="s1">int </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= ...,</span>
+    <span class="s1">storage_options</span><span class="s2">: </span><span class="s1">StorageOptions </span><span class="s2">= ...,</span>
+    <span class="s1">dtype_backend</span><span class="s2">: </span><span class="s1">DtypeBackend </span><span class="s2">| </span><span class="s1">lib</span><span class="s2">.</span><span class="s1">NoDefault </span><span class="s2">= ...,</span>
+    <span class="s1">engine</span><span class="s2">: </span><span class="s1">JSONEngine </span><span class="s2">= ...,</span>
+<span class="s2">) </span><span class="s1">-&gt; DataFrame</span><span class="s2">: ...</span>
+
+
+<span class="s2">@</span><span class="s1">set_module</span><span class="s2">(</span><span class="s3">&quot;pandas&quot;</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">read_json</span><span class="s2">(</span>
+    <span class="s1">path_or_buf</span><span class="s2">: </span><span class="s1">FilePath </span><span class="s2">| </span><span class="s1">ReadBuffer</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] | </span><span class="s1">ReadBuffer</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">],</span>
+    <span class="s2">*,</span>
+    <span class="s1">orient</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">typ</span><span class="s2">: </span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;frame&quot;</span><span class="s2">, </span><span class="s3">&quot;series&quot;</span><span class="s2">] = </span><span class="s3">&quot;frame&quot;</span><span class="s2">,</span>
+    <span class="s1">dtype</span><span class="s2">: </span><span class="s1">DtypeArg </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">convert_axes</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">convert_dates</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s1">list</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] = </span><span class="s0">True</span><span class="s2">,</span>
+    <span class="s1">keep_default_dates</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">True</span><span class="s2">,</span>
+    <span class="s1">precise_float</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">,</span>
+    <span class="s1">date_unit</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">encoding</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">encoding_errors</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s3">&quot;strict&quot;</span><span class="s2">,</span>
+    <span class="s1">lines</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">,</span>
+    <span class="s1">chunksize</span><span class="s2">: </span><span class="s1">int </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">compression</span><span class="s2">: </span><span class="s1">CompressionOptions </span><span class="s2">= </span><span class="s3">&quot;infer&quot;</span><span class="s2">,</span>
+    <span class="s1">nrows</span><span class="s2">: </span><span class="s1">int </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">storage_options</span><span class="s2">: </span><span class="s1">StorageOptions </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">dtype_backend</span><span class="s2">: </span><span class="s1">DtypeBackend </span><span class="s2">| </span><span class="s1">lib</span><span class="s2">.</span><span class="s1">NoDefault </span><span class="s2">= </span><span class="s1">lib</span><span class="s2">.</span><span class="s1">no_default</span><span class="s2">,</span>
+    <span class="s1">engine</span><span class="s2">: </span><span class="s1">JSONEngine </span><span class="s2">= </span><span class="s3">&quot;ujson&quot;</span><span class="s2">,</span>
+<span class="s2">) </span><span class="s1">-&gt; DataFrame </span><span class="s2">| </span><span class="s1">Series </span><span class="s2">| </span><span class="s1">JsonReader</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Convert a JSON string to pandas object. 
+ 
+    This method reads JSON files or JSON-like data and converts them into pandas 
+    objects. It supports a variety of input formats, including line-delimited JSON, 
+    compressed files, and various data representations (table, records, index-based, 
+    etc.). When `chunksize` is specified, an iterator is returned instead of loading 
+    the entire data into memory. 
+ 
+    Parameters 
+    ---------- 
+    path_or_buf : a str path, path object or file-like object 
+        Any valid string path is acceptable. The string could be a URL. Valid 
+        URL schemes include http, ftp, s3, and file. For file URLs, a host is 
+        expected. A local file could be: 
+        ``file://localhost/path/to/table.json``. 
+ 
+        If you want to pass in a path object, pandas accepts any 
+        ``os.PathLike``. 
+ 
+        By file-like object, we refer to objects with a ``read()`` method, 
+        such as a file handle (e.g. via builtin ``open`` function) 
+        or ``StringIO``. 
+ 
+    orient : str, optional 
+        Indication of expected JSON string format. 
+        Compatible JSON strings can be produced by ``to_json()`` with a 
+        corresponding orient value. 
+        The set of possible orients is: 
+ 
+        - ``'split'`` : dict like 
+          ``{index -&gt; [index], columns -&gt; [columns], data -&gt; [values]}`` 
+        - ``'records'`` : list like 
+          ``[{column -&gt; value}, ... , {column -&gt; value}]`` 
+        - ``'index'`` : dict like ``{index -&gt; {column -&gt; value}}`` 
+        - ``'columns'`` : dict like ``{column -&gt; {index -&gt; value}}`` 
+        - ``'values'`` : just the values array 
+        - ``'table'`` : dict like ``{'schema': {schema}, 'data': {data}}`` 
+ 
+        The allowed and default values depend on the value 
+        of the `typ` parameter. 
+ 
+        * when ``typ == 'series'``, 
+ 
+          - allowed orients are ``{'split','records','index'}`` 
+          - default is ``'index'`` 
+          - The Series index must be unique for orient ``'index'``. 
+ 
+        * when ``typ == 'frame'``, 
+ 
+          - allowed orients are ``{'split','records','index', 
+            'columns','values', 'table'}`` 
+          - default is ``'columns'`` 
+          - The DataFrame index must be unique for orients ``'index'`` and 
+            ``'columns'``. 
+          - The DataFrame columns must be unique for orients ``'index'``, 
+            ``'columns'``, and ``'records'``. 
+ 
+    typ : {'frame', 'series'}, default 'frame' 
+        The type of object to recover. 
+ 
+    dtype : bool or dict, default None 
+        If True, infer dtypes; if a dict of column to dtype, then use those; 
+        if False, then don't infer dtypes at all, applies only to the data. 
+ 
+        For all ``orient`` values except ``'table'``, default is True. 
+ 
+    convert_axes : bool, default None 
+        Try to convert the axes to the proper dtypes. 
+ 
+        For all ``orient`` values except ``'table'``, default is True. 
+ 
+    convert_dates : bool or list of str, default True 
+        If True then default datelike columns may be converted (depending on 
+        keep_default_dates). 
+        If False, no dates will be converted. 
+        If a list of column names, then those columns will be converted and 
+        default datelike columns may also be converted (depending on 
+        keep_default_dates). 
+ 
+    keep_default_dates : bool, default True 
+        If parsing dates (convert_dates is not False), then try to parse the 
+        default datelike columns. 
+        A column label is datelike if 
+ 
+        * it ends with ``'_at'``, 
+ 
+        * it ends with ``'_time'``, 
+ 
+        * it begins with ``'timestamp'``, 
+ 
+        * it is ``'modified'``, or 
+ 
+        * it is ``'date'``. 
+ 
+    precise_float : bool, default False 
+        Set to enable usage of higher precision (strtod) function when 
+        decoding string to double values. Default (False) is to use fast but 
+        less precise builtin functionality. 
+ 
+    date_unit : str, default None 
+        The timestamp unit to detect if converting dates. The default behaviour 
+        is to try and detect the correct precision, but if this is not desired 
+        then pass one of 's', 'ms', 'us' or 'ns' to force parsing only seconds, 
+        milliseconds, microseconds or nanoseconds respectively. 
+ 
+    encoding : str, default is 'utf-8' 
+        The encoding to use to decode py3 bytes. 
+ 
+    encoding_errors : str, optional, default &quot;strict&quot; 
+        How encoding errors are treated. `List of possible values 
+        &lt;https://docs.python.org/3/library/codecs.html#error-handlers&gt;`_ . 
+ 
+    lines : bool, default False 
+        Read the file as a json object per line. 
+ 
+    chunksize : int, optional 
+        Return JsonReader object for iteration. 
+        See the `line-delimited json docs 
+        &lt;https://pandas.pydata.org/pandas-docs/stable/user_guide/io.html#line-delimited-json&gt;`_ 
+        for more information on ``chunksize``. 
+        This can only be passed if `lines=True`. 
+        If this is None, the file will be read into memory all at once. 
+ 
+    compression : str or dict, default 'infer' 
+        For on-the-fly decompression of on-disk data. If 'infer' and 'path_or_buf' is 
+        path-like, then detect compression from the following extensions: '.gz', 
+        '.bz2', '.zip', '.xz', '.zst', '.tar', '.tar.gz', '.tar.xz' or '.tar.bz2' 
+        (otherwise no compression). 
+        If using 'zip' or 'tar', the ZIP file must contain only one data file to be 
+        read in. 
+        Set to ``None`` for no decompression. 
+        Can also be a dict with key ``'method'`` set 
+        to one of {``'zip'``, ``'gzip'``, ``'bz2'``, ``'zstd'``, ``'xz'``, ``'tar'``} 
+        and other key-value pairs are forwarded to 
+        ``zipfile.ZipFile``, ``gzip.GzipFile``, 
+        ``bz2.BZ2File``, ``zstandard.ZstdDecompressor``, ``lzma.LZMAFile`` or 
+        ``tarfile.TarFile``, respectively. 
+        As an example, the following could be passed for Zstandard decompression using a 
+        custom compression dictionary: 
+        ``compression={'method': 'zstd', 'dict_data': my_compression_dict}``. 
+ 
+    nrows : int, optional 
+        The number of lines from the line-delimited jsonfile that has to be read. 
+        This can only be passed if `lines=True`. 
+        If this is None, all the rows will be returned. 
+ 
+    storage_options : dict, optional 
+        Extra options that make sense for a particular storage connection, e.g. 
+        host, port, username, password, etc. For HTTP(S) URLs the key-value pairs 
+        are forwarded to ``urllib.request.Request`` as header options. For other 
+        URLs (e.g. starting with &quot;s3://&quot;, and &quot;gcs://&quot;) the key-value pairs are 
+        forwarded to ``fsspec.open``. Please see ``fsspec`` and ``urllib`` for more 
+        details, and for more examples on storage options refer `here 
+        &lt;https://pandas.pydata.org/docs/user_guide/io.html? 
+        highlight=storage_options#reading-writing-remote-files&gt;`_. 
+ 
+    dtype_backend : {'numpy_nullable', 'pyarrow'} 
+        Back-end data type applied to the resultant :class:`DataFrame` 
+        (still experimental). If not specified, the default behavior 
+        is to not use nullable data types. If specified, the behavior 
+        is as follows: 
+ 
+        * ``&quot;numpy_nullable&quot;``: returns nullable-dtype-backed :class:`DataFrame` 
+        * ``&quot;pyarrow&quot;``: returns pyarrow-backed nullable 
+          :class:`ArrowDtype` :class:`DataFrame` 
+ 
+        .. versionadded:: 2.0 
+ 
+    engine : {&quot;ujson&quot;, &quot;pyarrow&quot;}, default &quot;ujson&quot; 
+        Parser engine to use. The ``&quot;pyarrow&quot;`` engine is only available when 
+        ``lines=True``. 
+ 
+        .. versionadded:: 2.0 
+ 
+    Returns 
+    ------- 
+    Series, DataFrame, or pandas.api.typing.JsonReader 
+        A JsonReader is returned when ``chunksize`` is not ``0`` or ``None``. 
+        Otherwise, the type returned depends on the value of ``typ``. 
+ 
+    See Also 
+    -------- 
+    DataFrame.to_json : Convert a DataFrame to a JSON string. 
+    Series.to_json : Convert a Series to a JSON string. 
+    json_normalize : Normalize semi-structured JSON data into a flat table. 
+ 
+    Notes 
+    ----- 
+    Specific to ``orient='table'``, if a :class:`DataFrame` with a literal 
+    :class:`Index` name of `index` gets written with :func:`to_json`, the 
+    subsequent read operation will incorrectly set the :class:`Index` name to 
+    ``None``. This is because `index` is also used by :func:`DataFrame.to_json` 
+    to denote a missing :class:`Index` name, and the subsequent 
+    :func:`read_json` operation cannot distinguish between the two. The same 
+    limitation is encountered with a :class:`MultiIndex` and any names 
+    beginning with ``'level_'``. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; from io import StringIO 
+    &gt;&gt;&gt; df = pd.DataFrame( 
+    ...     [[&quot;a&quot;, &quot;b&quot;], [&quot;c&quot;, &quot;d&quot;]], 
+    ...     index=[&quot;row 1&quot;, &quot;row 2&quot;], 
+    ...     columns=[&quot;col 1&quot;, &quot;col 2&quot;], 
+    ... ) 
+ 
+    Encoding/decoding a Dataframe using ``'split'`` formatted JSON: 
+ 
+    &gt;&gt;&gt; df.to_json(orient=&quot;split&quot;) 
+    '{&quot;columns&quot;:[&quot;col 1&quot;,&quot;col 2&quot;],&quot;index&quot;:[&quot;row 1&quot;,&quot;row 2&quot;],&quot;data&quot;:[[&quot;a&quot;,&quot;b&quot;],[&quot;c&quot;,&quot;d&quot;]]}' 
+ 
+    &gt;&gt;&gt; pd.read_json(StringIO(_), orient=&quot;split&quot;)  # noqa: F821 
+          col 1 col 2 
+    row 1     a     b 
+    row 2     c     d 
+ 
+    Encoding/decoding a Dataframe using ``'index'`` formatted JSON: 
+ 
+    &gt;&gt;&gt; df.to_json(orient=&quot;index&quot;) 
+    '{&quot;row 1&quot;:{&quot;col 1&quot;:&quot;a&quot;,&quot;col 2&quot;:&quot;b&quot;},&quot;row 2&quot;:{&quot;col 1&quot;:&quot;c&quot;,&quot;col 2&quot;:&quot;d&quot;}}' 
+ 
+    &gt;&gt;&gt; pd.read_json(StringIO(_), orient=&quot;index&quot;)  # noqa: F821 
+          col 1 col 2 
+    row 1     a     b 
+    row 2     c     d 
+ 
+    Encoding/decoding a Dataframe using ``'records'`` formatted JSON. 
+    Note that index labels are not preserved with this encoding. 
+ 
+    &gt;&gt;&gt; df.to_json(orient=&quot;records&quot;) 
+    '[{&quot;col 1&quot;:&quot;a&quot;,&quot;col 2&quot;:&quot;b&quot;},{&quot;col 1&quot;:&quot;c&quot;,&quot;col 2&quot;:&quot;d&quot;}]' 
+ 
+    &gt;&gt;&gt; pd.read_json(StringIO(_), orient=&quot;records&quot;)  # noqa: F821 
+      col 1 col 2 
+    0     a     b 
+    1     c     d 
+ 
+    Encoding with Table Schema 
+ 
+    &gt;&gt;&gt; df.to_json(orient=&quot;table&quot;) 
+    '{&quot;schema&quot;:{&quot;fields&quot;:[{&quot;name&quot;:&quot;index&quot;,&quot;type&quot;:&quot;string&quot;,&quot;extDtype&quot;:&quot;str&quot;},{&quot;name&quot;:&quot;col 1&quot;,&quot;type&quot;:&quot;string&quot;,&quot;extDtype&quot;:&quot;str&quot;},{&quot;name&quot;:&quot;col 2&quot;,&quot;type&quot;:&quot;string&quot;,&quot;extDtype&quot;:&quot;str&quot;}],&quot;primaryKey&quot;:[&quot;index&quot;],&quot;pandas_version&quot;:&quot;1.4.0&quot;},&quot;data&quot;:[{&quot;index&quot;:&quot;row 1&quot;,&quot;col 1&quot;:&quot;a&quot;,&quot;col 2&quot;:&quot;b&quot;},{&quot;index&quot;:&quot;row 2&quot;,&quot;col 1&quot;:&quot;c&quot;,&quot;col 2&quot;:&quot;d&quot;}]}' 
+ 
+    The following example uses ``dtype_backend=&quot;numpy_nullable&quot;`` 
+ 
+    &gt;&gt;&gt; data = '''{&quot;index&quot;: {&quot;0&quot;: 0, &quot;1&quot;: 1}, 
+    ...        &quot;a&quot;: {&quot;0&quot;: 1, &quot;1&quot;: null}, 
+    ...        &quot;b&quot;: {&quot;0&quot;: 2.5, &quot;1&quot;: 4.5}, 
+    ...        &quot;c&quot;: {&quot;0&quot;: true, &quot;1&quot;: false}, 
+    ...        &quot;d&quot;: {&quot;0&quot;: &quot;a&quot;, &quot;1&quot;: &quot;b&quot;}, 
+    ...        &quot;e&quot;: {&quot;0&quot;: 1577.2, &quot;1&quot;: 1577.1}}''' 
+    &gt;&gt;&gt; pd.read_json(StringIO(data), dtype_backend=&quot;numpy_nullable&quot;) 
+       index     a    b      c  d       e 
+    0      0     1  2.5   True  a  1577.2 
+    1      1  &lt;NA&gt;  4.5  False  b  1577.1 
+    &quot;&quot;&quot;  </span><span class="s4"># noqa: E501</span>
+    <span class="s0">if </span><span class="s1">orient </span><span class="s2">== </span><span class="s3">&quot;table&quot; </span><span class="s0">and </span><span class="s1">dtype</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;cannot pass both dtype and orient='table'&quot;</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">orient </span><span class="s2">== </span><span class="s3">&quot;table&quot; </span><span class="s0">and </span><span class="s1">convert_axes</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;cannot pass both convert_axes and orient='table'&quot;</span><span class="s2">)</span>
+
+    <span class="s1">check_dtype_backend</span><span class="s2">(</span><span class="s1">dtype_backend</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">dtype </span><span class="s0">is None and </span><span class="s1">orient </span><span class="s2">!= </span><span class="s3">&quot;table&quot;</span><span class="s2">:</span>
+        <span class="s4"># error: Incompatible types in assignment (expression has type &quot;bool&quot;, variable</span>
+        <span class="s4"># has type &quot;Union[ExtensionDtype, str, dtype[Any], Type[str], Type[float],</span>
+        <span class="s4"># Type[int], Type[complex], Type[bool], Type[object], Dict[Hashable,</span>
+        <span class="s4"># Union[ExtensionDtype, Union[str, dtype[Any]], Type[str], Type[float],</span>
+        <span class="s4"># Type[int], Type[complex], Type[bool], Type[object]]], None]&quot;)</span>
+        <span class="s1">dtype </span><span class="s2">= </span><span class="s0">True  </span><span class="s4"># type: ignore[assignment]</span>
+    <span class="s0">if </span><span class="s1">convert_axes </span><span class="s0">is None and </span><span class="s1">orient </span><span class="s2">!= </span><span class="s3">&quot;table&quot;</span><span class="s2">:</span>
+        <span class="s1">convert_axes </span><span class="s2">= </span><span class="s0">True</span>
+
+    <span class="s1">json_reader </span><span class="s2">= </span><span class="s1">JsonReader</span><span class="s2">(</span>
+        <span class="s1">path_or_buf</span><span class="s2">,</span>
+        <span class="s1">orient</span><span class="s2">=</span><span class="s1">orient</span><span class="s2">,</span>
+        <span class="s1">typ</span><span class="s2">=</span><span class="s1">typ</span><span class="s2">,</span>
+        <span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">,</span>
+        <span class="s1">convert_axes</span><span class="s2">=</span><span class="s1">convert_axes</span><span class="s2">,</span>
+        <span class="s1">convert_dates</span><span class="s2">=</span><span class="s1">convert_dates</span><span class="s2">,</span>
+        <span class="s1">keep_default_dates</span><span class="s2">=</span><span class="s1">keep_default_dates</span><span class="s2">,</span>
+        <span class="s1">precise_float</span><span class="s2">=</span><span class="s1">precise_float</span><span class="s2">,</span>
+        <span class="s1">date_unit</span><span class="s2">=</span><span class="s1">date_unit</span><span class="s2">,</span>
+        <span class="s1">encoding</span><span class="s2">=</span><span class="s1">encoding</span><span class="s2">,</span>
+        <span class="s1">lines</span><span class="s2">=</span><span class="s1">lines</span><span class="s2">,</span>
+        <span class="s1">chunksize</span><span class="s2">=</span><span class="s1">chunksize</span><span class="s2">,</span>
+        <span class="s1">compression</span><span class="s2">=</span><span class="s1">compression</span><span class="s2">,</span>
+        <span class="s1">nrows</span><span class="s2">=</span><span class="s1">nrows</span><span class="s2">,</span>
+        <span class="s1">storage_options</span><span class="s2">=</span><span class="s1">storage_options</span><span class="s2">,</span>
+        <span class="s1">encoding_errors</span><span class="s2">=</span><span class="s1">encoding_errors</span><span class="s2">,</span>
+        <span class="s1">dtype_backend</span><span class="s2">=</span><span class="s1">dtype_backend</span><span class="s2">,</span>
+        <span class="s1">engine</span><span class="s2">=</span><span class="s1">engine</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">chunksize</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">json_reader</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">json_reader</span><span class="s2">.</span><span class="s1">read</span><span class="s2">()</span>
+
+
+<span class="s2">@</span><span class="s1">set_module</span><span class="s2">(</span><span class="s3">&quot;pandas.api.typing&quot;</span><span class="s2">)</span>
+<span class="s0">class </span><span class="s1">JsonReader</span><span class="s2">(</span><span class="s1">abc</span><span class="s2">.</span><span class="s1">Iterator</span><span class="s2">, </span><span class="s1">Generic</span><span class="s2">[</span><span class="s1">FrameSeriesStrT</span><span class="s2">]):</span>
+    <span class="s6">&quot;&quot;&quot; 
+    JsonReader provides an interface for reading in a JSON file. 
+ 
+    If initialized with ``lines=True`` and ``chunksize``, can be iterated over 
+    ``chunksize`` lines at a time. Otherwise, calling ``read`` reads in the 
+    whole document. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">filepath_or_buffer</span><span class="s2">,</span>
+        <span class="s1">orient</span><span class="s2">,</span>
+        <span class="s1">typ</span><span class="s2">: </span><span class="s1">FrameSeriesStrT</span><span class="s2">,</span>
+        <span class="s1">dtype</span><span class="s2">,</span>
+        <span class="s1">convert_axes</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">convert_dates</span><span class="s2">,</span>
+        <span class="s1">keep_default_dates</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+        <span class="s1">precise_float</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+        <span class="s1">date_unit</span><span class="s2">,</span>
+        <span class="s1">encoding</span><span class="s2">,</span>
+        <span class="s1">lines</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+        <span class="s1">chunksize</span><span class="s2">: </span><span class="s1">int </span><span class="s2">| </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">compression</span><span class="s2">: </span><span class="s1">CompressionOptions</span><span class="s2">,</span>
+        <span class="s1">nrows</span><span class="s2">: </span><span class="s1">int </span><span class="s2">| </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">storage_options</span><span class="s2">: </span><span class="s1">StorageOptions </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">encoding_errors</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s3">&quot;strict&quot;</span><span class="s2">,</span>
+        <span class="s1">dtype_backend</span><span class="s2">: </span><span class="s1">DtypeBackend </span><span class="s2">| </span><span class="s1">lib</span><span class="s2">.</span><span class="s1">NoDefault </span><span class="s2">= </span><span class="s1">lib</span><span class="s2">.</span><span class="s1">no_default</span><span class="s2">,</span>
+        <span class="s1">engine</span><span class="s2">: </span><span class="s1">JSONEngine </span><span class="s2">= </span><span class="s3">&quot;ujson&quot;</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">orient </span><span class="s2">= </span><span class="s1">orient</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">typ </span><span class="s2">= </span><span class="s1">typ</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">dtype </span><span class="s2">= </span><span class="s1">dtype</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">convert_axes </span><span class="s2">= </span><span class="s1">convert_axes</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">convert_dates </span><span class="s2">= </span><span class="s1">convert_dates</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">keep_default_dates </span><span class="s2">= </span><span class="s1">keep_default_dates</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">precise_float </span><span class="s2">= </span><span class="s1">precise_float</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">date_unit </span><span class="s2">= </span><span class="s1">date_unit</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">encoding </span><span class="s2">= </span><span class="s1">encoding</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">engine </span><span class="s2">= </span><span class="s1">engine</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">compression </span><span class="s2">= </span><span class="s1">compression</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">storage_options </span><span class="s2">= </span><span class="s1">storage_options</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">lines </span><span class="s2">= </span><span class="s1">lines</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">chunksize </span><span class="s2">= </span><span class="s1">chunksize</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">nrows_seen </span><span class="s2">= </span><span class="s5">0</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">nrows </span><span class="s2">= </span><span class="s1">nrows</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">encoding_errors </span><span class="s2">= </span><span class="s1">encoding_errors</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">handles</span><span class="s2">: </span><span class="s1">IOHandles</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">dtype_backend </span><span class="s2">= </span><span class="s1">dtype_backend</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">engine </span><span class="s0">not in </span><span class="s2">{</span><span class="s3">&quot;pyarrow&quot;</span><span class="s2">, </span><span class="s3">&quot;ujson&quot;</span><span class="s2">}:</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span>
+                <span class="s3">f&quot;The engine type </span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">engine</span><span class="s0">} </span><span class="s3">is currently not supported.&quot;</span>
+            <span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">chunksize </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">chunksize </span><span class="s2">= </span><span class="s1">validate_integer</span><span class="s2">(</span><span class="s3">&quot;chunksize&quot;</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">chunksize</span><span class="s2">, </span><span class="s5">1</span><span class="s2">)</span>
+            <span class="s0">if not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">lines</span><span class="s2">:</span>
+                <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;chunksize can only be passed if lines=True&quot;</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">engine </span><span class="s2">== </span><span class="s3">&quot;pyarrow&quot;</span><span class="s2">:</span>
+                <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span>
+                    <span class="s3">&quot;currently pyarrow engine doesn't support chunksize parameter&quot;</span>
+                <span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">nrows </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">nrows </span><span class="s2">= </span><span class="s1">validate_integer</span><span class="s2">(</span><span class="s3">&quot;nrows&quot;</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">nrows</span><span class="s2">, </span><span class="s5">0</span><span class="s2">)</span>
+            <span class="s0">if not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">lines</span><span class="s2">:</span>
+                <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;nrows can only be passed if lines=True&quot;</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">engine </span><span class="s2">== </span><span class="s3">&quot;pyarrow&quot;</span><span class="s2">:</span>
+            <span class="s0">if not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">lines</span><span class="s2">:</span>
+                <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span>
+                    <span class="s3">&quot;currently pyarrow engine only supports &quot;</span>
+                    <span class="s3">&quot;the line-delimited JSON format&quot;</span>
+                <span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s1">filepath_or_buffer</span>
+        <span class="s0">elif </span><span class="s1">self</span><span class="s2">.</span><span class="s1">engine </span><span class="s2">== </span><span class="s3">&quot;ujson&quot;</span><span class="s2">:</span>
+            <span class="s1">data </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_data_from_filepath</span><span class="s2">(</span><span class="s1">filepath_or_buffer</span><span class="s2">)</span>
+            <span class="s4"># If self.chunksize, we prepare the data for the `__next__` method.</span>
+            <span class="s4"># Otherwise, we read it into memory for the `read` method.</span>
+            <span class="s0">if not </span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">chunksize </span><span class="s0">or </span><span class="s1">self</span><span class="s2">.</span><span class="s1">nrows</span><span class="s2">):</span>
+                <span class="s0">with </span><span class="s1">self</span><span class="s2">:</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s1">data</span><span class="s2">.</span><span class="s1">read</span><span class="s2">()</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s1">data</span>
+
+    <span class="s0">def </span><span class="s1">_get_data_from_filepath</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">filepath_or_buffer</span><span class="s2">):</span>
+        <span class="s6">&quot;&quot;&quot; 
+        The function read_json accepts three input types: 
+            1. filepath (string-like) 
+            2. file-like object (e.g. open file object, StringIO) 
+        &quot;&quot;&quot;</span>
+        <span class="s1">filepath_or_buffer </span><span class="s2">= </span><span class="s1">stringify_path</span><span class="s2">(</span><span class="s1">filepath_or_buffer</span><span class="s2">)</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">handles </span><span class="s2">= </span><span class="s1">get_handle</span><span class="s2">(</span>
+                <span class="s1">filepath_or_buffer</span><span class="s2">,</span>
+                <span class="s3">&quot;r&quot;</span><span class="s2">,</span>
+                <span class="s1">encoding</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">encoding</span><span class="s2">,</span>
+                <span class="s1">compression</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">compression</span><span class="s2">,</span>
+                <span class="s1">storage_options</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">storage_options</span><span class="s2">,</span>
+                <span class="s1">errors</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">encoding_errors</span><span class="s2">,</span>
+            <span class="s2">)</span>
+        <span class="s0">except </span><span class="s1">OSError </span><span class="s0">as </span><span class="s1">err</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">FileNotFoundError</span><span class="s2">(</span>
+                <span class="s3">f&quot;File </span><span class="s0">{</span><span class="s1">filepath_or_buffer</span><span class="s0">} </span><span class="s3">does not exist&quot;</span>
+            <span class="s2">) </span><span class="s0">from </span><span class="s1">err</span>
+        <span class="s1">filepath_or_buffer </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">handles</span><span class="s2">.</span><span class="s1">handle</span>
+        <span class="s0">return </span><span class="s1">filepath_or_buffer</span>
+
+    <span class="s0">def </span><span class="s1">_combine_lines</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">lines</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Combines a list of JSON objects into one JSON object. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s2">(</span>
+            <span class="s3">f&quot;[</span><span class="s0">{</span><span class="s3">','</span><span class="s2">.</span><span class="s1">join</span><span class="s2">([</span><span class="s1">line </span><span class="s0">for </span><span class="s1">line </span><span class="s0">in </span><span class="s2">(</span><span class="s1">line</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">() </span><span class="s0">for </span><span class="s1">line </span><span class="s0">in </span><span class="s1">lines</span><span class="s2">) </span><span class="s0">if </span><span class="s1">line</span><span class="s2">])</span><span class="s0">}</span><span class="s3">]&quot;</span>
+        <span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">overload</span>
+    <span class="s0">def </span><span class="s1">read</span><span class="s2">(</span><span class="s1">self</span><span class="s2">: </span><span class="s1">JsonReader</span><span class="s2">[</span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;frame&quot;</span><span class="s2">]]) </span><span class="s1">-&gt; DataFrame</span><span class="s2">: ...</span>
+
+    <span class="s2">@</span><span class="s1">overload</span>
+    <span class="s0">def </span><span class="s1">read</span><span class="s2">(</span><span class="s1">self</span><span class="s2">: </span><span class="s1">JsonReader</span><span class="s2">[</span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;series&quot;</span><span class="s2">]]) </span><span class="s1">-&gt; Series</span><span class="s2">: ...</span>
+
+    <span class="s2">@</span><span class="s1">overload</span>
+    <span class="s0">def </span><span class="s1">read</span><span class="s2">(</span><span class="s1">self</span><span class="s2">: </span><span class="s1">JsonReader</span><span class="s2">[</span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;frame&quot;</span><span class="s2">, </span><span class="s3">&quot;series&quot;</span><span class="s2">]]) </span><span class="s1">-&gt; DataFrame </span><span class="s2">| </span><span class="s1">Series</span><span class="s2">: ...</span>
+
+    <span class="s0">def </span><span class="s1">read</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; DataFrame </span><span class="s2">| </span><span class="s1">Series</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Read the whole JSON input into a pandas object. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">obj</span><span class="s2">: </span><span class="s1">DataFrame </span><span class="s2">| </span><span class="s1">Series</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">engine </span><span class="s2">== </span><span class="s3">&quot;pyarrow&quot;</span><span class="s2">:</span>
+                <span class="s1">obj </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_read_pyarrow</span><span class="s2">()</span>
+            <span class="s0">elif </span><span class="s1">self</span><span class="s2">.</span><span class="s1">engine </span><span class="s2">== </span><span class="s3">&quot;ujson&quot;</span><span class="s2">:</span>
+                <span class="s1">obj </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_read_ujson</span><span class="s2">()</span>
+
+        <span class="s0">return </span><span class="s1">obj</span>
+
+    <span class="s0">def </span><span class="s1">_read_pyarrow</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; DataFrame</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Read JSON using the pyarrow engine. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">pyarrow_json </span><span class="s2">= </span><span class="s1">import_optional_dependency</span><span class="s2">(</span><span class="s3">&quot;pyarrow.json&quot;</span><span class="s2">)</span>
+        <span class="s1">options </span><span class="s2">= </span><span class="s0">None</span>
+
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">dict</span><span class="s2">):</span>
+            <span class="s1">pa </span><span class="s2">= </span><span class="s1">import_optional_dependency</span><span class="s2">(</span><span class="s3">&quot;pyarrow&quot;</span><span class="s2">)</span>
+            <span class="s1">fields </span><span class="s2">= []</span>
+            <span class="s0">for </span><span class="s1">field</span><span class="s2">, </span><span class="s1">dtype </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">items</span><span class="s2">():</span>
+                <span class="s1">pd_dtype </span><span class="s2">= </span><span class="s1">pandas_dtype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">pd_dtype</span><span class="s2">, </span><span class="s1">ArrowDtype</span><span class="s2">):</span>
+                    <span class="s1">fields</span><span class="s2">.</span><span class="s1">append</span><span class="s2">((</span><span class="s1">field</span><span class="s2">, </span><span class="s1">pd_dtype</span><span class="s2">.</span><span class="s1">pyarrow_dtype</span><span class="s2">))</span>
+
+            <span class="s1">schema </span><span class="s2">= </span><span class="s1">pa</span><span class="s2">.</span><span class="s1">schema</span><span class="s2">(</span><span class="s1">fields</span><span class="s2">)</span>
+            <span class="s1">options </span><span class="s2">= </span><span class="s1">pyarrow_json</span><span class="s2">.</span><span class="s1">ParseOptions</span><span class="s2">(</span>
+                <span class="s1">explicit_schema</span><span class="s2">=</span><span class="s1">schema</span><span class="s2">, </span><span class="s1">unexpected_field_behavior</span><span class="s2">=</span><span class="s3">&quot;infer&quot;</span>
+            <span class="s2">)</span>
+
+        <span class="s1">pa_table </span><span class="s2">= </span><span class="s1">pyarrow_json</span><span class="s2">.</span><span class="s1">read_json</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">, </span><span class="s1">parse_options</span><span class="s2">=</span><span class="s1">options</span><span class="s2">)</span>
+        <span class="s1">df </span><span class="s2">= </span><span class="s1">arrow_table_to_pandas</span><span class="s2">(</span><span class="s1">pa_table</span><span class="s2">, </span><span class="s1">dtype_backend</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype_backend</span><span class="s2">)</span>
+
+        <span class="s0">return </span><span class="s1">df</span>
+
+    <span class="s0">def </span><span class="s1">_read_ujson</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; DataFrame </span><span class="s2">| </span><span class="s1">Series</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Read JSON using the ujson engine. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">obj</span><span class="s2">: </span><span class="s1">DataFrame </span><span class="s2">| </span><span class="s1">Series</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">lines</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">chunksize</span><span class="s2">:</span>
+                <span class="s1">obj </span><span class="s2">= </span><span class="s1">concat</span><span class="s2">(</span><span class="s1">self</span><span class="s2">)</span>
+            <span class="s0">elif </span><span class="s1">self</span><span class="s2">.</span><span class="s1">nrows</span><span class="s2">:</span>
+                <span class="s1">lines </span><span class="s2">= </span><span class="s1">list</span><span class="s2">(</span><span class="s1">islice</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">nrows</span><span class="s2">))</span>
+                <span class="s1">lines_json </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_combine_lines</span><span class="s2">(</span><span class="s1">lines</span><span class="s2">)</span>
+                <span class="s1">obj </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_object_parser</span><span class="s2">(</span><span class="s1">lines_json</span><span class="s2">)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">data </span><span class="s2">= </span><span class="s1">ensure_str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">)</span>
+                <span class="s1">data_lines </span><span class="s2">= </span><span class="s1">data</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s3">&quot;</span><span class="s0">\n</span><span class="s3">&quot;</span><span class="s2">)</span>
+                <span class="s1">obj </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_object_parser</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_combine_lines</span><span class="s2">(</span><span class="s1">data_lines</span><span class="s2">))</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">obj </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_object_parser</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype_backend </span><span class="s0">is not </span><span class="s1">lib</span><span class="s2">.</span><span class="s1">no_default</span><span class="s2">:</span>
+            <span class="s0">with </span><span class="s1">option_context</span><span class="s2">(</span><span class="s3">&quot;future.distinguish_nan_and_na&quot;</span><span class="s2">, </span><span class="s0">False</span><span class="s2">):</span>
+                <span class="s0">return </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">convert_dtypes</span><span class="s2">(</span>
+                    <span class="s1">infer_objects</span><span class="s2">=</span><span class="s0">False</span><span class="s2">, </span><span class="s1">dtype_backend</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype_backend</span>
+                <span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">obj</span>
+
+    <span class="s0">def </span><span class="s1">_get_object_parser</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">json</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; DataFrame </span><span class="s2">| </span><span class="s1">Series</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Parses a json document into a pandas object. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">typ </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">typ</span>
+        <span class="s1">dtype </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span>
+        <span class="s1">kwargs </span><span class="s2">= {</span>
+            <span class="s3">&quot;orient&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">orient</span><span class="s2">,</span>
+            <span class="s3">&quot;dtype&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">,</span>
+            <span class="s3">&quot;convert_axes&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">convert_axes</span><span class="s2">,</span>
+            <span class="s3">&quot;convert_dates&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">convert_dates</span><span class="s2">,</span>
+            <span class="s3">&quot;keep_default_dates&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">keep_default_dates</span><span class="s2">,</span>
+            <span class="s3">&quot;precise_float&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">precise_float</span><span class="s2">,</span>
+            <span class="s3">&quot;date_unit&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">date_unit</span><span class="s2">,</span>
+            <span class="s3">&quot;dtype_backend&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype_backend</span><span class="s2">,</span>
+        <span class="s2">}</span>
+        <span class="s0">if </span><span class="s1">typ </span><span class="s2">== </span><span class="s3">&quot;frame&quot;</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">FrameParser</span><span class="s2">(</span><span class="s1">json</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">).</span><span class="s1">parse</span><span class="s2">()</span>
+        <span class="s0">elif </span><span class="s1">typ </span><span class="s2">== </span><span class="s3">&quot;series&quot;</span><span class="s2">:</span>
+            <span class="s0">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">bool</span><span class="s2">):</span>
+                <span class="s1">kwargs</span><span class="s2">[</span><span class="s3">&quot;dtype&quot;</span><span class="s2">] = </span><span class="s1">dtype</span>
+            <span class="s0">return </span><span class="s1">SeriesParser</span><span class="s2">(</span><span class="s1">json</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">).</span><span class="s1">parse</span><span class="s2">()</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">f&quot;</span><span class="s0">{</span><span class="s1">typ</span><span class="s2">=</span><span class="s0">} </span><span class="s3">must be 'frame' or 'series'.&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">close</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        If we opened a stream earlier, in _get_data_from_filepath, we should 
+        close it. 
+ 
+        If an open stream or file was passed, we leave it open. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">handles </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">handles</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">__iter__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Self</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">self</span>
+
+    <span class="s2">@</span><span class="s1">overload</span>
+    <span class="s0">def </span><span class="s1">__next__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">: </span><span class="s1">JsonReader</span><span class="s2">[</span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;frame&quot;</span><span class="s2">]]) </span><span class="s1">-&gt; DataFrame</span><span class="s2">: ...</span>
+
+    <span class="s2">@</span><span class="s1">overload</span>
+    <span class="s0">def </span><span class="s1">__next__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">: </span><span class="s1">JsonReader</span><span class="s2">[</span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;series&quot;</span><span class="s2">]]) </span><span class="s1">-&gt; Series</span><span class="s2">: ...</span>
+
+    <span class="s2">@</span><span class="s1">overload</span>
+    <span class="s0">def </span><span class="s1">__next__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">: </span><span class="s1">JsonReader</span><span class="s2">[</span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;frame&quot;</span><span class="s2">, </span><span class="s3">&quot;series&quot;</span><span class="s2">]],</span>
+    <span class="s2">) </span><span class="s1">-&gt; DataFrame </span><span class="s2">| </span><span class="s1">Series</span><span class="s2">: ...</span>
+
+    <span class="s0">def </span><span class="s1">__next__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; DataFrame </span><span class="s2">| </span><span class="s1">Series</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">nrows </span><span class="s0">and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">nrows_seen </span><span class="s2">&gt;= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">nrows</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+            <span class="s0">raise </span><span class="s1">StopIteration</span>
+
+        <span class="s1">lines </span><span class="s2">= </span><span class="s1">list</span><span class="s2">(</span><span class="s1">islice</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">chunksize</span><span class="s2">))</span>
+        <span class="s0">if not </span><span class="s1">lines</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+            <span class="s0">raise </span><span class="s1">StopIteration</span>
+
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">lines_json </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_combine_lines</span><span class="s2">(</span><span class="s1">lines</span><span class="s2">)</span>
+            <span class="s1">obj </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_object_parser</span><span class="s2">(</span><span class="s1">lines_json</span><span class="s2">)</span>
+
+            <span class="s4"># Make sure that the returned objects have the right index.</span>
+            <span class="s1">obj</span><span class="s2">.</span><span class="s1">index </span><span class="s2">= </span><span class="s1">range</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">nrows_seen</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">nrows_seen </span><span class="s2">+ </span><span class="s1">len</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">))</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">nrows_seen </span><span class="s2">+= </span><span class="s1">len</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">)</span>
+        <span class="s0">except </span><span class="s1">Exception </span><span class="s0">as </span><span class="s1">ex</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+            <span class="s0">raise </span><span class="s1">ex</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype_backend </span><span class="s0">is not </span><span class="s1">lib</span><span class="s2">.</span><span class="s1">no_default</span><span class="s2">:</span>
+            <span class="s0">with </span><span class="s1">option_context</span><span class="s2">(</span><span class="s3">&quot;future.distinguish_nan_and_na&quot;</span><span class="s2">, </span><span class="s0">False</span><span class="s2">):</span>
+                <span class="s0">return </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">convert_dtypes</span><span class="s2">(</span>
+                    <span class="s1">infer_objects</span><span class="s2">=</span><span class="s0">False</span><span class="s2">, </span><span class="s1">dtype_backend</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype_backend</span>
+                <span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">obj</span>
+
+    <span class="s0">def </span><span class="s1">__enter__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Self</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">self</span>
+
+    <span class="s0">def </span><span class="s1">__exit__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">exc_type</span><span class="s2">: </span><span class="s1">type</span><span class="s2">[</span><span class="s1">BaseException</span><span class="s2">] | </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">exc_value</span><span class="s2">: </span><span class="s1">BaseException </span><span class="s2">| </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">traceback</span><span class="s2">: </span><span class="s1">TracebackType </span><span class="s2">| </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+
+
+<span class="s0">class </span><span class="s1">Parser</span><span class="s2">:</span>
+    <span class="s1">_split_keys</span><span class="s2">: </span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, ...]</span>
+    <span class="s1">_default_orient</span><span class="s2">: </span><span class="s1">str</span>
+
+    <span class="s1">_STAMP_UNITS </span><span class="s2">= (</span><span class="s3">&quot;s&quot;</span><span class="s2">, </span><span class="s3">&quot;ms&quot;</span><span class="s2">, </span><span class="s3">&quot;us&quot;</span><span class="s2">, </span><span class="s3">&quot;ns&quot;</span><span class="s2">)</span>
+    <span class="s1">_MIN_STAMPS </span><span class="s2">= {</span>
+        <span class="s3">&quot;s&quot;</span><span class="s2">: </span><span class="s5">31536000</span><span class="s2">,</span>
+        <span class="s3">&quot;ms&quot;</span><span class="s2">: </span><span class="s5">31536000000</span><span class="s2">,</span>
+        <span class="s3">&quot;us&quot;</span><span class="s2">: </span><span class="s5">31536000000000</span><span class="s2">,</span>
+        <span class="s3">&quot;ns&quot;</span><span class="s2">: </span><span class="s5">31536000000000000</span><span class="s2">,</span>
+    <span class="s2">}</span>
+    <span class="s1">json</span><span class="s2">: </span><span class="s1">str</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">json</span><span class="s2">: </span><span class="s1">str</span><span class="s2">,</span>
+        <span class="s1">orient</span><span class="s2">,</span>
+        <span class="s1">dtype</span><span class="s2">: </span><span class="s1">DtypeArg </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">convert_axes</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">True</span><span class="s2">,</span>
+        <span class="s1">convert_dates</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s1">list</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] = </span><span class="s0">True</span><span class="s2">,</span>
+        <span class="s1">keep_default_dates</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">,</span>
+        <span class="s1">precise_float</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">,</span>
+        <span class="s1">date_unit</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">dtype_backend</span><span class="s2">: </span><span class="s1">DtypeBackend </span><span class="s2">| </span><span class="s1">lib</span><span class="s2">.</span><span class="s1">NoDefault </span><span class="s2">= </span><span class="s1">lib</span><span class="s2">.</span><span class="s1">no_default</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">json </span><span class="s2">= </span><span class="s1">json</span>
+
+        <span class="s0">if </span><span class="s1">orient </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">orient </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_default_orient</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">orient </span><span class="s2">= </span><span class="s1">orient</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">dtype </span><span class="s2">= </span><span class="s1">dtype</span>
+
+        <span class="s0">if </span><span class="s1">date_unit </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s1">date_unit </span><span class="s2">= </span><span class="s1">date_unit</span><span class="s2">.</span><span class="s1">lower</span><span class="s2">()</span>
+            <span class="s0">if </span><span class="s1">date_unit </span><span class="s0">not in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_STAMP_UNITS</span><span class="s2">:</span>
+                <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">f&quot;date_unit must be one of </span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_STAMP_UNITS</span><span class="s0">}</span><span class="s3">&quot;</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">min_stamp </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_MIN_STAMPS</span><span class="s2">[</span><span class="s1">date_unit</span><span class="s2">]</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">min_stamp </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_MIN_STAMPS</span><span class="s2">[</span><span class="s3">&quot;s&quot;</span><span class="s2">]</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">precise_float </span><span class="s2">= </span><span class="s1">precise_float</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">convert_axes </span><span class="s2">= </span><span class="s1">convert_axes</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">convert_dates </span><span class="s2">= </span><span class="s1">convert_dates</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">date_unit </span><span class="s2">= </span><span class="s1">date_unit</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">keep_default_dates </span><span class="s2">= </span><span class="s1">keep_default_dates</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">dtype_backend </span><span class="s2">= </span><span class="s1">dtype_backend</span>
+
+    <span class="s2">@</span><span class="s1">final</span>
+    <span class="s0">def </span><span class="s1">check_keys_split</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">decoded</span><span class="s2">: </span><span class="s1">dict</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Checks that dict has only the appropriate keys for orient='split'. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">bad_keys </span><span class="s2">= </span><span class="s1">set</span><span class="s2">(</span><span class="s1">decoded</span><span class="s2">.</span><span class="s1">keys</span><span class="s2">()).</span><span class="s1">difference</span><span class="s2">(</span><span class="s1">set</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_split_keys</span><span class="s2">))</span>
+        <span class="s0">if </span><span class="s1">bad_keys</span><span class="s2">:</span>
+            <span class="s1">bad_keys_joined </span><span class="s2">= </span><span class="s3">&quot;, &quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">bad_keys</span><span class="s2">)</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">f&quot;JSON data had unexpected key(s): </span><span class="s0">{</span><span class="s1">bad_keys_joined</span><span class="s0">}</span><span class="s3">&quot;</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">final</span>
+    <span class="s0">def </span><span class="s1">parse</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; DataFrame </span><span class="s2">| </span><span class="s1">Series</span><span class="s2">:</span>
+        <span class="s1">obj </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_parse</span><span class="s2">()</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">convert_axes</span><span class="s2">:</span>
+            <span class="s1">obj </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_convert_axes</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">)</span>
+        <span class="s1">obj </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_try_convert_types</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">obj</span>
+
+    <span class="s0">def </span><span class="s1">_parse</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; DataFrame </span><span class="s2">| </span><span class="s1">Series</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">AbstractMethodError</span><span class="s2">(</span><span class="s1">self</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">final</span>
+    <span class="s0">def </span><span class="s1">_convert_axes</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">obj</span><span class="s2">: </span><span class="s1">DataFrame </span><span class="s2">| </span><span class="s1">Series</span><span class="s2">) </span><span class="s1">-&gt; DataFrame </span><span class="s2">| </span><span class="s1">Series</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Try to convert axes. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">for </span><span class="s1">axis_name </span><span class="s0">in </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">_AXIS_ORDERS</span><span class="s2">:</span>
+            <span class="s1">ax </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">_get_axis</span><span class="s2">(</span><span class="s1">axis_name</span><span class="s2">)</span>
+            <span class="s1">ser </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">ax</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">ax</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+            <span class="s1">new_ser</span><span class="s2">, </span><span class="s1">result </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_try_convert_data</span><span class="s2">(</span>
+                <span class="s1">name</span><span class="s2">=</span><span class="s1">axis_name</span><span class="s2">,</span>
+                <span class="s1">data</span><span class="s2">=</span><span class="s1">ser</span><span class="s2">,</span>
+                <span class="s1">use_dtypes</span><span class="s2">=</span><span class="s0">False</span><span class="s2">,</span>
+                <span class="s1">convert_dates</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,</span>
+                <span class="s1">is_axis</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,</span>
+            <span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">result</span><span class="s2">:</span>
+                <span class="s1">new_axis </span><span class="s2">= </span><span class="s1">Index</span><span class="s2">(</span><span class="s1">new_ser</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">new_ser</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+                <span class="s1">setattr</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">axis_name</span><span class="s2">, </span><span class="s1">new_axis</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">obj</span>
+
+    <span class="s0">def </span><span class="s1">_try_convert_types</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">obj</span><span class="s2">):</span>
+        <span class="s0">raise </span><span class="s1">AbstractMethodError</span><span class="s2">(</span><span class="s1">self</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">final</span>
+    <span class="s0">def </span><span class="s1">_try_convert_data</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">name</span><span class="s2">: </span><span class="s1">Hashable</span><span class="s2">,</span>
+        <span class="s1">data</span><span class="s2">: </span><span class="s1">Series</span><span class="s2">,</span>
+        <span class="s1">use_dtypes</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">True</span><span class="s2">,</span>
+        <span class="s1">convert_dates</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s1">list</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] = </span><span class="s0">True</span><span class="s2">,</span>
+        <span class="s1">is_axis</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">Series</span><span class="s2">, </span><span class="s1">bool</span><span class="s2">]:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Try to parse a Series into a column by inferring dtype. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">org_data </span><span class="s2">= </span><span class="s1">data</span>
+        <span class="s4"># don't try to coerce, unless a force conversion</span>
+        <span class="s0">if </span><span class="s1">use_dtypes</span><span class="s2">:</span>
+            <span class="s0">if not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">:</span>
+                <span class="s0">if </span><span class="s1">all</span><span class="s2">(</span><span class="s1">notna</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)):</span>
+                    <span class="s0">return </span><span class="s1">data</span><span class="s2">, </span><span class="s0">False</span>
+
+                <span class="s1">filled </span><span class="s2">= </span><span class="s1">data</span><span class="s2">.</span><span class="s1">fillna</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">)</span>
+
+                <span class="s0">return </span><span class="s1">filled</span><span class="s2">, </span><span class="s0">True</span>
+
+            <span class="s0">elif </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype </span><span class="s0">is True</span><span class="s2">:</span>
+                <span class="s0">pass</span>
+            <span class="s0">elif not </span><span class="s1">_should_convert_dates</span><span class="s2">(</span>
+                <span class="s1">convert_dates</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">keep_default_dates</span><span class="s2">, </span><span class="s1">name</span>
+            <span class="s2">):</span>
+                <span class="s4"># convert_dates takes precedence over columns listed in dtypes</span>
+                <span class="s1">dtype </span><span class="s2">= (</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">name</span><span class="s2">) </span><span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">dict</span><span class="s2">) </span><span class="s0">else </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span>
+                <span class="s2">)</span>
+                <span class="s0">if </span><span class="s1">dtype </span><span class="s0">is not None</span><span class="s2">:</span>
+                    <span class="s0">try</span><span class="s2">:</span>
+                        <span class="s0">return </span><span class="s1">data</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">), </span><span class="s0">True</span>
+                    <span class="s0">except </span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">, </span><span class="s1">ValueError</span><span class="s2">):</span>
+                        <span class="s0">return </span><span class="s1">data</span><span class="s2">, </span><span class="s0">False</span>
+
+        <span class="s0">if </span><span class="s1">convert_dates</span><span class="s2">:</span>
+            <span class="s1">new_data </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_try_convert_to_date</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">new_data </span><span class="s0">is not </span><span class="s1">data</span><span class="s2">:</span>
+                <span class="s0">return </span><span class="s1">new_data</span><span class="s2">, </span><span class="s0">True</span>
+
+        <span class="s1">converted </span><span class="s2">= </span><span class="s0">False</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype_backend </span><span class="s0">is not </span><span class="s1">lib</span><span class="s2">.</span><span class="s1">no_default </span><span class="s0">and not </span><span class="s1">is_axis</span><span class="s2">:</span>
+            <span class="s4"># Fall through for conversion later on</span>
+            <span class="s0">return </span><span class="s1">data</span><span class="s2">, </span><span class="s0">True</span>
+        <span class="s0">elif </span><span class="s1">is_string_dtype</span><span class="s2">(</span><span class="s1">data</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">):</span>
+            <span class="s4"># try float</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">data </span><span class="s2">= </span><span class="s1">data</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s3">&quot;float64&quot;</span><span class="s2">)</span>
+                <span class="s1">converted </span><span class="s2">= </span><span class="s0">True</span>
+            <span class="s0">except </span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">, </span><span class="s1">ValueError</span><span class="s2">):</span>
+                <span class="s0">pass</span>
+
+        <span class="s0">if </span><span class="s1">data</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">kind </span><span class="s2">== </span><span class="s3">&quot;f&quot; </span><span class="s0">and </span><span class="s1">data</span><span class="s2">.</span><span class="s1">dtype </span><span class="s2">!= </span><span class="s3">&quot;float64&quot;</span><span class="s2">:</span>
+            <span class="s4"># coerce floats to 64</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">data </span><span class="s2">= </span><span class="s1">data</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s3">&quot;float64&quot;</span><span class="s2">)</span>
+                <span class="s1">converted </span><span class="s2">= </span><span class="s0">True</span>
+            <span class="s0">except </span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">, </span><span class="s1">ValueError</span><span class="s2">):</span>
+                <span class="s0">pass</span>
+
+        <span class="s4"># don't coerce 0-len data</span>
+        <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">data</span><span class="s2">) </span><span class="s0">and </span><span class="s1">data</span><span class="s2">.</span><span class="s1">dtype </span><span class="s0">in </span><span class="s2">(</span><span class="s3">&quot;float&quot;</span><span class="s2">, </span><span class="s3">&quot;object&quot;</span><span class="s2">):</span>
+            <span class="s4"># coerce ints if we can</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">new_data </span><span class="s2">= </span><span class="s1">org_data</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s3">&quot;int64&quot;</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s2">(</span><span class="s1">new_data </span><span class="s2">== </span><span class="s1">data</span><span class="s2">).</span><span class="s1">all</span><span class="s2">():</span>
+                    <span class="s1">data </span><span class="s2">= </span><span class="s1">new_data</span>
+                    <span class="s1">converted </span><span class="s2">= </span><span class="s0">True</span>
+            <span class="s0">except </span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">, </span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">OverflowError</span><span class="s2">):</span>
+                <span class="s0">pass</span>
+
+        <span class="s0">if </span><span class="s1">data</span><span class="s2">.</span><span class="s1">dtype </span><span class="s2">== </span><span class="s3">&quot;int&quot; </span><span class="s0">and </span><span class="s1">data</span><span class="s2">.</span><span class="s1">dtype </span><span class="s2">!= </span><span class="s3">&quot;int64&quot;</span><span class="s2">:</span>
+            <span class="s4"># coerce ints to 64</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">data </span><span class="s2">= </span><span class="s1">data</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s3">&quot;int64&quot;</span><span class="s2">)</span>
+                <span class="s1">converted </span><span class="s2">= </span><span class="s0">True</span>
+            <span class="s0">except </span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">, </span><span class="s1">ValueError</span><span class="s2">):</span>
+                <span class="s0">pass</span>
+
+        <span class="s4"># if we have an index, we want to preserve dtypes</span>
+        <span class="s0">if </span><span class="s1">name </span><span class="s2">== </span><span class="s3">&quot;index&quot; </span><span class="s0">and </span><span class="s1">len</span><span class="s2">(</span><span class="s1">data</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">orient </span><span class="s2">== </span><span class="s3">&quot;split&quot;</span><span class="s2">:</span>
+                <span class="s0">return </span><span class="s1">data</span><span class="s2">, </span><span class="s0">False</span>
+
+        <span class="s0">return </span><span class="s1">data</span><span class="s2">, </span><span class="s1">converted</span>
+
+    <span class="s2">@</span><span class="s1">final</span>
+    <span class="s0">def </span><span class="s1">_try_convert_to_date</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">data</span><span class="s2">: </span><span class="s1">Series</span><span class="s2">) </span><span class="s1">-&gt; Series</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Try to parse an ndarray like into a date column. 
+ 
+        Try to coerce object in epoch/iso formats and integer/float in epoch 
+        formats. 
+        &quot;&quot;&quot;</span>
+        <span class="s4"># no conversion on empty</span>
+        <span class="s0">if not </span><span class="s1">len</span><span class="s2">(</span><span class="s1">data</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">data</span>
+
+        <span class="s1">new_data </span><span class="s2">= </span><span class="s1">data</span>
+
+        <span class="s0">if </span><span class="s1">new_data</span><span class="s2">.</span><span class="s1">dtype </span><span class="s2">== </span><span class="s3">&quot;object&quot; </span><span class="s0">or </span><span class="s1">new_data</span><span class="s2">.</span><span class="s1">dtype </span><span class="s2">== </span><span class="s3">&quot;string&quot;</span><span class="s2">:  </span><span class="s4"># noqa: PLR1714</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">new_data </span><span class="s2">= </span><span class="s1">data</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s3">&quot;int64&quot;</span><span class="s2">)</span>
+            <span class="s0">except </span><span class="s1">OverflowError</span><span class="s2">:</span>
+                <span class="s0">return </span><span class="s1">data</span>
+            <span class="s0">except </span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">, </span><span class="s1">ValueError</span><span class="s2">):</span>
+                <span class="s0">pass</span>
+
+        <span class="s4"># ignore numbers that are out of range</span>
+        <span class="s0">if </span><span class="s1">issubclass</span><span class="s2">(</span><span class="s1">new_data</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">type</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">number</span><span class="s2">):</span>
+            <span class="s1">in_range </span><span class="s2">= (</span>
+                <span class="s1">isna</span><span class="s2">(</span><span class="s1">new_data</span><span class="s2">.</span><span class="s1">_values</span><span class="s2">)</span>
+                <span class="s2">| (</span><span class="s1">new_data </span><span class="s2">&gt; </span><span class="s1">self</span><span class="s2">.</span><span class="s1">min_stamp</span><span class="s2">)</span>
+                <span class="s2">| (</span><span class="s1">new_data</span><span class="s2">.</span><span class="s1">_values </span><span class="s2">== </span><span class="s1">iNaT</span><span class="s2">)</span>
+            <span class="s2">)</span>
+            <span class="s0">if not </span><span class="s1">in_range</span><span class="s2">.</span><span class="s1">all</span><span class="s2">():</span>
+                <span class="s0">return </span><span class="s1">data</span>
+
+        <span class="s0">if </span><span class="s1">new_data</span><span class="s2">.</span><span class="s1">dtype </span><span class="s2">== </span><span class="s3">&quot;string&quot;</span><span class="s2">:</span>
+            <span class="s0">with </span><span class="s1">warnings</span><span class="s2">.</span><span class="s1">catch_warnings</span><span class="s2">():</span>
+                <span class="s4"># ignore &quot;Could not infer format&quot; warnings from to_datetime</span>
+                <span class="s4"># which is incorrectly raised for non-date strings</span>
+                <span class="s1">warnings</span><span class="s2">.</span><span class="s1">simplefilter</span><span class="s2">(</span><span class="s3">&quot;ignore&quot;</span><span class="s2">, </span><span class="s1">UserWarning</span><span class="s2">)</span>
+                <span class="s0">for </span><span class="s1">format </span><span class="s0">in </span><span class="s2">(</span><span class="s0">None</span><span class="s2">, </span><span class="s3">&quot;iso8601&quot;</span><span class="s2">, </span><span class="s3">&quot;mixed&quot;</span><span class="s2">):</span>
+                    <span class="s0">try</span><span class="s2">:</span>
+                        <span class="s0">return </span><span class="s1">to_datetime</span><span class="s2">(</span><span class="s1">new_data</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">=</span><span class="s3">&quot;raise&quot;</span><span class="s2">, </span><span class="s1">format</span><span class="s2">=</span><span class="s1">format</span><span class="s2">)</span>
+                    <span class="s0">except </span><span class="s1">Exception</span><span class="s2">:</span>
+                        <span class="s0">pass</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s4"># numeric or mixed objects</span>
+            <span class="s1">date_units </span><span class="s2">= (</span><span class="s1">self</span><span class="s2">.</span><span class="s1">date_unit</span><span class="s2">,) </span><span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">date_unit </span><span class="s0">else </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_STAMP_UNITS</span>
+            <span class="s0">for </span><span class="s1">date_unit </span><span class="s0">in </span><span class="s1">date_units</span><span class="s2">:</span>
+                <span class="s0">try</span><span class="s2">:</span>
+                    <span class="s4"># In case of multiple possible units, infer the likely unit</span>
+                    <span class="s4"># based on the first unit for which the parsed dates fit</span>
+                    <span class="s4"># within the nanoseconds bounds</span>
+                    <span class="s4"># -&gt; do as_unit cast to ensure OutOfBounds error</span>
+                    <span class="s1">data </span><span class="s2">= </span><span class="s1">to_datetime</span><span class="s2">(</span><span class="s1">new_data</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">=</span><span class="s3">&quot;raise&quot;</span><span class="s2">, </span><span class="s1">unit</span><span class="s2">=</span><span class="s1">date_unit</span><span class="s2">)</span>
+                    <span class="s1">_ </span><span class="s2">= </span><span class="s1">data</span><span class="s2">.</span><span class="s1">dt</span><span class="s2">.</span><span class="s1">as_unit</span><span class="s2">(</span><span class="s3">&quot;ns&quot;</span><span class="s2">)</span>
+                    <span class="s0">break</span>
+                <span class="s0">except </span><span class="s1">OutOfBoundsDatetime</span><span class="s2">:</span>
+                    <span class="s0">continue</span>
+                <span class="s0">except </span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">OverflowError</span><span class="s2">, </span><span class="s1">TypeError</span><span class="s2">):</span>
+                    <span class="s0">pass</span>
+        <span class="s0">return </span><span class="s1">data</span>
+
+
+<span class="s0">class </span><span class="s1">SeriesParser</span><span class="s2">(</span><span class="s1">Parser</span><span class="s2">):</span>
+    <span class="s1">_default_orient </span><span class="s2">= </span><span class="s3">&quot;index&quot;</span>
+    <span class="s1">_split_keys </span><span class="s2">= (</span><span class="s3">&quot;name&quot;</span><span class="s2">, </span><span class="s3">&quot;index&quot;</span><span class="s2">, </span><span class="s3">&quot;data&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_parse</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Series</span><span class="s2">:</span>
+        <span class="s1">data </span><span class="s2">= </span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">json</span><span class="s2">, </span><span class="s1">precise_float</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">precise_float</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">orient </span><span class="s2">== </span><span class="s3">&quot;split&quot;</span><span class="s2">:</span>
+            <span class="s1">decoded </span><span class="s2">= {</span><span class="s1">str</span><span class="s2">(</span><span class="s1">k</span><span class="s2">): </span><span class="s1">v </span><span class="s0">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">v </span><span class="s0">in </span><span class="s1">data</span><span class="s2">.</span><span class="s1">items</span><span class="s2">()}</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">check_keys_split</span><span class="s2">(</span><span class="s1">decoded</span><span class="s2">)</span>
+            <span class="s0">return </span><span class="s1">Series</span><span class="s2">(**</span><span class="s1">decoded</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_try_convert_types</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">obj</span><span class="s2">: </span><span class="s1">Series</span><span class="s2">) </span><span class="s1">-&gt; Series</span><span class="s2">:</span>
+        <span class="s1">obj</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_try_convert_data</span><span class="s2">(</span><span class="s3">&quot;data&quot;</span><span class="s2">, </span><span class="s1">obj</span><span class="s2">, </span><span class="s1">convert_dates</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">convert_dates</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">obj</span>
+
+
+<span class="s0">class </span><span class="s1">FrameParser</span><span class="s2">(</span><span class="s1">Parser</span><span class="s2">):</span>
+    <span class="s1">_default_orient </span><span class="s2">= </span><span class="s3">&quot;columns&quot;</span>
+    <span class="s1">_split_keys </span><span class="s2">= (</span><span class="s3">&quot;columns&quot;</span><span class="s2">, </span><span class="s3">&quot;index&quot;</span><span class="s2">, </span><span class="s3">&quot;data&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_parse</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; DataFrame</span><span class="s2">:</span>
+        <span class="s1">json </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">json</span>
+        <span class="s1">orient </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">orient</span>
+
+        <span class="s0">if </span><span class="s1">orient </span><span class="s2">== </span><span class="s3">&quot;split&quot;</span><span class="s2">:</span>
+            <span class="s1">decoded </span><span class="s2">= {</span>
+                <span class="s1">str</span><span class="s2">(</span><span class="s1">k</span><span class="s2">): </span><span class="s1">v</span>
+                <span class="s0">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">v </span><span class="s0">in </span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">json</span><span class="s2">, </span><span class="s1">precise_float</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">precise_float</span><span class="s2">).</span><span class="s1">items</span><span class="s2">()</span>
+            <span class="s2">}</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">check_keys_split</span><span class="s2">(</span><span class="s1">decoded</span><span class="s2">)</span>
+            <span class="s1">orig_names </span><span class="s2">= [</span>
+                <span class="s2">(</span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">col</span><span class="s2">) </span><span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">col</span><span class="s2">, </span><span class="s1">list</span><span class="s2">) </span><span class="s0">else </span><span class="s1">col</span><span class="s2">)</span>
+                <span class="s0">for </span><span class="s1">col </span><span class="s0">in </span><span class="s1">decoded</span><span class="s2">[</span><span class="s3">&quot;columns&quot;</span><span class="s2">]</span>
+            <span class="s2">]</span>
+            <span class="s1">decoded</span><span class="s2">[</span><span class="s3">&quot;columns&quot;</span><span class="s2">] = </span><span class="s1">dedup_names</span><span class="s2">(</span>
+                <span class="s1">orig_names</span><span class="s2">,</span>
+                <span class="s1">is_potential_multi_index</span><span class="s2">(</span><span class="s1">orig_names</span><span class="s2">, </span><span class="s0">None</span><span class="s2">),</span>
+            <span class="s2">)</span>
+            <span class="s0">return </span><span class="s1">DataFrame</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">=</span><span class="s0">None</span><span class="s2">, **</span><span class="s1">decoded</span><span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">orient </span><span class="s2">== </span><span class="s3">&quot;index&quot;</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">DataFrame</span><span class="s2">.</span><span class="s1">from_dict</span><span class="s2">(</span>
+                <span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">json</span><span class="s2">, </span><span class="s1">precise_float</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">precise_float</span><span class="s2">),</span>
+                <span class="s1">dtype</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+                <span class="s1">orient</span><span class="s2">=</span><span class="s3">&quot;index&quot;</span><span class="s2">,</span>
+            <span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">orient </span><span class="s2">== </span><span class="s3">&quot;table&quot;</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">parse_table_schema</span><span class="s2">(</span><span class="s1">json</span><span class="s2">, </span><span class="s1">precise_float</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">precise_float</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s4"># includes orient == &quot;columns&quot;</span>
+            <span class="s0">return </span><span class="s1">DataFrame</span><span class="s2">(</span>
+                <span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">json</span><span class="s2">, </span><span class="s1">precise_float</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">precise_float</span><span class="s2">), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s0">None</span>
+            <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_try_convert_types</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">obj</span><span class="s2">: </span><span class="s1">DataFrame</span><span class="s2">) </span><span class="s1">-&gt; DataFrame</span><span class="s2">:</span>
+        <span class="s1">arrays </span><span class="s2">= []</span>
+        <span class="s0">for </span><span class="s1">col_label</span><span class="s2">, </span><span class="s1">series </span><span class="s0">in </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">items</span><span class="s2">():</span>
+            <span class="s1">result</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_try_convert_data</span><span class="s2">(</span>
+                <span class="s1">col_label</span><span class="s2">,</span>
+                <span class="s1">series</span><span class="s2">,</span>
+                <span class="s1">convert_dates</span><span class="s2">=</span><span class="s1">_should_convert_dates</span><span class="s2">(</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">convert_dates</span><span class="s2">,</span>
+                    <span class="s1">keep_default_dates</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">keep_default_dates</span><span class="s2">,</span>
+                    <span class="s1">col</span><span class="s2">=</span><span class="s1">col_label</span><span class="s2">,</span>
+                <span class="s2">),</span>
+            <span class="s2">)</span>
+            <span class="s1">arrays</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">result</span><span class="s2">.</span><span class="s1">array</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">DataFrame</span><span class="s2">.</span><span class="s1">_from_arrays</span><span class="s2">(</span>
+            <span class="s1">arrays</span><span class="s2">, </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">columns</span><span class="s2">, </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">index</span><span class="s2">, </span><span class="s1">verify_integrity</span><span class="s2">=</span><span class="s0">False</span>
+        <span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_should_convert_dates</span><span class="s2">(</span>
+    <span class="s1">convert_dates</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s1">list</span><span class="s2">[</span><span class="s1">str</span><span class="s2">],</span>
+    <span class="s1">keep_default_dates</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+    <span class="s1">col</span><span class="s2">: </span><span class="s1">Hashable</span><span class="s2">,</span>
+<span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s6">&quot;&quot;&quot; 
+    Return bool whether a DataFrame column should be cast to datetime. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">convert_dates </span><span class="s0">is False</span><span class="s2">:</span>
+        <span class="s4"># convert_dates=True means follow keep_default_dates</span>
+        <span class="s0">return False</span>
+    <span class="s0">elif not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">convert_dates</span><span class="s2">, </span><span class="s1">bool</span><span class="s2">) </span><span class="s0">and </span><span class="s1">col </span><span class="s0">in </span><span class="s1">set</span><span class="s2">(</span><span class="s1">convert_dates</span><span class="s2">):</span>
+        <span class="s0">return True</span>
+    <span class="s0">elif not </span><span class="s1">keep_default_dates</span><span class="s2">:</span>
+        <span class="s0">return False</span>
+    <span class="s0">elif not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">col</span><span class="s2">, </span><span class="s1">str</span><span class="s2">):</span>
+        <span class="s0">return False</span>
+    <span class="s1">col_lower </span><span class="s2">= </span><span class="s1">col</span><span class="s2">.</span><span class="s1">lower</span><span class="s2">()</span>
+    <span class="s0">if </span><span class="s2">(</span>
+        <span class="s1">col_lower</span><span class="s2">.</span><span class="s1">endswith</span><span class="s2">((</span><span class="s3">&quot;_at&quot;</span><span class="s2">, </span><span class="s3">&quot;_time&quot;</span><span class="s2">))</span>
+        <span class="s0">or </span><span class="s1">col_lower </span><span class="s0">in </span><span class="s2">{</span><span class="s3">&quot;modified&quot;</span><span class="s2">, </span><span class="s3">&quot;date&quot;</span><span class="s2">, </span><span class="s3">&quot;datetime&quot;</span><span class="s2">}</span>
+        <span class="s0">or </span><span class="s1">col_lower</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s3">&quot;timestamp&quot;</span><span class="s2">)</span>
+    <span class="s2">):</span>
+        <span class="s0">return True</span>
+    <span class="s0">return False</span>
+</pre>
+</body>
+</html>

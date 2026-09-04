@@ -1,0 +1,328 @@
+<html>
+<head>
+<title>numeric.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+numeric.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">numbers</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s2">,</span>
+    <span class="s1">Any</span><span class="s2">,</span>
+    <span class="s1">Self</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_config </span><span class="s0">import </span><span class="s1">is_nan_na</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_libs </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">lib</span><span class="s2">,</span>
+    <span class="s1">missing </span><span class="s0">as </span><span class="s1">libmissing</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">errors </span><span class="s0">import </span><span class="s1">AbstractMethodError</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">util</span><span class="s2">.</span><span class="s1">_decorators </span><span class="s0">import </span><span class="s1">cache_readonly</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">dtypes</span><span class="s2">.</span><span class="s1">common </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">is_integer_dtype</span><span class="s2">,</span>
+    <span class="s1">is_string_dtype</span><span class="s2">,</span>
+    <span class="s1">pandas_dtype</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">arrays</span><span class="s2">.</span><span class="s1">masked </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">BaseMaskedArray</span><span class="s2">,</span>
+    <span class="s1">BaseMaskedDtype</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s0">if </span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">collections</span><span class="s2">.</span><span class="s1">abc </span><span class="s0">import </span><span class="s2">(</span>
+        <span class="s1">Callable</span><span class="s2">,</span>
+        <span class="s1">Mapping</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+    <span class="s0">import </span><span class="s1">pyarrow</span>
+
+    <span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_typing </span><span class="s0">import </span><span class="s2">(</span>
+        <span class="s1">DtypeObj</span><span class="s2">,</span>
+        <span class="s1">npt</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+    <span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">dtypes</span><span class="s2">.</span><span class="s1">dtypes </span><span class="s0">import </span><span class="s1">ExtensionDtype</span>
+
+
+<span class="s0">class </span><span class="s1">NumericDtype</span><span class="s2">(</span><span class="s1">BaseMaskedDtype</span><span class="s2">):</span>
+    <span class="s1">_default_np_dtype</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span>
+    <span class="s1">_checker</span><span class="s2">: </span><span class="s1">Callable</span><span class="s2">[[</span><span class="s1">Any</span><span class="s2">], </span><span class="s1">bool</span><span class="s2">]  </span><span class="s3"># is_foo_dtype</span>
+
+    <span class="s0">def </span><span class="s1">__repr__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">name</span><span class="s0">}</span><span class="s4">Dtype()&quot;</span>
+
+    <span class="s2">@</span><span class="s1">cache_readonly</span>
+    <span class="s0">def </span><span class="s1">is_signed_integer</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">kind </span><span class="s2">== </span><span class="s4">&quot;i&quot;</span>
+
+    <span class="s2">@</span><span class="s1">cache_readonly</span>
+    <span class="s0">def </span><span class="s1">is_unsigned_integer</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">kind </span><span class="s2">== </span><span class="s4">&quot;u&quot;</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">_is_numeric</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s0">return True</span>
+
+    <span class="s0">def </span><span class="s1">__from_arrow__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">array</span><span class="s2">: </span><span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">Array </span><span class="s2">| </span><span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">ChunkedArray</span>
+    <span class="s2">) </span><span class="s1">-&gt; BaseMaskedArray</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Construct IntegerArray/FloatingArray from pyarrow Array/ChunkedArray. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">import </span><span class="s1">pyarrow</span>
+
+        <span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">arrays</span><span class="s2">.</span><span class="s1">arrow</span><span class="s2">.</span><span class="s1">_arrow_utils </span><span class="s0">import </span><span class="s2">(</span>
+            <span class="s1">pyarrow_array_to_numpy_and_mask</span><span class="s2">,</span>
+        <span class="s2">)</span>
+
+        <span class="s1">array_class </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">construct_array_type</span><span class="s2">()</span>
+
+        <span class="s1">pyarrow_type </span><span class="s2">= </span><span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">from_numpy_dtype</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">type</span><span class="s2">)</span>
+        <span class="s0">if not </span><span class="s1">array</span><span class="s2">.</span><span class="s1">type</span><span class="s2">.</span><span class="s1">equals</span><span class="s2">(</span><span class="s1">pyarrow_type</span><span class="s2">) </span><span class="s0">and not </span><span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">types</span><span class="s2">.</span><span class="s1">is_null</span><span class="s2">(</span>
+            <span class="s1">array</span><span class="s2">.</span><span class="s1">type</span>
+        <span class="s2">):</span>
+            <span class="s3"># test_from_arrow_type_error raise for string, but allow</span>
+            <span class="s3">#  through itemsize conversion GH#31896</span>
+            <span class="s1">rt_dtype </span><span class="s2">= </span><span class="s1">pandas_dtype</span><span class="s2">(</span><span class="s1">array</span><span class="s2">.</span><span class="s1">type</span><span class="s2">.</span><span class="s1">to_pandas_dtype</span><span class="s2">())</span>
+            <span class="s0">if </span><span class="s1">rt_dtype</span><span class="s2">.</span><span class="s1">kind </span><span class="s0">not in </span><span class="s4">&quot;iuf&quot;</span><span class="s2">:</span>
+                <span class="s3"># Could allow &quot;c&quot; or potentially disallow float&lt;-&gt;int conversion,</span>
+                <span class="s3">#  but at the moment we specifically test that uint&lt;-&gt;int works</span>
+                <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span>
+                    <span class="s4">f&quot;Expected array of </span><span class="s0">{</span><span class="s1">self</span><span class="s0">} </span><span class="s4">type, got </span><span class="s0">{</span><span class="s1">array</span><span class="s2">.</span><span class="s1">type</span><span class="s0">} </span><span class="s4">instead&quot;</span>
+                <span class="s2">)</span>
+
+            <span class="s1">array </span><span class="s2">= </span><span class="s1">array</span><span class="s2">.</span><span class="s1">cast</span><span class="s2">(</span><span class="s1">pyarrow_type</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">array</span><span class="s2">, </span><span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">ChunkedArray</span><span class="s2">):</span>
+            <span class="s1">array </span><span class="s2">= </span><span class="s1">array</span><span class="s2">.</span><span class="s1">combine_chunks</span><span class="s2">()</span>
+
+        <span class="s1">data</span><span class="s2">, </span><span class="s1">mask </span><span class="s2">= </span><span class="s1">pyarrow_array_to_numpy_and_mask</span><span class="s2">(</span><span class="s1">array</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">numpy_dtype</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">data</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">kind </span><span class="s2">== </span><span class="s4">&quot;f&quot; </span><span class="s0">and </span><span class="s1">is_nan_na</span><span class="s2">():</span>
+            <span class="s1">mask</span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">isnan</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)] = </span><span class="s0">False</span>
+        <span class="s0">return </span><span class="s1">array_class</span><span class="s2">(</span><span class="s1">data</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">(), ~</span><span class="s1">mask</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">_get_dtype_mapping</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">) </span><span class="s1">-&gt; Mapping</span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">NumericDtype</span><span class="s2">]:</span>
+        <span class="s0">raise </span><span class="s1">AbstractMethodError</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">_standardize_dtype</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">: </span><span class="s1">NumericDtype </span><span class="s2">| </span><span class="s1">str </span><span class="s2">| </span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">) </span><span class="s1">-&gt; NumericDtype</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Convert a string representation or a numpy dtype to NumericDtype. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">str</span><span class="s2">) </span><span class="s0">and </span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">((</span><span class="s4">&quot;Int&quot;</span><span class="s2">, </span><span class="s4">&quot;UInt&quot;</span><span class="s2">, </span><span class="s4">&quot;Float&quot;</span><span class="s2">))):</span>
+            <span class="s3"># Avoid DeprecationWarning from NumPy about np.dtype(&quot;Int64&quot;)</span>
+            <span class="s3"># https://github.com/numpy/numpy/pull/7476</span>
+            <span class="s1">dtype </span><span class="s2">= </span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">lower</span><span class="s2">()</span>
+
+        <span class="s0">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">NumericDtype</span><span class="s2">):</span>
+            <span class="s1">mapping </span><span class="s2">= </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_get_dtype_mapping</span><span class="s2">()</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">dtype </span><span class="s2">= </span><span class="s1">mapping</span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)]</span>
+            <span class="s0">except </span><span class="s1">KeyError </span><span class="s0">as </span><span class="s1">err</span><span class="s2">:</span>
+                <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s4">f&quot;invalid dtype specified </span><span class="s0">{</span><span class="s1">dtype</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">) </span><span class="s0">from </span><span class="s1">err</span>
+        <span class="s0">return </span><span class="s1">dtype</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">_safe_cast</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">values</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">) </span><span class="s1">-&gt; np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Safely cast the values to the given dtype. 
+ 
+        &quot;safe&quot; in this context means the casting is lossless. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">raise </span><span class="s1">AbstractMethodError</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_coerce_to_data_and_mask</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">, </span><span class="s1">dtype_cls</span><span class="s2">: </span><span class="s1">type</span><span class="s2">[</span><span class="s1">NumericDtype</span><span class="s2">]):</span>
+    <span class="s1">checker </span><span class="s2">= </span><span class="s1">dtype_cls</span><span class="s2">.</span><span class="s1">_checker</span>
+    <span class="s1">default_dtype </span><span class="s2">= </span><span class="s1">dtype_cls</span><span class="s2">.</span><span class="s1">_default_np_dtype</span>
+
+    <span class="s1">mask </span><span class="s2">= </span><span class="s0">None</span>
+    <span class="s1">inferred_type </span><span class="s2">= </span><span class="s0">None</span>
+
+    <span class="s0">if </span><span class="s1">dtype </span><span class="s0">is None and </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s4">&quot;dtype&quot;</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">checker</span><span class="s2">(</span><span class="s1">values</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">):</span>
+            <span class="s1">dtype </span><span class="s2">= </span><span class="s1">values</span><span class="s2">.</span><span class="s1">dtype</span>
+
+    <span class="s0">if </span><span class="s1">dtype </span><span class="s0">is not None</span><span class="s2">:</span>
+        <span class="s1">dtype </span><span class="s2">= </span><span class="s1">dtype_cls</span><span class="s2">.</span><span class="s1">_standardize_dtype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+
+    <span class="s1">cls </span><span class="s2">= </span><span class="s1">dtype_cls</span><span class="s2">().</span><span class="s1">construct_array_type</span><span class="s2">()</span>
+    <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s1">cls</span><span class="s2">):</span>
+        <span class="s1">values</span><span class="s2">, </span><span class="s1">mask </span><span class="s2">= </span><span class="s1">values</span><span class="s2">.</span><span class="s1">_data</span><span class="s2">, </span><span class="s1">values</span><span class="s2">.</span><span class="s1">_mask</span>
+        <span class="s0">if </span><span class="s1">dtype </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s1">values </span><span class="s2">= </span><span class="s1">values</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">numpy_dtype</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">copy</span><span class="s2">:</span>
+            <span class="s1">values </span><span class="s2">= </span><span class="s1">values</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+            <span class="s1">mask </span><span class="s2">= </span><span class="s1">mask</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s1">values</span><span class="s2">, </span><span class="s1">mask</span>
+
+    <span class="s1">original </span><span class="s2">= </span><span class="s1">values</span>
+    <span class="s0">if not </span><span class="s1">copy</span><span class="s2">:</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">asarray</span><span class="s2">(</span><span class="s1">values</span><span class="s2">)</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s1">copy</span><span class="s2">)</span>
+    <span class="s1">inferred_type </span><span class="s2">= </span><span class="s0">None</span>
+    <span class="s0">if </span><span class="s1">values</span><span class="s2">.</span><span class="s1">dtype </span><span class="s2">== </span><span class="s1">object </span><span class="s0">or </span><span class="s1">is_string_dtype</span><span class="s2">(</span><span class="s1">values</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">):</span>
+        <span class="s1">inferred_type </span><span class="s2">= </span><span class="s1">lib</span><span class="s2">.</span><span class="s1">infer_dtype</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s1">skipna</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">inferred_type </span><span class="s2">== </span><span class="s4">&quot;boolean&quot; </span><span class="s0">and </span><span class="s1">dtype </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s3"># object dtype array of bools</span>
+            <span class="s1">name </span><span class="s2">= </span><span class="s1">dtype_cls</span><span class="s2">.</span><span class="s1">__name__</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">(</span><span class="s4">&quot;_&quot;</span><span class="s2">)</span>
+            <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">values</span><span class="s2">.</span><span class="s1">dtype</span><span class="s0">} </span><span class="s4">cannot be converted to </span><span class="s0">{</span><span class="s1">name</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">elif </span><span class="s1">values</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">kind </span><span class="s2">== </span><span class="s4">&quot;b&quot; </span><span class="s0">and </span><span class="s1">checker</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">):</span>
+        <span class="s3"># fastpath</span>
+        <span class="s1">mask </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">values</span><span class="s2">), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">bool_</span><span class="s2">)</span>
+        <span class="s0">if not </span><span class="s1">copy</span><span class="s2">:</span>
+            <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">asarray</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">default_dtype</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">default_dtype</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s1">copy</span><span class="s2">)</span>
+
+    <span class="s0">elif </span><span class="s1">values</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">kind </span><span class="s0">not in </span><span class="s4">&quot;iuf&quot;</span><span class="s2">:</span>
+        <span class="s1">name </span><span class="s2">= </span><span class="s1">dtype_cls</span><span class="s2">.</span><span class="s1">__name__</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">(</span><span class="s4">&quot;_&quot;</span><span class="s2">)</span>
+        <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">values</span><span class="s2">.</span><span class="s1">dtype</span><span class="s0">} </span><span class="s4">cannot be converted to </span><span class="s0">{</span><span class="s1">name</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">values</span><span class="s2">.</span><span class="s1">ndim </span><span class="s2">!= </span><span class="s6">1</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span><span class="s4">&quot;values must be a 1D list-like&quot;</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">mask </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">values</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">kind </span><span class="s0">in </span><span class="s4">&quot;iu&quot;</span><span class="s2">:</span>
+            <span class="s3"># fastpath</span>
+            <span class="s1">mask </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">values</span><span class="s2">), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">bool_</span><span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">values</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">kind </span><span class="s2">== </span><span class="s4">&quot;f&quot;</span><span class="s2">:</span>
+            <span class="s3"># np.isnan is faster than is_numeric_na() for floats</span>
+            <span class="s3"># github issue: #60066</span>
+            <span class="s0">if </span><span class="s1">is_nan_na</span><span class="s2">():</span>
+                <span class="s1">mask </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">isnan</span><span class="s2">(</span><span class="s1">values</span><span class="s2">)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">mask </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">values</span><span class="s2">), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">bool_</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s1">dtype_cls</span><span class="s2">.</span><span class="s1">__name__</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">(</span><span class="s4">&quot;_&quot;</span><span class="s2">).</span><span class="s1">startswith</span><span class="s2">((</span><span class="s4">&quot;I&quot;</span><span class="s2">, </span><span class="s4">&quot;U&quot;</span><span class="s2">)):</span>
+                    <span class="s1">wrong </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">isnan</span><span class="s2">(</span><span class="s1">values</span><span class="s2">)</span>
+                    <span class="s0">if </span><span class="s1">wrong</span><span class="s2">.</span><span class="s1">any</span><span class="s2">():</span>
+                        <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s4">&quot;Cannot cast NaN value to Integer dtype.&quot;</span><span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">is_nan_na</span><span class="s2">():</span>
+            <span class="s1">mask </span><span class="s2">= </span><span class="s1">libmissing</span><span class="s2">.</span><span class="s1">is_numeric_na</span><span class="s2">(</span><span class="s1">values</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s3"># is_numeric_na will raise on non-numeric NAs</span>
+            <span class="s1">libmissing</span><span class="s2">.</span><span class="s1">is_numeric_na</span><span class="s2">(</span><span class="s1">values</span><span class="s2">)</span>
+            <span class="s1">mask </span><span class="s2">= </span><span class="s1">libmissing</span><span class="s2">.</span><span class="s1">is_pdna_or_none</span><span class="s2">(</span><span class="s1">values</span><span class="s2">)</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">mask</span><span class="s2">) == </span><span class="s1">len</span><span class="s2">(</span><span class="s1">values</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">mask</span><span class="s2">.</span><span class="s1">ndim </span><span class="s2">!= </span><span class="s6">1</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span><span class="s4">&quot;mask must be a 1D list-like&quot;</span><span class="s2">)</span>
+
+    <span class="s3"># infer dtype if needed</span>
+    <span class="s0">if </span><span class="s1">dtype </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s1">dtype </span><span class="s2">= </span><span class="s1">default_dtype</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">dtype </span><span class="s2">= </span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">numpy_dtype</span>
+
+    <span class="s0">if </span><span class="s1">is_integer_dtype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">) </span><span class="s0">and </span><span class="s1">values</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">kind </span><span class="s2">== </span><span class="s4">&quot;f&quot; </span><span class="s0">and </span><span class="s1">len</span><span class="s2">(</span><span class="s1">values</span><span class="s2">) &gt; </span><span class="s6">0</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">mask</span><span class="s2">.</span><span class="s1">all</span><span class="s2">():</span>
+            <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s1">values</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">idx </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nanargmax</span><span class="s2">(</span><span class="s1">values</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">int</span><span class="s2">(</span><span class="s1">values</span><span class="s2">[</span><span class="s1">idx</span><span class="s2">]) != </span><span class="s1">original</span><span class="s2">[</span><span class="s1">idx</span><span class="s2">]:</span>
+                <span class="s3"># We have ints that lost precision during the cast.</span>
+                <span class="s1">inferred_type </span><span class="s2">= </span><span class="s1">lib</span><span class="s2">.</span><span class="s1">infer_dtype</span><span class="s2">(</span><span class="s1">original</span><span class="s2">, </span><span class="s1">skipna</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s2">(</span>
+                    <span class="s1">inferred_type </span><span class="s0">not in </span><span class="s2">[</span><span class="s4">&quot;floating&quot;</span><span class="s2">, </span><span class="s4">&quot;mixed-integer-float&quot;</span><span class="s2">]</span>
+                    <span class="s0">and not </span><span class="s1">mask</span><span class="s2">.</span><span class="s1">any</span><span class="s2">()</span>
+                <span class="s2">):</span>
+                    <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">asarray</span><span class="s2">(</span><span class="s1">original</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+                <span class="s0">else</span><span class="s2">:</span>
+                    <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">asarray</span><span class="s2">(</span><span class="s1">original</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s4">&quot;object&quot;</span><span class="s2">)</span>
+
+    <span class="s3"># we copy as need to coerce here</span>
+    <span class="s0">if </span><span class="s1">mask</span><span class="s2">.</span><span class="s1">any</span><span class="s2">():</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">values</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+        <span class="s1">values</span><span class="s2">[</span><span class="s1">mask</span><span class="s2">] = </span><span class="s1">dtype_cls</span><span class="s2">.</span><span class="s1">_internal_fill_value</span>
+    <span class="s0">if </span><span class="s1">inferred_type </span><span class="s0">in </span><span class="s2">(</span><span class="s4">&quot;string&quot;</span><span class="s2">, </span><span class="s4">&quot;unicode&quot;</span><span class="s2">):</span>
+        <span class="s3"># casts from str are always safe since they raise</span>
+        <span class="s3"># a ValueError if the str cannot be parsed into a float</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">values</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s1">copy</span><span class="s2">)</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">dtype_cls</span><span class="s2">.</span><span class="s1">_safe_cast</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">values</span><span class="s2">, </span><span class="s1">mask</span>
+
+
+<span class="s0">class </span><span class="s1">NumericArray</span><span class="s2">(</span><span class="s1">BaseMaskedArray</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Base class for IntegerArray and FloatingArray. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">_dtype_cls</span><span class="s2">: </span><span class="s1">type</span><span class="s2">[</span><span class="s1">NumericDtype</span><span class="s2">]</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">values</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">, </span><span class="s1">mask</span><span class="s2">: </span><span class="s1">npt</span><span class="s2">.</span><span class="s1">NDArray</span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">bool_</span><span class="s2">], </span><span class="s1">copy</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">checker </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_dtype_cls</span><span class="s2">.</span><span class="s1">_checker</span>
+        <span class="s0">if not </span><span class="s2">(</span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">) </span><span class="s0">and </span><span class="s1">checker</span><span class="s2">(</span><span class="s1">values</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">)):</span>
+            <span class="s1">descr </span><span class="s2">= (</span>
+                <span class="s4">&quot;floating&quot;</span>
+                <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_dtype_cls</span><span class="s2">.</span><span class="s1">kind </span><span class="s2">== </span><span class="s4">&quot;f&quot;  </span><span class="s3"># type: ignore[comparison-overlap]</span>
+                <span class="s0">else </span><span class="s4">&quot;integer&quot;</span>
+            <span class="s2">)</span>
+            <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span>
+                <span class="s4">f&quot;values should be </span><span class="s0">{</span><span class="s1">descr</span><span class="s0">} </span><span class="s4">numpy array. Use &quot;</span>
+                <span class="s4">&quot;the 'pd.array' function instead&quot;</span>
+            <span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">values</span><span class="s2">.</span><span class="s1">dtype </span><span class="s2">== </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float16</span><span class="s2">:</span>
+            <span class="s3"># If we don't raise here, then accessing self.dtype would raise</span>
+            <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span><span class="s4">&quot;FloatingArray does not support np.float16 dtype.&quot;</span><span class="s2">)</span>
+
+        <span class="s3"># NB: if is_nan_na() is True</span>
+        <span class="s3">#  then caller is responsible for ensuring</span>
+        <span class="s3">#  assert mask[np.isnan(values)].all()</span>
+
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s1">mask</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s1">copy</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">cache_readonly</span>
+    <span class="s0">def </span><span class="s1">dtype</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; NumericDtype</span><span class="s2">:</span>
+        <span class="s1">mapping </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_dtype_cls</span><span class="s2">.</span><span class="s1">_get_dtype_mapping</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s1">mapping</span><span class="s2">[</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_data</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">]</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">_coerce_to_array</span><span class="s2">(</span>
+        <span class="s1">cls</span><span class="s2">, </span><span class="s1">value</span><span class="s2">, *, </span><span class="s1">dtype</span><span class="s2">: </span><span class="s1">DtypeObj</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span>
+    <span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">]:</span>
+        <span class="s1">dtype_cls </span><span class="s2">= </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_dtype_cls</span>
+        <span class="s1">values</span><span class="s2">, </span><span class="s1">mask </span><span class="s2">= </span><span class="s1">_coerce_to_data_and_mask</span><span class="s2">(</span><span class="s1">value</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">, </span><span class="s1">dtype_cls</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">values</span><span class="s2">, </span><span class="s1">mask</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">_from_sequence_of_strings</span><span class="s2">(</span>
+        <span class="s1">cls</span><span class="s2">, </span><span class="s1">strings</span><span class="s2">, *, </span><span class="s1">dtype</span><span class="s2">: </span><span class="s1">ExtensionDtype</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span>
+    <span class="s2">) </span><span class="s1">-&gt; Self</span><span class="s2">:</span>
+        <span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">tools</span><span class="s2">.</span><span class="s1">numeric </span><span class="s0">import </span><span class="s1">to_numeric</span>
+
+        <span class="s1">scalars </span><span class="s2">= </span><span class="s1">to_numeric</span><span class="s2">(</span><span class="s1">strings</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">=</span><span class="s4">&quot;raise&quot;</span><span class="s2">, </span><span class="s1">dtype_backend</span><span class="s2">=</span><span class="s4">&quot;numpy_nullable&quot;</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_from_sequence</span><span class="s2">(</span><span class="s1">scalars</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s1">copy</span><span class="s2">)</span>
+
+    <span class="s1">_HANDLED_TYPES </span><span class="s2">= (</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">, </span><span class="s1">numbers</span><span class="s2">.</span><span class="s1">Number</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

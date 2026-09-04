@@ -1,0 +1,402 @@
+<html>
+<head>
+<title>test_tz_localize.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_tz_localize.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">datetime </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">datetime</span><span class="s2">,</span>
+    <span class="s1">timedelta</span><span class="s2">,</span>
+    <span class="s1">timezone</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">zoneinfo </span><span class="s0">import </span><span class="s1">ZoneInfo</span>
+
+<span class="s0">import </span><span class="s1">dateutil</span><span class="s2">.</span><span class="s1">tz</span>
+<span class="s0">from </span><span class="s1">dateutil</span><span class="s2">.</span><span class="s1">tz </span><span class="s0">import </span><span class="s1">gettz</span>
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">from </span><span class="s1">pandas </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">DatetimeIndex</span><span class="s2">,</span>
+    <span class="s1">Timestamp</span><span class="s2">,</span>
+    <span class="s1">bdate_range</span><span class="s2">,</span>
+    <span class="s1">date_range</span><span class="s2">,</span>
+    <span class="s1">offsets</span><span class="s2">,</span>
+    <span class="s1">to_datetime</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">import </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_testing </span><span class="s0">as </span><span class="s1">tm</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">fixture</span><span class="s2">(</span><span class="s1">params</span><span class="s2">=[</span><span class="s3">&quot;pytz/US/Eastern&quot;</span><span class="s2">, </span><span class="s1">gettz</span><span class="s2">(</span><span class="s3">&quot;US/Eastern&quot;</span><span class="s2">), </span><span class="s1">ZoneInfo</span><span class="s2">(</span><span class="s3">&quot;US/Eastern&quot;</span><span class="s2">)])</span>
+<span class="s0">def </span><span class="s1">tz</span><span class="s2">(</span><span class="s1">request</span><span class="s2">):</span>
+    <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">request</span><span class="s2">.</span><span class="s1">param</span><span class="s2">, </span><span class="s1">str</span><span class="s2">) </span><span class="s0">and </span><span class="s1">request</span><span class="s2">.</span><span class="s1">param</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s3">&quot;pytz/&quot;</span><span class="s2">):</span>
+        <span class="s1">pytz </span><span class="s2">= </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">importorskip</span><span class="s2">(</span><span class="s3">&quot;pytz&quot;</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">pytz</span><span class="s2">.</span><span class="s1">timezone</span><span class="s2">(</span><span class="s1">request</span><span class="s2">.</span><span class="s1">param</span><span class="s2">.</span><span class="s1">removeprefix</span><span class="s2">(</span><span class="s3">&quot;pytz/&quot;</span><span class="s2">))</span>
+    <span class="s0">return </span><span class="s1">request</span><span class="s2">.</span><span class="s1">param</span>
+
+
+<span class="s0">class </span><span class="s1">TestTZLocalize</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">test_tz_localize_invalidates_freq</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s4"># we only preserve freq in unambiguous cases</span>
+
+        <span class="s4"># if localized to US/Eastern, this crosses a DST transition</span>
+        <span class="s1">dti </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span><span class="s3">&quot;2014-03-08 23:00&quot;</span><span class="s2">, </span><span class="s3">&quot;2014-03-09 09:00&quot;</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">=</span><span class="s3">&quot;h&quot;</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">dti</span><span class="s2">.</span><span class="s1">freq </span><span class="s2">== </span><span class="s3">&quot;h&quot;</span>
+
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">dti</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s0">None</span><span class="s2">)  </span><span class="s4"># no-op</span>
+        <span class="s0">assert </span><span class="s1">result</span><span class="s2">.</span><span class="s1">freq </span><span class="s2">== </span><span class="s3">&quot;h&quot;</span>
+
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">dti</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s3">&quot;UTC&quot;</span><span class="s2">)  </span><span class="s4"># unambiguous freq preservation</span>
+        <span class="s0">assert </span><span class="s1">result</span><span class="s2">.</span><span class="s1">freq </span><span class="s2">== </span><span class="s3">&quot;h&quot;</span>
+
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">dti</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s3">&quot;US/Eastern&quot;</span><span class="s2">, </span><span class="s1">nonexistent</span><span class="s2">=</span><span class="s3">&quot;shift_forward&quot;</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">result</span><span class="s2">.</span><span class="s1">freq </span><span class="s0">is None</span>
+        <span class="s0">assert </span><span class="s1">result</span><span class="s2">.</span><span class="s1">inferred_freq </span><span class="s0">is None  </span><span class="s4"># i.e. we are not _too_ strict here</span>
+
+        <span class="s4"># Case where we _can_ keep freq because we're length==1</span>
+        <span class="s1">dti2 </span><span class="s2">= </span><span class="s1">dti</span><span class="s2">[:</span><span class="s5">1</span><span class="s2">]</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">dti2</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s3">&quot;US/Eastern&quot;</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">result</span><span class="s2">.</span><span class="s1">freq </span><span class="s2">== </span><span class="s3">&quot;h&quot;</span>
+
+    <span class="s0">def </span><span class="s1">test_tz_localize_utc_copies</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">utc_fixture</span><span class="s2">):</span>
+        <span class="s4"># GH#46460</span>
+        <span class="s1">times </span><span class="s2">= [</span><span class="s3">&quot;2015-03-08 01:00&quot;</span><span class="s2">, </span><span class="s3">&quot;2015-03-08 02:00&quot;</span><span class="s2">, </span><span class="s3">&quot;2015-03-08 03:00&quot;</span><span class="s2">]</span>
+        <span class="s1">index </span><span class="s2">= </span><span class="s1">DatetimeIndex</span><span class="s2">(</span><span class="s1">times</span><span class="s2">)</span>
+
+        <span class="s1">res </span><span class="s2">= </span><span class="s1">index</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">utc_fixture</span><span class="s2">)</span>
+        <span class="s0">assert not </span><span class="s1">tm</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">res</span><span class="s2">, </span><span class="s1">index</span><span class="s2">)</span>
+
+        <span class="s1">res2 </span><span class="s2">= </span><span class="s1">index</span><span class="s2">.</span><span class="s1">_data</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">utc_fixture</span><span class="s2">)</span>
+        <span class="s0">assert not </span><span class="s1">tm</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">index</span><span class="s2">.</span><span class="s1">_data</span><span class="s2">, </span><span class="s1">res2</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_dti_tz_localize_nonexistent_raise_coerce</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s4"># GH#13057</span>
+        <span class="s1">times </span><span class="s2">= [</span><span class="s3">&quot;2015-03-08 01:00&quot;</span><span class="s2">, </span><span class="s3">&quot;2015-03-08 02:00&quot;</span><span class="s2">, </span><span class="s3">&quot;2015-03-08 03:00&quot;</span><span class="s2">]</span>
+        <span class="s1">index </span><span class="s2">= </span><span class="s1">DatetimeIndex</span><span class="s2">(</span><span class="s1">times</span><span class="s2">)</span>
+        <span class="s1">tz </span><span class="s2">= </span><span class="s3">&quot;US/Eastern&quot;</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s3">&quot;|&quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">times</span><span class="s2">)):</span>
+            <span class="s1">index</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">=</span><span class="s1">tz</span><span class="s2">)</span>
+
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s3">&quot;|&quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">times</span><span class="s2">)):</span>
+            <span class="s1">index</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">=</span><span class="s1">tz</span><span class="s2">, </span><span class="s1">nonexistent</span><span class="s2">=</span><span class="s3">&quot;raise&quot;</span><span class="s2">)</span>
+
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">index</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">=</span><span class="s1">tz</span><span class="s2">, </span><span class="s1">nonexistent</span><span class="s2">=</span><span class="s3">&quot;NaT&quot;</span><span class="s2">)</span>
+        <span class="s1">test_times </span><span class="s2">= [</span><span class="s3">&quot;2015-03-08 01:00-05:00&quot;</span><span class="s2">, </span><span class="s3">&quot;NaT&quot;</span><span class="s2">, </span><span class="s3">&quot;2015-03-08 03:00-04:00&quot;</span><span class="s2">]</span>
+        <span class="s1">dti </span><span class="s2">= </span><span class="s1">to_datetime</span><span class="s2">(</span><span class="s1">test_times</span><span class="s2">, </span><span class="s1">utc</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">dti</span><span class="s2">.</span><span class="s1">tz_convert</span><span class="s2">(</span><span class="s3">&quot;US/Eastern&quot;</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_dti_tz_localize_ambiguous_infer</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">):</span>
+        <span class="s4"># November 6, 2011, fall back, repeat 2 AM hour</span>
+        <span class="s4"># With no repeated hours, we cannot infer the transition</span>
+        <span class="s1">dr </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span><span class="s1">datetime</span><span class="s2">(</span><span class="s5">2011</span><span class="s2">, </span><span class="s5">11</span><span class="s2">, </span><span class="s5">6</span><span class="s2">, </span><span class="s5">0</span><span class="s2">), </span><span class="s1">periods</span><span class="s2">=</span><span class="s5">5</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">=</span><span class="s1">offsets</span><span class="s2">.</span><span class="s1">Hour</span><span class="s2">())</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s3">&quot;Cannot infer dst time&quot;</span><span class="s2">):</span>
+            <span class="s1">dr</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_dti_tz_localize_ambiguous_infer2</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">, </span><span class="s1">unit</span><span class="s2">):</span>
+        <span class="s4"># With repeated hours, we can infer the transition</span>
+        <span class="s1">dr </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span>
+            <span class="s1">datetime</span><span class="s2">(</span><span class="s5">2011</span><span class="s2">, </span><span class="s5">11</span><span class="s2">, </span><span class="s5">6</span><span class="s2">, </span><span class="s5">0</span><span class="s2">), </span><span class="s1">periods</span><span class="s2">=</span><span class="s5">5</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">=</span><span class="s1">offsets</span><span class="s2">.</span><span class="s1">Hour</span><span class="s2">(), </span><span class="s1">tz</span><span class="s2">=</span><span class="s1">tz</span><span class="s2">, </span><span class="s1">unit</span><span class="s2">=</span><span class="s1">unit</span>
+        <span class="s2">)</span>
+        <span class="s1">times </span><span class="s2">= [</span>
+            <span class="s3">&quot;11/06/2011 00:00&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;11/06/2011 01:00&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;11/06/2011 01:00&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;11/06/2011 02:00&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;11/06/2011 03:00&quot;</span><span class="s2">,</span>
+        <span class="s2">]</span>
+        <span class="s1">di </span><span class="s2">= </span><span class="s1">DatetimeIndex</span><span class="s2">(</span><span class="s1">times</span><span class="s2">).</span><span class="s1">as_unit</span><span class="s2">(</span><span class="s1">unit</span><span class="s2">)</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">di</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">, </span><span class="s1">ambiguous</span><span class="s2">=</span><span class="s3">&quot;infer&quot;</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">dr</span><span class="s2">.</span><span class="s1">_with_freq</span><span class="s2">(</span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+        <span class="s1">result2 </span><span class="s2">= </span><span class="s1">DatetimeIndex</span><span class="s2">(</span><span class="s1">times</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">=</span><span class="s1">tz</span><span class="s2">, </span><span class="s1">ambiguous</span><span class="s2">=</span><span class="s3">&quot;infer&quot;</span><span class="s2">).</span><span class="s1">as_unit</span><span class="s2">(</span><span class="s1">unit</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">result2</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_dti_tz_localize_ambiguous_infer3</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">):</span>
+        <span class="s4"># When there is no dst transition, nothing special happens</span>
+        <span class="s1">dr </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span><span class="s1">datetime</span><span class="s2">(</span><span class="s5">2011</span><span class="s2">, </span><span class="s5">6</span><span class="s2">, </span><span class="s5">1</span><span class="s2">, </span><span class="s5">0</span><span class="s2">), </span><span class="s1">periods</span><span class="s2">=</span><span class="s5">10</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">=</span><span class="s1">offsets</span><span class="s2">.</span><span class="s1">Hour</span><span class="s2">())</span>
+        <span class="s1">localized </span><span class="s2">= </span><span class="s1">dr</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">)</span>
+        <span class="s1">localized_infer </span><span class="s2">= </span><span class="s1">dr</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">, </span><span class="s1">ambiguous</span><span class="s2">=</span><span class="s3">&quot;infer&quot;</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">localized</span><span class="s2">, </span><span class="s1">localized_infer</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_dti_tz_localize_ambiguous_times</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">):</span>
+        <span class="s4"># March 13, 2011, spring forward, skip from 2 AM to 3 AM</span>
+        <span class="s1">dr </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span><span class="s1">datetime</span><span class="s2">(</span><span class="s5">2011</span><span class="s2">, </span><span class="s5">3</span><span class="s2">, </span><span class="s5">13</span><span class="s2">, </span><span class="s5">1</span><span class="s2">, </span><span class="s5">30</span><span class="s2">), </span><span class="s1">periods</span><span class="s2">=</span><span class="s5">3</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">=</span><span class="s1">offsets</span><span class="s2">.</span><span class="s1">Hour</span><span class="s2">())</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s3">&quot;2011-03-13 02:30:00&quot;</span><span class="s2">):</span>
+            <span class="s1">dr</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">)</span>
+
+        <span class="s4"># after dst transition, it works</span>
+        <span class="s1">dr </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span>
+            <span class="s1">datetime</span><span class="s2">(</span><span class="s5">2011</span><span class="s2">, </span><span class="s5">3</span><span class="s2">, </span><span class="s5">13</span><span class="s2">, </span><span class="s5">3</span><span class="s2">, </span><span class="s5">30</span><span class="s2">), </span><span class="s1">periods</span><span class="s2">=</span><span class="s5">3</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">=</span><span class="s1">offsets</span><span class="s2">.</span><span class="s1">Hour</span><span class="s2">(), </span><span class="s1">tz</span><span class="s2">=</span><span class="s1">tz</span>
+        <span class="s2">)</span>
+
+        <span class="s4"># November 6, 2011, fall back, repeat 2 AM hour</span>
+        <span class="s1">dr </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span><span class="s1">datetime</span><span class="s2">(</span><span class="s5">2011</span><span class="s2">, </span><span class="s5">11</span><span class="s2">, </span><span class="s5">6</span><span class="s2">, </span><span class="s5">1</span><span class="s2">, </span><span class="s5">30</span><span class="s2">), </span><span class="s1">periods</span><span class="s2">=</span><span class="s5">3</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">=</span><span class="s1">offsets</span><span class="s2">.</span><span class="s1">Hour</span><span class="s2">())</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s3">&quot;Cannot infer dst time&quot;</span><span class="s2">):</span>
+            <span class="s1">dr</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">)</span>
+
+        <span class="s4"># UTC is OK</span>
+        <span class="s1">dr </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span>
+            <span class="s1">datetime</span><span class="s2">(</span><span class="s5">2011</span><span class="s2">, </span><span class="s5">3</span><span class="s2">, </span><span class="s5">13</span><span class="s2">), </span><span class="s1">periods</span><span class="s2">=</span><span class="s5">48</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">=</span><span class="s1">offsets</span><span class="s2">.</span><span class="s1">Minute</span><span class="s2">(</span><span class="s5">30</span><span class="s2">), </span><span class="s1">tz</span><span class="s2">=</span><span class="s1">timezone</span><span class="s2">.</span><span class="s1">utc</span>
+        <span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s3">&quot;tzstr&quot;</span><span class="s2">, [</span><span class="s3">&quot;US/Eastern&quot;</span><span class="s2">, </span><span class="s3">&quot;dateutil/US/Eastern&quot;</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_dti_tz_localize_pass_dates_to_utc</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tzstr</span><span class="s2">):</span>
+        <span class="s1">strdates </span><span class="s2">= [</span><span class="s3">&quot;1/1/2012&quot;</span><span class="s2">, </span><span class="s3">&quot;3/1/2012&quot;</span><span class="s2">, </span><span class="s3">&quot;4/1/2012&quot;</span><span class="s2">]</span>
+
+        <span class="s1">idx </span><span class="s2">= </span><span class="s1">DatetimeIndex</span><span class="s2">(</span><span class="s1">strdates</span><span class="s2">)</span>
+        <span class="s1">conv </span><span class="s2">= </span><span class="s1">idx</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tzstr</span><span class="s2">)</span>
+
+        <span class="s1">fromdates </span><span class="s2">= </span><span class="s1">DatetimeIndex</span><span class="s2">(</span><span class="s1">strdates</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">=</span><span class="s1">tzstr</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">conv</span><span class="s2">.</span><span class="s1">tz </span><span class="s2">== </span><span class="s1">fromdates</span><span class="s2">.</span><span class="s1">tz</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">conv</span><span class="s2">.</span><span class="s1">values</span><span class="s2">, </span><span class="s1">fromdates</span><span class="s2">.</span><span class="s1">values</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s3">&quot;prefix&quot;</span><span class="s2">, [</span><span class="s3">&quot;&quot;</span><span class="s2">, </span><span class="s3">&quot;dateutil/&quot;</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_dti_tz_localize</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">prefix</span><span class="s2">):</span>
+        <span class="s1">tzstr </span><span class="s2">= </span><span class="s1">prefix </span><span class="s2">+ </span><span class="s3">&quot;US/Eastern&quot;</span>
+        <span class="s1">dti </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span><span class="s1">start</span><span class="s2">=</span><span class="s3">&quot;1/1/2005&quot;</span><span class="s2">, </span><span class="s1">end</span><span class="s2">=</span><span class="s3">&quot;1/1/2005 0:00:02.256&quot;</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">=</span><span class="s3">&quot;ms&quot;</span><span class="s2">)</span>
+        <span class="s1">dti2 </span><span class="s2">= </span><span class="s1">dti</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tzstr</span><span class="s2">)</span>
+
+        <span class="s1">dti_utc </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span>
+            <span class="s1">start</span><span class="s2">=</span><span class="s3">&quot;1/1/2005 05:00&quot;</span><span class="s2">, </span><span class="s1">end</span><span class="s2">=</span><span class="s3">&quot;1/1/2005 5:00:02.256&quot;</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">=</span><span class="s3">&quot;ms&quot;</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">=</span><span class="s3">&quot;utc&quot;</span>
+        <span class="s2">)</span>
+
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">dti2</span><span class="s2">.</span><span class="s1">values</span><span class="s2">, </span><span class="s1">dti_utc</span><span class="s2">.</span><span class="s1">values</span><span class="s2">)</span>
+
+        <span class="s1">dti3 </span><span class="s2">= </span><span class="s1">dti2</span><span class="s2">.</span><span class="s1">tz_convert</span><span class="s2">(</span><span class="s1">prefix </span><span class="s2">+ </span><span class="s3">&quot;US/Pacific&quot;</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">dti3</span><span class="s2">.</span><span class="s1">values</span><span class="s2">, </span><span class="s1">dti_utc</span><span class="s2">.</span><span class="s1">values</span><span class="s2">)</span>
+
+        <span class="s1">dti </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span><span class="s1">start</span><span class="s2">=</span><span class="s3">&quot;11/6/2011 1:59:59&quot;</span><span class="s2">, </span><span class="s1">end</span><span class="s2">=</span><span class="s3">&quot;11/6/2011 2:00&quot;</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">=</span><span class="s3">&quot;ms&quot;</span><span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s3">&quot;Cannot infer dst time&quot;</span><span class="s2">):</span>
+            <span class="s1">dti</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tzstr</span><span class="s2">)</span>
+
+        <span class="s1">dti </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span><span class="s1">start</span><span class="s2">=</span><span class="s3">&quot;3/13/2011 1:59:59&quot;</span><span class="s2">, </span><span class="s1">end</span><span class="s2">=</span><span class="s3">&quot;3/13/2011 2:00&quot;</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">=</span><span class="s3">&quot;ms&quot;</span><span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s3">&quot;2011-03-13 02:00:00&quot;</span><span class="s2">):</span>
+            <span class="s1">dti</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tzstr</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_dti_tz_localize_utc_conversion</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">):</span>
+        <span class="s4"># Localizing to time zone should:</span>
+        <span class="s4">#  1) check for DST ambiguities</span>
+        <span class="s4">#  2) convert to UTC</span>
+
+        <span class="s1">rng </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span><span class="s3">&quot;3/10/2012&quot;</span><span class="s2">, </span><span class="s3">&quot;3/11/2012&quot;</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">=</span><span class="s3">&quot;30min&quot;</span><span class="s2">)</span>
+
+        <span class="s1">converted </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">)</span>
+        <span class="s1">expected_naive </span><span class="s2">= </span><span class="s1">rng </span><span class="s2">+ </span><span class="s1">offsets</span><span class="s2">.</span><span class="s1">Hour</span><span class="s2">(</span><span class="s5">5</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">converted</span><span class="s2">.</span><span class="s1">asi8</span><span class="s2">, </span><span class="s1">expected_naive</span><span class="s2">.</span><span class="s1">asi8</span><span class="s2">)</span>
+
+        <span class="s4"># DST ambiguity, this should fail</span>
+        <span class="s1">rng </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span><span class="s3">&quot;3/11/2012&quot;</span><span class="s2">, </span><span class="s3">&quot;3/12/2012&quot;</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">=</span><span class="s3">&quot;30min&quot;</span><span class="s2">)</span>
+        <span class="s4"># Is this really how it should fail??</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s3">&quot;2012-03-11 02:00:00&quot;</span><span class="s2">):</span>
+            <span class="s1">rng</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_dti_tz_localize_roundtrip</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tz_aware_fixture</span><span class="s2">):</span>
+        <span class="s4"># note: this tz tests that a tz-naive index can be localized</span>
+        <span class="s4"># and de-localized successfully, when there are no DST transitions</span>
+        <span class="s4"># in the range.</span>
+        <span class="s1">idx </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span><span class="s1">start</span><span class="s2">=</span><span class="s3">&quot;2014-06-01&quot;</span><span class="s2">, </span><span class="s1">end</span><span class="s2">=</span><span class="s3">&quot;2014-08-30&quot;</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">=</span><span class="s3">&quot;15min&quot;</span><span class="s2">)</span>
+        <span class="s1">tz </span><span class="s2">= </span><span class="s1">tz_aware_fixture</span>
+        <span class="s1">localized </span><span class="s2">= </span><span class="s1">idx</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">)</span>
+        <span class="s4"># can't localize a tz-aware object</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span>
+            <span class="s1">TypeError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s3">&quot;Already tz-aware, use tz_convert to convert&quot;</span>
+        <span class="s2">):</span>
+            <span class="s1">localized</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">)</span>
+        <span class="s1">reset </span><span class="s2">= </span><span class="s1">localized</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">reset</span><span class="s2">.</span><span class="s1">tzinfo </span><span class="s0">is None</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">idx</span><span class="s2">.</span><span class="s1">_with_freq</span><span class="s2">(</span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">reset</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_dti_tz_localize_naive</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">rng </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span><span class="s3">&quot;1/1/2011&quot;</span><span class="s2">, </span><span class="s1">periods</span><span class="s2">=</span><span class="s5">100</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">=</span><span class="s3">&quot;h&quot;</span><span class="s2">)</span>
+
+        <span class="s1">conv </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s3">&quot;US/Pacific&quot;</span><span class="s2">)</span>
+        <span class="s1">exp </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span><span class="s3">&quot;1/1/2011&quot;</span><span class="s2">, </span><span class="s1">periods</span><span class="s2">=</span><span class="s5">100</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">=</span><span class="s3">&quot;h&quot;</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">=</span><span class="s3">&quot;US/Pacific&quot;</span><span class="s2">)</span>
+
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">conv</span><span class="s2">, </span><span class="s1">exp</span><span class="s2">.</span><span class="s1">_with_freq</span><span class="s2">(</span><span class="s0">None</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">test_dti_tz_localize_tzlocal</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s4"># GH#13583</span>
+        <span class="s1">offset </span><span class="s2">= </span><span class="s1">dateutil</span><span class="s2">.</span><span class="s1">tz</span><span class="s2">.</span><span class="s1">tzlocal</span><span class="s2">().</span><span class="s1">utcoffset</span><span class="s2">(</span><span class="s1">datetime</span><span class="s2">(</span><span class="s5">2011</span><span class="s2">, </span><span class="s5">1</span><span class="s2">, </span><span class="s5">1</span><span class="s2">))</span>
+        <span class="s1">offset </span><span class="s2">= </span><span class="s1">int</span><span class="s2">(</span><span class="s1">offset</span><span class="s2">.</span><span class="s1">total_seconds</span><span class="s2">() * </span><span class="s5">1000000000</span><span class="s2">)</span>
+
+        <span class="s1">dti </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span><span class="s1">start</span><span class="s2">=</span><span class="s3">&quot;2001-01-01&quot;</span><span class="s2">, </span><span class="s1">end</span><span class="s2">=</span><span class="s3">&quot;2001-03-01&quot;</span><span class="s2">, </span><span class="s1">unit</span><span class="s2">=</span><span class="s3">&quot;ns&quot;</span><span class="s2">)</span>
+        <span class="s1">dti2 </span><span class="s2">= </span><span class="s1">dti</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">dateutil</span><span class="s2">.</span><span class="s1">tz</span><span class="s2">.</span><span class="s1">tzlocal</span><span class="s2">())</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">dti2</span><span class="s2">.</span><span class="s1">asi8 </span><span class="s2">+ </span><span class="s1">offset</span><span class="s2">, </span><span class="s1">dti</span><span class="s2">.</span><span class="s1">asi8</span><span class="s2">)</span>
+
+        <span class="s1">dti </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span>
+            <span class="s1">start</span><span class="s2">=</span><span class="s3">&quot;2001-01-01&quot;</span><span class="s2">, </span><span class="s1">end</span><span class="s2">=</span><span class="s3">&quot;2001-03-01&quot;</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">=</span><span class="s1">dateutil</span><span class="s2">.</span><span class="s1">tz</span><span class="s2">.</span><span class="s1">tzlocal</span><span class="s2">(), </span><span class="s1">unit</span><span class="s2">=</span><span class="s3">&quot;ns&quot;</span>
+        <span class="s2">)</span>
+        <span class="s1">dti2 </span><span class="s2">= </span><span class="s1">dti</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">dti2</span><span class="s2">.</span><span class="s1">asi8 </span><span class="s2">- </span><span class="s1">offset</span><span class="s2">, </span><span class="s1">dti</span><span class="s2">.</span><span class="s1">asi8</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_dti_tz_localize_ambiguous_nat</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">):</span>
+        <span class="s1">times </span><span class="s2">= [</span>
+            <span class="s3">&quot;11/06/2011 00:00&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;11/06/2011 01:00&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;11/06/2011 01:00&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;11/06/2011 02:00&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;11/06/2011 03:00&quot;</span><span class="s2">,</span>
+        <span class="s2">]</span>
+        <span class="s1">di </span><span class="s2">= </span><span class="s1">DatetimeIndex</span><span class="s2">(</span><span class="s1">times</span><span class="s2">)</span>
+        <span class="s1">localized </span><span class="s2">= </span><span class="s1">di</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">, </span><span class="s1">ambiguous</span><span class="s2">=</span><span class="s3">&quot;NaT&quot;</span><span class="s2">)</span>
+
+        <span class="s1">times </span><span class="s2">= [</span>
+            <span class="s3">&quot;11/06/2011 00:00&quot;</span><span class="s2">,</span>
+            <span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">,</span>
+            <span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">,</span>
+            <span class="s3">&quot;11/06/2011 02:00&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;11/06/2011 03:00&quot;</span><span class="s2">,</span>
+        <span class="s2">]</span>
+        <span class="s1">di_test </span><span class="s2">= </span><span class="s1">DatetimeIndex</span><span class="s2">(</span><span class="s1">times</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">=</span><span class="s3">&quot;US/Eastern&quot;</span><span class="s2">)</span>
+
+        <span class="s4"># left dtype is datetime64[ns, US/Eastern]</span>
+        <span class="s4"># right is datetime64[ns, tzfile('/usr/share/zoneinfo/US/Eastern')]</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">di_test</span><span class="s2">.</span><span class="s1">values</span><span class="s2">, </span><span class="s1">localized</span><span class="s2">.</span><span class="s1">values</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_dti_tz_localize_ambiguous_flags</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">, </span><span class="s1">unit</span><span class="s2">):</span>
+        <span class="s4"># November 6, 2011, fall back, repeat 2 AM hour</span>
+
+        <span class="s4"># Pass in flags to determine right dst transition</span>
+        <span class="s1">dr </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span>
+            <span class="s1">datetime</span><span class="s2">(</span><span class="s5">2011</span><span class="s2">, </span><span class="s5">11</span><span class="s2">, </span><span class="s5">6</span><span class="s2">, </span><span class="s5">0</span><span class="s2">), </span><span class="s1">periods</span><span class="s2">=</span><span class="s5">5</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">=</span><span class="s1">offsets</span><span class="s2">.</span><span class="s1">Hour</span><span class="s2">(), </span><span class="s1">tz</span><span class="s2">=</span><span class="s1">tz</span><span class="s2">, </span><span class="s1">unit</span><span class="s2">=</span><span class="s1">unit</span>
+        <span class="s2">)</span>
+        <span class="s1">times </span><span class="s2">= [</span>
+            <span class="s3">&quot;11/06/2011 00:00&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;11/06/2011 01:00&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;11/06/2011 01:00&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;11/06/2011 02:00&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;11/06/2011 03:00&quot;</span><span class="s2">,</span>
+        <span class="s2">]</span>
+
+        <span class="s4"># Test tz_localize</span>
+        <span class="s1">di </span><span class="s2">= </span><span class="s1">DatetimeIndex</span><span class="s2">(</span><span class="s1">times</span><span class="s2">).</span><span class="s1">as_unit</span><span class="s2">(</span><span class="s1">unit</span><span class="s2">)</span>
+        <span class="s1">is_dst </span><span class="s2">= [</span><span class="s5">1</span><span class="s2">, </span><span class="s5">1</span><span class="s2">, </span><span class="s5">0</span><span class="s2">, </span><span class="s5">0</span><span class="s2">, </span><span class="s5">0</span><span class="s2">]</span>
+        <span class="s1">localized </span><span class="s2">= </span><span class="s1">di</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">, </span><span class="s1">ambiguous</span><span class="s2">=</span><span class="s1">is_dst</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">dr</span><span class="s2">.</span><span class="s1">_with_freq</span><span class="s2">(</span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">expected</span><span class="s2">, </span><span class="s1">localized</span><span class="s2">)</span>
+
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">DatetimeIndex</span><span class="s2">(</span><span class="s1">times</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">=</span><span class="s1">tz</span><span class="s2">, </span><span class="s1">ambiguous</span><span class="s2">=</span><span class="s1">is_dst</span><span class="s2">).</span><span class="s1">as_unit</span><span class="s2">(</span><span class="s1">unit</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+        <span class="s1">localized </span><span class="s2">= </span><span class="s1">di</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">, </span><span class="s1">ambiguous</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">is_dst</span><span class="s2">))</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">dr</span><span class="s2">, </span><span class="s1">localized</span><span class="s2">)</span>
+
+        <span class="s1">localized </span><span class="s2">= </span><span class="s1">di</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">, </span><span class="s1">ambiguous</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">is_dst</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s3">&quot;bool&quot;</span><span class="s2">))</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">dr</span><span class="s2">, </span><span class="s1">localized</span><span class="s2">)</span>
+
+        <span class="s4"># Test constructor</span>
+        <span class="s1">localized </span><span class="s2">= </span><span class="s1">DatetimeIndex</span><span class="s2">(</span><span class="s1">times</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">=</span><span class="s1">tz</span><span class="s2">, </span><span class="s1">ambiguous</span><span class="s2">=</span><span class="s1">is_dst</span><span class="s2">).</span><span class="s1">as_unit</span><span class="s2">(</span><span class="s1">unit</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">dr</span><span class="s2">, </span><span class="s1">localized</span><span class="s2">)</span>
+
+        <span class="s4"># Test duplicate times where inferring the dst fails</span>
+        <span class="s1">times </span><span class="s2">+= </span><span class="s1">times</span>
+        <span class="s1">di </span><span class="s2">= </span><span class="s1">DatetimeIndex</span><span class="s2">(</span><span class="s1">times</span><span class="s2">).</span><span class="s1">as_unit</span><span class="s2">(</span><span class="s1">unit</span><span class="s2">)</span>
+
+        <span class="s4"># When the sizes are incompatible, make sure error is raised</span>
+        <span class="s1">msg </span><span class="s2">= </span><span class="s3">&quot;Length of ambiguous bool-array must be the same size as vals&quot;</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">Exception</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">msg</span><span class="s2">):</span>
+            <span class="s1">di</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">, </span><span class="s1">ambiguous</span><span class="s2">=</span><span class="s1">is_dst</span><span class="s2">)</span>
+
+        <span class="s4"># When sizes are compatible and there are repeats ('infer' won't work)</span>
+        <span class="s1">is_dst </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">hstack</span><span class="s2">((</span><span class="s1">is_dst</span><span class="s2">, </span><span class="s1">is_dst</span><span class="s2">))</span>
+        <span class="s1">localized </span><span class="s2">= </span><span class="s1">di</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">, </span><span class="s1">ambiguous</span><span class="s2">=</span><span class="s1">is_dst</span><span class="s2">)</span>
+        <span class="s1">dr </span><span class="s2">= </span><span class="s1">dr</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">dr</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">dr</span><span class="s2">, </span><span class="s1">localized</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_dti_tz_localize_ambiguous_flags2</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">):</span>
+        <span class="s4"># When there is no dst transition, nothing special happens</span>
+        <span class="s1">dr </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span><span class="s1">datetime</span><span class="s2">(</span><span class="s5">2011</span><span class="s2">, </span><span class="s5">6</span><span class="s2">, </span><span class="s5">1</span><span class="s2">, </span><span class="s5">0</span><span class="s2">), </span><span class="s1">periods</span><span class="s2">=</span><span class="s5">10</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">=</span><span class="s1">offsets</span><span class="s2">.</span><span class="s1">Hour</span><span class="s2">())</span>
+        <span class="s1">is_dst </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s5">1</span><span class="s2">] * </span><span class="s5">10</span><span class="s2">)</span>
+        <span class="s1">localized </span><span class="s2">= </span><span class="s1">dr</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">)</span>
+        <span class="s1">localized_is_dst </span><span class="s2">= </span><span class="s1">dr</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">, </span><span class="s1">ambiguous</span><span class="s2">=</span><span class="s1">is_dst</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">localized</span><span class="s2">, </span><span class="s1">localized_is_dst</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_dti_tz_localize_bdate_range</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">dr </span><span class="s2">= </span><span class="s1">bdate_range</span><span class="s2">(</span><span class="s3">&quot;1/1/2009&quot;</span><span class="s2">, </span><span class="s3">&quot;1/1/2010&quot;</span><span class="s2">)</span>
+        <span class="s1">dr_utc </span><span class="s2">= </span><span class="s1">bdate_range</span><span class="s2">(</span><span class="s3">&quot;1/1/2009&quot;</span><span class="s2">, </span><span class="s3">&quot;1/1/2010&quot;</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">=</span><span class="s1">timezone</span><span class="s2">.</span><span class="s1">utc</span><span class="s2">)</span>
+        <span class="s1">localized </span><span class="s2">= </span><span class="s1">dr</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">timezone</span><span class="s2">.</span><span class="s1">utc</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">dr_utc</span><span class="s2">, </span><span class="s1">localized</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+        <span class="s3">&quot;start_ts, tz, end_ts, shift&quot;</span><span class="s2">,</span>
+        <span class="s2">[</span>
+            <span class="s2">[</span><span class="s3">&quot;2015-03-29 02:20:00&quot;</span><span class="s2">, </span><span class="s3">&quot;Europe/Warsaw&quot;</span><span class="s2">, </span><span class="s3">&quot;2015-03-29 03:00:00&quot;</span><span class="s2">, </span><span class="s3">&quot;forward&quot;</span><span class="s2">],</span>
+            <span class="s2">[</span>
+                <span class="s3">&quot;2015-03-29 02:20:00&quot;</span><span class="s2">,</span>
+                <span class="s3">&quot;Europe/Warsaw&quot;</span><span class="s2">,</span>
+                <span class="s3">&quot;2015-03-29 01:59:59.999999999&quot;</span><span class="s2">,</span>
+                <span class="s3">&quot;backward&quot;</span><span class="s2">,</span>
+            <span class="s2">],</span>
+            <span class="s2">[</span>
+                <span class="s3">&quot;2015-03-29 02:20:00&quot;</span><span class="s2">,</span>
+                <span class="s3">&quot;Europe/Warsaw&quot;</span><span class="s2">,</span>
+                <span class="s3">&quot;2015-03-29 03:20:00&quot;</span><span class="s2">,</span>
+                <span class="s1">timedelta</span><span class="s2">(</span><span class="s1">hours</span><span class="s2">=</span><span class="s5">1</span><span class="s2">),</span>
+            <span class="s2">],</span>
+            <span class="s2">[</span>
+                <span class="s3">&quot;2015-03-29 02:20:00&quot;</span><span class="s2">,</span>
+                <span class="s3">&quot;Europe/Warsaw&quot;</span><span class="s2">,</span>
+                <span class="s3">&quot;2015-03-29 01:20:00&quot;</span><span class="s2">,</span>
+                <span class="s1">timedelta</span><span class="s2">(</span><span class="s1">hours</span><span class="s2">=-</span><span class="s5">1</span><span class="s2">),</span>
+            <span class="s2">],</span>
+            <span class="s2">[</span><span class="s3">&quot;2018-03-11 02:33:00&quot;</span><span class="s2">, </span><span class="s3">&quot;US/Pacific&quot;</span><span class="s2">, </span><span class="s3">&quot;2018-03-11 03:00:00&quot;</span><span class="s2">, </span><span class="s3">&quot;forward&quot;</span><span class="s2">],</span>
+            <span class="s2">[</span>
+                <span class="s3">&quot;2018-03-11 02:33:00&quot;</span><span class="s2">,</span>
+                <span class="s3">&quot;US/Pacific&quot;</span><span class="s2">,</span>
+                <span class="s3">&quot;2018-03-11 01:59:59.999999999&quot;</span><span class="s2">,</span>
+                <span class="s3">&quot;backward&quot;</span><span class="s2">,</span>
+            <span class="s2">],</span>
+            <span class="s2">[</span>
+                <span class="s3">&quot;2018-03-11 02:33:00&quot;</span><span class="s2">,</span>
+                <span class="s3">&quot;US/Pacific&quot;</span><span class="s2">,</span>
+                <span class="s3">&quot;2018-03-11 03:33:00&quot;</span><span class="s2">,</span>
+                <span class="s1">timedelta</span><span class="s2">(</span><span class="s1">hours</span><span class="s2">=</span><span class="s5">1</span><span class="s2">),</span>
+            <span class="s2">],</span>
+            <span class="s2">[</span>
+                <span class="s3">&quot;2018-03-11 02:33:00&quot;</span><span class="s2">,</span>
+                <span class="s3">&quot;US/Pacific&quot;</span><span class="s2">,</span>
+                <span class="s3">&quot;2018-03-11 01:33:00&quot;</span><span class="s2">,</span>
+                <span class="s1">timedelta</span><span class="s2">(</span><span class="s1">hours</span><span class="s2">=-</span><span class="s5">1</span><span class="s2">),</span>
+            <span class="s2">],</span>
+        <span class="s2">],</span>
+    <span class="s2">)</span>
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s3">&quot;tz_type&quot;</span><span class="s2">, [</span><span class="s3">&quot;&quot;</span><span class="s2">, </span><span class="s3">&quot;dateutil/&quot;</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_dti_tz_localize_nonexistent_shift</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">start_ts</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">, </span><span class="s1">end_ts</span><span class="s2">, </span><span class="s1">shift</span><span class="s2">, </span><span class="s1">tz_type</span><span class="s2">, </span><span class="s1">unit</span>
+    <span class="s2">):</span>
+        <span class="s4"># GH#8917</span>
+        <span class="s1">tz </span><span class="s2">= </span><span class="s1">tz_type </span><span class="s2">+ </span><span class="s1">tz</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">shift</span><span class="s2">, </span><span class="s1">str</span><span class="s2">):</span>
+            <span class="s1">shift </span><span class="s2">= </span><span class="s3">&quot;shift_&quot; </span><span class="s2">+ </span><span class="s1">shift</span>
+        <span class="s1">dti </span><span class="s2">= </span><span class="s1">DatetimeIndex</span><span class="s2">([</span><span class="s1">Timestamp</span><span class="s2">(</span><span class="s1">start_ts</span><span class="s2">)]).</span><span class="s1">as_unit</span><span class="s2">(</span><span class="s1">unit</span><span class="s2">)</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">dti</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">, </span><span class="s1">nonexistent</span><span class="s2">=</span><span class="s1">shift</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">DatetimeIndex</span><span class="s2">([</span><span class="s1">Timestamp</span><span class="s2">(</span><span class="s1">end_ts</span><span class="s2">)]).</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">).</span><span class="s1">as_unit</span><span class="s2">(</span><span class="s1">unit</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s3">&quot;offset&quot;</span><span class="s2">, [-</span><span class="s5">1</span><span class="s2">, </span><span class="s5">1</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_dti_tz_localize_nonexistent_shift_invalid</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">offset</span><span class="s2">, </span><span class="s1">warsaw</span><span class="s2">):</span>
+        <span class="s4"># GH#8917</span>
+        <span class="s1">tz </span><span class="s2">= </span><span class="s1">warsaw</span>
+        <span class="s1">dti </span><span class="s2">= </span><span class="s1">DatetimeIndex</span><span class="s2">([</span><span class="s1">Timestamp</span><span class="s2">(</span><span class="s3">&quot;2015-03-29 02:20:00&quot;</span><span class="s2">)])</span>
+        <span class="s1">msg </span><span class="s2">= </span><span class="s3">&quot;The provided timedelta will relocalize on a nonexistent time&quot;</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">msg</span><span class="s2">):</span>
+            <span class="s1">dti</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">, </span><span class="s1">nonexistent</span><span class="s2">=</span><span class="s1">timedelta</span><span class="s2">(</span><span class="s1">seconds</span><span class="s2">=</span><span class="s1">offset</span><span class="s2">))</span>
+</pre>
+</body>
+</html>

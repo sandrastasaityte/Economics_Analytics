@@ -1,0 +1,198 @@
+<html>
+<head>
+<title>extension.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+extension.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Shared methods for Index subclasses backed by ExtensionArray. 
+&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">from </span><span class="s1">inspect </span><span class="s2">import </span><span class="s1">signature</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s3">,</span>
+    <span class="s1">TypeVar</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">_decorators </span><span class="s2">import </span><span class="s1">cache_readonly</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">generic </span><span class="s2">import </span><span class="s1">ABCDataFrame</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">indexes</span><span class="s3">.</span><span class="s1">base </span><span class="s2">import </span><span class="s1">Index</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">collections</span><span class="s3">.</span><span class="s1">abc </span><span class="s2">import </span><span class="s1">Callable</span>
+
+    <span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_typing </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">ArrayLike</span><span class="s3">,</span>
+        <span class="s1">npt</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">arrays </span><span class="s2">import </span><span class="s1">IntervalArray</span>
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">arrays</span><span class="s3">.</span><span class="s1">_mixins </span><span class="s2">import </span><span class="s1">NDArrayBackedExtensionArray</span>
+
+<span class="s1">_ExtensionIndexT </span><span class="s3">= </span><span class="s1">TypeVar</span><span class="s3">(</span><span class="s4">&quot;_ExtensionIndexT&quot;</span><span class="s3">, </span><span class="s1">bound</span><span class="s3">=</span><span class="s4">&quot;ExtensionIndex&quot;</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_inherit_from_data</span><span class="s3">(</span>
+    <span class="s1">name</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">delegate</span><span class="s3">: </span><span class="s1">type</span><span class="s3">, </span><span class="s1">cache</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span><span class="s3">, </span><span class="s1">wrap</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span>
+<span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Make an alias for a method of the underlying ExtensionArray. 
+ 
+    Parameters 
+    ---------- 
+    name : str 
+        Name of an attribute the class should inherit from its EA parent. 
+    delegate : class 
+    cache : bool, default False 
+        Whether to convert wrapped properties into cache_readonly 
+    wrap : bool, default False 
+        Whether to wrap the inherited result in an Index. 
+ 
+    Returns 
+    ------- 
+    attribute, method, property, or cache_readonly 
+    &quot;&quot;&quot;</span>
+    <span class="s1">attr </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">delegate</span><span class="s3">, </span><span class="s1">name</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">attr</span><span class="s3">, </span><span class="s1">property</span><span class="s3">) </span><span class="s2">or </span><span class="s1">type</span><span class="s3">(</span><span class="s1">attr</span><span class="s3">).</span><span class="s1">__name__ </span><span class="s3">== </span><span class="s4">&quot;getset_descriptor&quot;</span><span class="s3">:</span>
+        <span class="s5"># getset_descriptor i.e. property defined in cython class</span>
+        <span class="s2">if </span><span class="s1">cache</span><span class="s3">:</span>
+
+            <span class="s2">def </span><span class="s1">cached</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+                <span class="s2">return </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">, </span><span class="s1">name</span><span class="s3">)</span>
+
+            <span class="s1">cached</span><span class="s3">.</span><span class="s1">__name__ </span><span class="s3">= </span><span class="s1">name</span>
+            <span class="s1">cached</span><span class="s3">.</span><span class="s1">__doc__ </span><span class="s3">= </span><span class="s1">attr</span><span class="s3">.</span><span class="s1">__doc__</span>
+            <span class="s1">method </span><span class="s3">= </span><span class="s1">cache_readonly</span><span class="s3">(</span><span class="s1">cached</span><span class="s3">)</span>
+
+        <span class="s2">else</span><span class="s3">:</span>
+
+            <span class="s2">def </span><span class="s1">fget</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+                <span class="s1">result </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">, </span><span class="s1">name</span><span class="s3">)</span>
+                <span class="s2">if </span><span class="s1">wrap</span><span class="s3">:</span>
+                    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">)):</span>
+                        <span class="s2">return </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">).</span><span class="s1">_simple_new</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">name</span><span class="s3">)</span>
+                    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">ABCDataFrame</span><span class="s3">):</span>
+                        <span class="s2">return </span><span class="s1">result</span><span class="s3">.</span><span class="s1">set_index</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+                    <span class="s2">return </span><span class="s1">Index</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">name</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">result</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+                <span class="s2">return </span><span class="s1">result</span>
+
+            <span class="s2">def </span><span class="s1">fset</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">value</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+                <span class="s1">setattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">, </span><span class="s1">name</span><span class="s3">, </span><span class="s1">value</span><span class="s3">)</span>
+
+            <span class="s1">fget</span><span class="s3">.</span><span class="s1">__name__ </span><span class="s3">= </span><span class="s1">name</span>
+            <span class="s1">fget</span><span class="s3">.</span><span class="s1">__doc__ </span><span class="s3">= </span><span class="s1">attr</span><span class="s3">.</span><span class="s1">__doc__</span>
+
+            <span class="s1">method </span><span class="s3">= </span><span class="s1">property</span><span class="s3">(</span><span class="s1">fget</span><span class="s3">, </span><span class="s1">fset</span><span class="s3">)</span>
+
+    <span class="s2">elif not </span><span class="s1">callable</span><span class="s3">(</span><span class="s1">attr</span><span class="s3">):</span>
+        <span class="s5"># just a normal attribute, no wrapping</span>
+        <span class="s1">method </span><span class="s3">= </span><span class="s1">attr</span>
+
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s5"># error: Incompatible redefinition (redefinition with type &quot;Callable[[Any,</span>
+        <span class="s5"># VarArg(Any), KwArg(Any)], Any]&quot;, original type &quot;property&quot;)</span>
+        <span class="s2">def </span><span class="s1">method</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">):  </span><span class="s5"># type: ignore[misc]</span>
+            <span class="s2">if </span><span class="s4">&quot;inplace&quot; </span><span class="s2">in </span><span class="s1">kwargs</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">f&quot;cannot use inplace with </span><span class="s2">{</span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">).</span><span class="s1">__name__</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">)</span>
+            <span class="s1">result </span><span class="s3">= </span><span class="s1">attr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">wrap</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">)):</span>
+                    <span class="s2">return </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">).</span><span class="s1">_simple_new</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">name</span><span class="s3">)</span>
+                <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">ABCDataFrame</span><span class="s3">):</span>
+                    <span class="s2">return </span><span class="s1">result</span><span class="s3">.</span><span class="s1">set_index</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+                <span class="s2">return </span><span class="s1">Index</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">name</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">result</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">result</span>
+
+        <span class="s5"># error: &quot;property&quot; has no attribute &quot;__name__&quot;</span>
+        <span class="s1">method</span><span class="s3">.</span><span class="s1">__name__ </span><span class="s3">= </span><span class="s1">name  </span><span class="s5"># type: ignore[attr-defined]</span>
+        <span class="s1">method</span><span class="s3">.</span><span class="s1">__doc__ </span><span class="s3">= </span><span class="s1">attr</span><span class="s3">.</span><span class="s1">__doc__</span>
+        <span class="s1">method</span><span class="s3">.</span><span class="s1">__signature__ </span><span class="s3">= </span><span class="s1">signature</span><span class="s3">(</span><span class="s1">attr</span><span class="s3">)  </span><span class="s5"># type: ignore[attr-defined]</span>
+    <span class="s2">return </span><span class="s1">method</span>
+
+
+<span class="s2">def </span><span class="s1">inherit_names</span><span class="s3">(</span>
+    <span class="s1">names</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">], </span><span class="s1">delegate</span><span class="s3">: </span><span class="s1">type</span><span class="s3">, </span><span class="s1">cache</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span><span class="s3">, </span><span class="s1">wrap</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span>
+<span class="s3">) </span><span class="s1">-&gt; Callable</span><span class="s3">[[</span><span class="s1">type</span><span class="s3">[</span><span class="s1">_ExtensionIndexT</span><span class="s3">]], </span><span class="s1">type</span><span class="s3">[</span><span class="s1">_ExtensionIndexT</span><span class="s3">]]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Class decorator to pin attributes from an ExtensionArray to an Index subclass. 
+ 
+    Parameters 
+    ---------- 
+    names : List[str] 
+    delegate : class 
+    cache : bool, default False 
+    wrap : bool, default False 
+        Whether to wrap the inherited result in an Index. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">wrapper</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">: </span><span class="s1">type</span><span class="s3">[</span><span class="s1">_ExtensionIndexT</span><span class="s3">]) </span><span class="s1">-&gt; type</span><span class="s3">[</span><span class="s1">_ExtensionIndexT</span><span class="s3">]:</span>
+        <span class="s2">for </span><span class="s1">name </span><span class="s2">in </span><span class="s1">names</span><span class="s3">:</span>
+            <span class="s1">meth </span><span class="s3">= </span><span class="s1">_inherit_from_data</span><span class="s3">(</span><span class="s1">name</span><span class="s3">, </span><span class="s1">delegate</span><span class="s3">, </span><span class="s1">cache</span><span class="s3">=</span><span class="s1">cache</span><span class="s3">, </span><span class="s1">wrap</span><span class="s3">=</span><span class="s1">wrap</span><span class="s3">)</span>
+            <span class="s1">setattr</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">name</span><span class="s3">, </span><span class="s1">meth</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">cls</span>
+
+    <span class="s2">return </span><span class="s1">wrapper</span>
+
+
+<span class="s2">class </span><span class="s1">ExtensionIndex</span><span class="s3">(</span><span class="s1">Index</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Index subclass for indexes backed by ExtensionArray. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s5"># The base class already passes through to _data:</span>
+    <span class="s5">#  size, __len__, dtype</span>
+
+    <span class="s1">_data</span><span class="s3">: </span><span class="s1">IntervalArray </span><span class="s3">| </span><span class="s1">NDArrayBackedExtensionArray</span>
+
+    <span class="s5"># ---------------------------------------------------------------------</span>
+
+    <span class="s2">def </span><span class="s1">_validate_fill_value</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">value</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Convert value to be insertable to underlying array. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_validate_setitem_value</span><span class="s3">(</span><span class="s1">value</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">cache_readonly</span>
+    <span class="s2">def </span><span class="s1">_isnan</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">bool_</span><span class="s3">]:</span>
+        <span class="s5"># error: Incompatible return value type (got &quot;ExtensionArray&quot;, expected</span>
+        <span class="s5"># &quot;ndarray&quot;)</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">isna</span><span class="s3">()  </span><span class="s5"># type: ignore[return-value]</span>
+
+
+<span class="s2">class </span><span class="s1">NDArrayBackedExtensionIndex</span><span class="s3">(</span><span class="s1">ExtensionIndex</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Index subclass for indexes backed by NDArrayBackedExtensionArray. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">_data</span><span class="s3">: </span><span class="s1">NDArrayBackedExtensionArray</span>
+
+    <span class="s2">def </span><span class="s1">_get_engine_target</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_ndarray</span>
+
+    <span class="s2">def </span><span class="s1">_from_join_target</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">result</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">) </span><span class="s1">-&gt; ArrayLike</span><span class="s3">:</span>
+        <span class="s2">assert </span><span class="s1">result</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_ndarray</span><span class="s3">.</span><span class="s1">dtype</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_from_backing_data</span><span class="s3">(</span><span class="s1">result</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

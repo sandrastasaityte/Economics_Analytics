@@ -1,0 +1,491 @@
+<html>
+<head>
+<title>dataframe_protocol.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #2aacb8;}
+.s5 { color: #7a7e85;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+dataframe_protocol.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+A verbatim copy (vendored) of the spec from https://github.com/data-apis/dataframe-api 
+&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">from </span><span class="s1">abc </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">ABC</span><span class="s3">,</span>
+    <span class="s1">abstractmethod</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">import </span><span class="s1">enum</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s3">,</span>
+    <span class="s1">Any</span><span class="s3">,</span>
+    <span class="s1">TypedDict</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">_decorators </span><span class="s2">import </span><span class="s1">set_module</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">collections</span><span class="s3">.</span><span class="s1">abc </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">Iterable</span><span class="s3">,</span>
+        <span class="s1">Sequence</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">DlpackDeviceType</span><span class="s3">(</span><span class="s1">enum</span><span class="s3">.</span><span class="s1">IntEnum</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Integer enum for device type codes matching DLPack.&quot;&quot;&quot;</span>
+
+    <span class="s1">CPU </span><span class="s3">= </span><span class="s4">1</span>
+    <span class="s1">CUDA </span><span class="s3">= </span><span class="s4">2</span>
+    <span class="s1">CPU_PINNED </span><span class="s3">= </span><span class="s4">3</span>
+    <span class="s1">OPENCL </span><span class="s3">= </span><span class="s4">4</span>
+    <span class="s1">VULKAN </span><span class="s3">= </span><span class="s4">7</span>
+    <span class="s1">METAL </span><span class="s3">= </span><span class="s4">8</span>
+    <span class="s1">VPI </span><span class="s3">= </span><span class="s4">9</span>
+    <span class="s1">ROCM </span><span class="s3">= </span><span class="s4">10</span>
+
+
+<span class="s2">class </span><span class="s1">DtypeKind</span><span class="s3">(</span><span class="s1">enum</span><span class="s3">.</span><span class="s1">IntEnum</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Integer enum for data types. 
+ 
+    Attributes 
+    ---------- 
+    INT : int 
+        Matches to signed integer data type. 
+    UINT : int 
+        Matches to unsigned integer data type. 
+    FLOAT : int 
+        Matches to floating point data type. 
+    BOOL : int 
+        Matches to boolean data type. 
+    STRING : int 
+        Matches to string data type (UTF-8 encoded). 
+    DATETIME : int 
+        Matches to datetime data type. 
+    CATEGORICAL : int 
+        Matches to categorical data type. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">INT </span><span class="s3">= </span><span class="s4">0</span>
+    <span class="s1">UINT </span><span class="s3">= </span><span class="s4">1</span>
+    <span class="s1">FLOAT </span><span class="s3">= </span><span class="s4">2</span>
+    <span class="s1">BOOL </span><span class="s3">= </span><span class="s4">20</span>
+    <span class="s1">STRING </span><span class="s3">= </span><span class="s4">21  </span><span class="s5"># UTF-8</span>
+    <span class="s1">DATETIME </span><span class="s3">= </span><span class="s4">22</span>
+    <span class="s1">CATEGORICAL </span><span class="s3">= </span><span class="s4">23</span>
+
+
+<span class="s2">class </span><span class="s1">ColumnNullType</span><span class="s3">(</span><span class="s1">enum</span><span class="s3">.</span><span class="s1">IntEnum</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Integer enum for null type representation. 
+ 
+    Attributes 
+    ---------- 
+    NON_NULLABLE : int 
+        Non-nullable column. 
+    USE_NAN : int 
+        Use explicit float NaN value. 
+    USE_SENTINEL : int 
+        Sentinel value besides NaN/NaT. 
+    USE_BITMASK : int 
+        The bit is set/unset representing a null on a certain position. 
+    USE_BYTEMASK : int 
+        The byte is set/unset representing a null on a certain position. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">NON_NULLABLE </span><span class="s3">= </span><span class="s4">0</span>
+    <span class="s1">USE_NAN </span><span class="s3">= </span><span class="s4">1</span>
+    <span class="s1">USE_SENTINEL </span><span class="s3">= </span><span class="s4">2</span>
+    <span class="s1">USE_BITMASK </span><span class="s3">= </span><span class="s4">3</span>
+    <span class="s1">USE_BYTEMASK </span><span class="s3">= </span><span class="s4">4</span>
+
+
+<span class="s2">class </span><span class="s1">ColumnBuffers</span><span class="s3">(</span><span class="s1">TypedDict</span><span class="s3">):</span>
+    <span class="s5"># first element is a buffer containing the column data;</span>
+    <span class="s5"># second element is the data buffer's associated dtype</span>
+    <span class="s1">data</span><span class="s3">: </span><span class="s1">tuple</span><span class="s3">[</span><span class="s1">Buffer</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">]</span>
+
+    <span class="s5"># first element is a buffer containing mask values indicating missing data;</span>
+    <span class="s5"># second element is the mask value buffer's associated dtype.</span>
+    <span class="s5"># None if the null representation is not a bit or byte mask</span>
+    <span class="s1">validity</span><span class="s3">: </span><span class="s1">tuple</span><span class="s3">[</span><span class="s1">Buffer</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">] | </span><span class="s2">None</span>
+
+    <span class="s5"># first element is a buffer containing the offset values for</span>
+    <span class="s5"># variable-size binary data (e.g., variable-length strings);</span>
+    <span class="s5"># second element is the offsets buffer's associated dtype.</span>
+    <span class="s5"># None if the data buffer does not have an associated offsets buffer</span>
+    <span class="s1">offsets</span><span class="s3">: </span><span class="s1">tuple</span><span class="s3">[</span><span class="s1">Buffer</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">] | </span><span class="s2">None</span>
+
+
+<span class="s2">class </span><span class="s1">CategoricalDescription</span><span class="s3">(</span><span class="s1">TypedDict</span><span class="s3">):</span>
+    <span class="s5"># whether the ordering of dictionary indices is semantically meaningful</span>
+    <span class="s1">is_ordered</span><span class="s3">: </span><span class="s1">bool</span>
+    <span class="s5"># whether a dictionary-style mapping of categorical values to other objects exists</span>
+    <span class="s1">is_dictionary</span><span class="s3">: </span><span class="s1">bool</span>
+    <span class="s5"># Python-level only (e.g. ``{int: str}``).</span>
+    <span class="s5"># None if not a dictionary-style categorical.</span>
+    <span class="s1">categories</span><span class="s3">: </span><span class="s1">Column </span><span class="s3">| </span><span class="s2">None</span>
+
+
+<span class="s2">class </span><span class="s1">Buffer</span><span class="s3">(</span><span class="s1">ABC</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Data in the buffer is guaranteed to be contiguous in memory. 
+ 
+    Note that there is no dtype attribute present, a buffer can be thought of 
+    as simply a block of memory. However, if the column that the buffer is 
+    attached to has a dtype that's supported by DLPack and ``__dlpack__`` is 
+    implemented, then that dtype information will be contained in the return 
+    value from ``__dlpack__``. 
+ 
+    This distinction is useful to support both data exchange via DLPack on a 
+    buffer and (b) dtypes like variable-length strings which do not have a 
+    fixed number of bytes per element. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">bufsize</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; int</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Buffer size in bytes. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">ptr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; int</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Pointer to start of the buffer as an integer. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">__dlpack__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Produce DLPack capsule (see array API standard). 
+ 
+        Raises: 
+ 
+            - TypeError : if the buffer contains unsupported dtypes. 
+            - NotImplementedError : if DLPack support is not implemented 
+ 
+        Useful to have to connect to array libraries. Support optional because 
+        it's not completely trivial to implement for a Python-only library. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">raise </span><span class="s1">NotImplementedError</span><span class="s3">(</span><span class="s6">&quot;__dlpack__&quot;</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">__dlpack_device__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">DlpackDeviceType</span><span class="s3">, </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None</span><span class="s3">]:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Device type and device ID for where the data in the buffer resides. 
+        Uses device type codes matching DLPack. 
+        Note: must be implemented even if ``__dlpack__`` is not. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Column</span><span class="s3">(</span><span class="s1">ABC</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    A column object, with only the methods and properties required by the 
+    interchange protocol defined. 
+ 
+    A column can contain one or more chunks. Each chunk can contain up to three 
+    buffers - a data buffer, a mask buffer (depending on null representation), 
+    and an offsets buffer (if variable-size binary; e.g., variable-length 
+    strings). 
+ 
+    TBD: Arrow has a separate &quot;null&quot; dtype, and has no separate mask concept. 
+         Instead, it seems to use &quot;children&quot; for both columns with a bit mask, 
+         and for nested dtypes. Unclear whether this is elegant or confusing. 
+         This design requires checking the null representation explicitly. 
+ 
+         The Arrow design requires checking: 
+         1. the ARROW_FLAG_NULLABLE (for sentinel values) 
+         2. if a column has two children, combined with one of those children 
+            having a null dtype. 
+ 
+         Making the mask concept explicit seems useful. One null dtype would 
+         not be enough to cover both bit and byte masks, so that would mean 
+         even more checking if we did it the Arrow way. 
+ 
+    TBD: there's also the &quot;chunk&quot; concept here, which is implicit in Arrow as 
+         multiple buffers per array (= column here). Semantically it may make 
+         sense to have both: chunks were meant for example for lazy evaluation 
+         of data which doesn't fit in memory, while multiple buffers per column 
+         could also come from doing a selection operation on a single 
+         contiguous buffer. 
+ 
+         Given these concepts, one would expect chunks to be all of the same 
+         size (say a 10,000 row dataframe could have 10 chunks of 1,000 rows), 
+         while multiple buffers could have data-dependent lengths. Not an issue 
+         in pandas if one column is backed by a single NumPy array, but in 
+         Arrow it seems possible. 
+         Are multiple chunks *and* multiple buffers per column necessary for 
+         the purposes of this interchange protocol, or must producers either 
+         reuse the chunk concept for this or copy the data? 
+ 
+    Note: this Column object can only be produced by ``__dataframe__``, so 
+          doesn't need its own version or ``__column__`` protocol. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">size</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; int</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Size of the column, in elements. 
+ 
+        Corresponds to DataFrame.num_rows() if column is a single chunk; 
+        equal to size of this current chunk otherwise. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">offset</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; int</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Offset of first element. 
+ 
+        May be &gt; 0 if using chunks; for example for a column with N chunks of 
+        equal size M (only the last chunk may be shorter), 
+        ``offset = n * M``, ``n = 0 .. N-1``. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">DtypeKind</span><span class="s3">, </span><span class="s1">int</span><span class="s3">, </span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">]:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Dtype description as a tuple ``(kind, bit-width, format string, endianness)``. 
+ 
+        Bit-width : the number of bits as an integer 
+        Format string : data type description format string in Apache Arrow C 
+                        Data Interface format. 
+        Endianness : current only native endianness (``=``) is supported 
+ 
+        Notes: 
+            - Kind specifiers are aligned with DLPack where possible (hence the 
+              jump to 20, leave enough room for future extension) 
+            - Masks must be specified as boolean with either bit width 1 (for bit 
+              masks) or 8 (for byte masks). 
+            - Dtype width in bits was preferred over bytes 
+            - Endianness isn't too useful, but included now in case in the future 
+              we need to support non-native endianness 
+            - Went with Apache Arrow format strings over NumPy format strings 
+              because they're more complete from a dataframe perspective 
+            - Format strings are mostly useful for datetime specification, and 
+              for categoricals. 
+            - For categoricals, the format string describes the type of the 
+              categorical in the data buffer. In case of a separate encoding of 
+              the categorical (e.g. an integer to string mapping), this can 
+              be derived from ``self.describe_categorical``. 
+            - Data types not included: complex, Arrow-style null, binary, decimal, 
+              and nested (list, struct, map, union) dtypes. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">describe_categorical</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; CategoricalDescription</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        If the dtype is categorical, there are two options: 
+        - There are only values in the data buffer. 
+        - There is a separate non-categorical Column encoding for categorical values. 
+ 
+        Raises TypeError if the dtype is not categorical 
+ 
+        Returns the dictionary with description on how to interpret the data buffer: 
+            - &quot;is_ordered&quot; : bool, whether the ordering of dictionary indices is 
+                             semantically meaningful. 
+            - &quot;is_dictionary&quot; : bool, whether a mapping of 
+                                categorical values to other objects exists 
+            - &quot;categories&quot; : Column representing the (implicit) mapping of indices to 
+                             category values (e.g. an array of cat1, cat2, ...). 
+                             None if not a dictionary-style categorical. 
+ 
+        TBD: are there any other in-memory representations that are needed? 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">describe_null</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">ColumnNullType</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">]:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return the missing value (or &quot;null&quot;) representation the column dtype 
+        uses, as a tuple ``(kind, value)``. 
+ 
+        Value : if kind is &quot;sentinel value&quot;, the actual value. If kind is a bit 
+        mask or a byte mask, the value (0 or 1) indicating a missing value. None 
+        otherwise. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">null_count</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; int </span><span class="s3">| </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Number of null elements, if known. 
+ 
+        Note: Arrow uses -1 to indicate &quot;unknown&quot;, but None seems cleaner. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">metadata</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">]:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        The metadata for the column. See `DataFrame.metadata` for more details. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">num_chunks</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; int</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return the number of chunks the column consists of. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">get_chunks</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">n_chunks</span><span class="s3">: </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">) </span><span class="s1">-&gt; Iterable</span><span class="s3">[</span><span class="s1">Column</span><span class="s3">]:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return an iterator yielding the chunks. 
+ 
+        See `DataFrame.get_chunks` for details on ``n_chunks``. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">get_buffers</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; ColumnBuffers</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return a dictionary containing the underlying buffers. 
+ 
+        The returned dictionary has the following contents: 
+ 
+            - &quot;data&quot;: a two-element tuple whose first element is a buffer 
+                      containing the data and whose second element is the data 
+                      buffer's associated dtype. 
+            - &quot;validity&quot;: a two-element tuple whose first element is a buffer 
+                          containing mask values indicating missing data and 
+                          whose second element is the mask value buffer's 
+                          associated dtype. None if the null representation is 
+                          not a bit or byte mask. 
+            - &quot;offsets&quot;: a two-element tuple whose first element is a buffer 
+                         containing the offset values for variable-size binary 
+                         data (e.g., variable-length strings) and whose second 
+                         element is the offsets buffer's associated dtype. None 
+                         if the data buffer does not have an associated offsets 
+                         buffer. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s5">#    def get_children(self) -&gt; Iterable[Column]:</span>
+<span class="s5">#        &quot;&quot;&quot;</span>
+<span class="s5">#        Children columns underneath the column, each object in this iterator</span>
+<span class="s5">#        must adhere to the column specification.</span>
+<span class="s5">#        &quot;&quot;&quot;</span>
+<span class="s5">#        pass</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s6">&quot;pandas.api.interchange&quot;</span><span class="s3">)</span>
+<span class="s2">class </span><span class="s1">DataFrame</span><span class="s3">(</span><span class="s1">ABC</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    A data frame class, with only the methods required by the interchange 
+    protocol defined. 
+ 
+    A &quot;data frame&quot; represents an ordered collection of named columns. 
+    A column's &quot;name&quot; must be a unique string. 
+    Columns may be accessed by name or by position. 
+ 
+    This could be a public data frame class, or an object with the methods and 
+    attributes defined on this DataFrame class could be returned from the 
+    ``__dataframe__`` method of a public data frame class in a library adhering 
+    to the dataframe interchange protocol specification. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">version </span><span class="s3">= </span><span class="s4">0  </span><span class="s5"># version of the protocol</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">__dataframe__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">nan_as_null</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span><span class="s3">, </span><span class="s1">allow_copy</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Construct a new interchange object, potentially changing the parameters.&quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">metadata</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">]:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        The metadata for the data frame, as a dictionary with string keys. The 
+        contents of `metadata` may be anything, they are meant for a library 
+        to store information that it needs to, e.g., roundtrip losslessly or 
+        for two implementations to share data that is not (yet) part of the 
+        interchange protocol specification. For avoiding collisions with other 
+        entries, please add name the keys with the name of the library 
+        followed by a period and the desired name, e.g, ``pandas.indexcol``. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">num_columns</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; int</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return the number of columns in the DataFrame. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">num_rows</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; int </span><span class="s3">| </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s5"># TODO: not happy with Optional, but need to flag it may be expensive</span>
+        <span class="s5">#       why include it if it may be None - what do we expect consumers</span>
+        <span class="s5">#       to do here?</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return the number of rows in the DataFrame, if available. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">num_chunks</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; int</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return the number of chunks the DataFrame consists of. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">column_names</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; Iterable</span><span class="s3">[</span><span class="s1">str</span><span class="s3">]:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return an iterator yielding the column names. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">get_column</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">i</span><span class="s3">: </span><span class="s1">int</span><span class="s3">) </span><span class="s1">-&gt; Column</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return the column at the indicated position. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">get_column_by_name</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">name</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; Column</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return the column whose name is the indicated name. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">get_columns</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; Iterable</span><span class="s3">[</span><span class="s1">Column</span><span class="s3">]:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return an iterator yielding the columns. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">select_columns</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">indices</span><span class="s3">: </span><span class="s1">Sequence</span><span class="s3">[</span><span class="s1">int</span><span class="s3">]) </span><span class="s1">-&gt; DataFrame</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Create a new DataFrame by selecting a subset of columns by index. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">select_columns_by_name</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">names</span><span class="s3">: </span><span class="s1">Sequence</span><span class="s3">[</span><span class="s1">str</span><span class="s3">]) </span><span class="s1">-&gt; DataFrame</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Create a new DataFrame by selecting a subset of columns by name. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">get_chunks</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">n_chunks</span><span class="s3">: </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">) </span><span class="s1">-&gt; Iterable</span><span class="s3">[</span><span class="s1">DataFrame</span><span class="s3">]:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return an iterator yielding the chunks. 
+ 
+        By default (None), yields the chunks that the data is stored as by the 
+        producer. If given, ``n_chunks`` must be a multiple of 
+        ``self.num_chunks()``, meaning the producer must subdivide each chunk 
+        before yielding it. 
+        &quot;&quot;&quot;</span>
+</pre>
+</body>
+</html>

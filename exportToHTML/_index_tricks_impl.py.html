@@ -1,0 +1,1071 @@
+<html>
+<head>
+<title>_index_tricks_impl.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #5f826b; font-style: italic;}
+.s5 { color: #2aacb8;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_index_tricks_impl.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">functools</span>
+<span class="s0">import </span><span class="s1">math</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">from </span><span class="s1">itertools </span><span class="s0">import </span><span class="s1">product</span>
+
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+<span class="s0">import </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">_core</span><span class="s2">.</span><span class="s1">numeric </span><span class="s0">as </span><span class="s1">_nx</span>
+<span class="s0">import </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">matrixlib </span><span class="s0">as </span><span class="s1">matrixlib</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">_core </span><span class="s0">import </span><span class="s1">linspace</span><span class="s2">, </span><span class="s1">overrides</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">_core</span><span class="s2">.</span><span class="s1">multiarray </span><span class="s0">import </span><span class="s1">ravel_multi_index</span><span class="s2">, </span><span class="s1">unravel_index</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">_core</span><span class="s2">.</span><span class="s1">numeric </span><span class="s0">import </span><span class="s1">ScalarType</span><span class="s2">, </span><span class="s1">array</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">_core</span><span class="s2">.</span><span class="s1">numerictypes </span><span class="s0">import </span><span class="s1">issubdtype</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">_utils </span><span class="s0">import </span><span class="s1">set_module</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">lib</span><span class="s2">.</span><span class="s1">_function_base_impl </span><span class="s0">import </span><span class="s1">diff</span>
+
+<span class="s1">array_function_dispatch </span><span class="s2">= </span><span class="s1">functools</span><span class="s2">.</span><span class="s1">partial</span><span class="s2">(</span>
+    <span class="s1">overrides</span><span class="s2">.</span><span class="s1">array_function_dispatch</span><span class="s2">, </span><span class="s1">module</span><span class="s2">=</span><span class="s3">'numpy'</span><span class="s2">)</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s3">'ravel_multi_index'</span><span class="s2">, </span><span class="s3">'unravel_index'</span><span class="s2">, </span><span class="s3">'mgrid'</span><span class="s2">, </span><span class="s3">'ogrid'</span><span class="s2">, </span><span class="s3">'r_'</span><span class="s2">, </span><span class="s3">'c_'</span><span class="s2">,</span>
+    <span class="s3">'s_'</span><span class="s2">, </span><span class="s3">'index_exp'</span><span class="s2">, </span><span class="s3">'ix_'</span><span class="s2">, </span><span class="s3">'ndenumerate'</span><span class="s2">, </span><span class="s3">'ndindex'</span><span class="s2">, </span><span class="s3">'fill_diagonal'</span><span class="s2">,</span>
+    <span class="s3">'diag_indices'</span><span class="s2">, </span><span class="s3">'diag_indices_from'</span>
+<span class="s2">]</span>
+
+
+<span class="s0">def </span><span class="s1">_ix__dispatcher</span><span class="s2">(*</span><span class="s1">args</span><span class="s2">):</span>
+    <span class="s0">return </span><span class="s1">args</span>
+
+
+<span class="s2">@</span><span class="s1">array_function_dispatch</span><span class="s2">(</span><span class="s1">_ix__dispatcher</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">ix_</span><span class="s2">(*</span><span class="s1">args</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Construct an open mesh from multiple sequences. 
+ 
+    This function takes N 1-D sequences and returns N outputs with N 
+    dimensions each, such that the shape is 1 in all but one dimension 
+    and the dimension with the non-unit shape value cycles through all 
+    N dimensions. 
+ 
+    Using `ix_` one can quickly construct index arrays that will index 
+    the cross product. ``a[np.ix_([1,3],[2,5])]`` returns the array 
+    ``[[a[1,2] a[1,5]], [a[3,2] a[3,5]]]``. 
+ 
+    Parameters 
+    ---------- 
+    args : 1-D sequences 
+        Each sequence should be of integer or boolean type. 
+        Boolean sequences will be interpreted as boolean masks for the 
+        corresponding dimension (equivalent to passing in 
+        ``np.nonzero(boolean_sequence)``). 
+ 
+    Returns 
+    ------- 
+    out : tuple of ndarrays 
+        N arrays with N dimensions each, with N the number of input 
+        sequences. Together these arrays form an open mesh. 
+ 
+    See Also 
+    -------- 
+    ogrid, mgrid, meshgrid 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+    &gt;&gt;&gt; a = np.arange(10).reshape(2, 5) 
+    &gt;&gt;&gt; a 
+    array([[0, 1, 2, 3, 4], 
+           [5, 6, 7, 8, 9]]) 
+    &gt;&gt;&gt; ixgrid = np.ix_([0, 1], [2, 4]) 
+    &gt;&gt;&gt; ixgrid 
+    (array([[0], 
+           [1]]), array([[2, 4]])) 
+    &gt;&gt;&gt; ixgrid[0].shape, ixgrid[1].shape 
+    ((2, 1), (1, 2)) 
+    &gt;&gt;&gt; a[ixgrid] 
+    array([[2, 4], 
+           [7, 9]]) 
+ 
+    &gt;&gt;&gt; ixgrid = np.ix_([True, True], [2, 4]) 
+    &gt;&gt;&gt; a[ixgrid] 
+    array([[2, 4], 
+           [7, 9]]) 
+    &gt;&gt;&gt; ixgrid = np.ix_([True, True], [False, False, True, False, True]) 
+    &gt;&gt;&gt; a[ixgrid] 
+    array([[2, 4], 
+           [7, 9]]) 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">out </span><span class="s2">= []</span>
+    <span class="s1">nd </span><span class="s2">= </span><span class="s1">len</span><span class="s2">(</span><span class="s1">args</span><span class="s2">)</span>
+    <span class="s0">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">new </span><span class="s0">in </span><span class="s1">enumerate</span><span class="s2">(</span><span class="s1">args</span><span class="s2">):</span>
+        <span class="s0">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">new</span><span class="s2">, </span><span class="s1">_nx</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">):</span>
+            <span class="s1">new </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">asarray</span><span class="s2">(</span><span class="s1">new</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">new</span><span class="s2">.</span><span class="s1">size </span><span class="s2">== </span><span class="s5">0</span><span class="s2">:</span>
+                <span class="s6"># Explicitly type empty arrays to avoid float default</span>
+                <span class="s1">new </span><span class="s2">= </span><span class="s1">new</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">_nx</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">new</span><span class="s2">.</span><span class="s1">ndim </span><span class="s2">!= </span><span class="s5">1</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;Cross index must be 1 dimensional&quot;</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">issubdtype</span><span class="s2">(</span><span class="s1">new</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">_nx</span><span class="s2">.</span><span class="s1">bool</span><span class="s2">):</span>
+            <span class="s1">new</span><span class="s2">, = </span><span class="s1">new</span><span class="s2">.</span><span class="s1">nonzero</span><span class="s2">()</span>
+        <span class="s1">new </span><span class="s2">= </span><span class="s1">new</span><span class="s2">.</span><span class="s1">reshape</span><span class="s2">((</span><span class="s5">1</span><span class="s2">,) * </span><span class="s1">k </span><span class="s2">+ (</span><span class="s1">new</span><span class="s2">.</span><span class="s1">size</span><span class="s2">,) + (</span><span class="s5">1</span><span class="s2">,) * (</span><span class="s1">nd </span><span class="s2">- </span><span class="s1">k </span><span class="s2">- </span><span class="s5">1</span><span class="s2">))</span>
+        <span class="s1">out</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">new</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">out</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">nd_grid</span><span class="s2">:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Construct a multi-dimensional &quot;meshgrid&quot;. 
+ 
+    ``grid = nd_grid()`` creates an instance which will return a mesh-grid 
+    when indexed.  The dimension and number of the output arrays are equal 
+    to the number of indexing dimensions.  If the step length is not a 
+    complex number, then the stop is not inclusive. 
+ 
+    However, if the step length is a **complex number** (e.g. 5j), then the 
+    integer part of its magnitude is interpreted as specifying the 
+    number of points to create between the start and stop values, where 
+    the stop value **is inclusive**. 
+ 
+    If instantiated with an argument of ``sparse=True``, the mesh-grid is 
+    open (or not fleshed out) so that only one-dimension of each returned 
+    argument is greater than 1. 
+ 
+    Parameters 
+    ---------- 
+    sparse : bool, optional 
+        Whether the grid is sparse or not. Default is False. 
+ 
+    Notes 
+    ----- 
+    Two instances of `nd_grid` are made available in the NumPy namespace, 
+    `mgrid` and `ogrid`, approximately defined as:: 
+ 
+        mgrid = nd_grid(sparse=False) 
+        ogrid = nd_grid(sparse=True) 
+ 
+    Users should use these pre-defined instances instead of using `nd_grid` 
+    directly. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">__slots__ </span><span class="s2">= (</span><span class="s3">'sparse'</span><span class="s2">,)</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">sparse</span><span class="s2">=</span><span class="s0">False</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">sparse </span><span class="s2">= </span><span class="s1">sparse</span>
+
+    <span class="s0">def </span><span class="s1">__getitem__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">key</span><span class="s2">):</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">size </span><span class="s2">= []</span>
+            <span class="s6"># Mimic the behavior of `np.arange` and use a data type</span>
+            <span class="s6"># which is at least as large as `np.int_`</span>
+            <span class="s1">num_list </span><span class="s2">= [</span><span class="s5">0</span><span class="s2">]</span>
+            <span class="s0">for </span><span class="s1">k </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">key</span><span class="s2">)):</span>
+                <span class="s1">step </span><span class="s2">= </span><span class="s1">key</span><span class="s2">[</span><span class="s1">k</span><span class="s2">].</span><span class="s1">step</span>
+                <span class="s1">start </span><span class="s2">= </span><span class="s1">key</span><span class="s2">[</span><span class="s1">k</span><span class="s2">].</span><span class="s1">start</span>
+                <span class="s1">stop </span><span class="s2">= </span><span class="s1">key</span><span class="s2">[</span><span class="s1">k</span><span class="s2">].</span><span class="s1">stop</span>
+                <span class="s0">if </span><span class="s1">start </span><span class="s0">is None</span><span class="s2">:</span>
+                    <span class="s1">start </span><span class="s2">= </span><span class="s5">0</span>
+                <span class="s0">if </span><span class="s1">step </span><span class="s0">is None</span><span class="s2">:</span>
+                    <span class="s1">step </span><span class="s2">= </span><span class="s5">1</span>
+                <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">step</span><span class="s2">, (</span><span class="s1">_nx</span><span class="s2">.</span><span class="s1">complexfloating</span><span class="s2">, </span><span class="s1">complex</span><span class="s2">)):</span>
+                    <span class="s1">step </span><span class="s2">= </span><span class="s1">abs</span><span class="s2">(</span><span class="s1">step</span><span class="s2">)</span>
+                    <span class="s1">size</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">int</span><span class="s2">(</span><span class="s1">step</span><span class="s2">))</span>
+                <span class="s0">else</span><span class="s2">:</span>
+                    <span class="s1">size</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span>
+                        <span class="s1">math</span><span class="s2">.</span><span class="s1">ceil</span><span class="s2">((</span><span class="s1">stop </span><span class="s2">- </span><span class="s1">start</span><span class="s2">) / </span><span class="s1">step</span><span class="s2">))</span>
+                <span class="s1">num_list </span><span class="s2">+= [</span><span class="s1">start</span><span class="s2">, </span><span class="s1">stop</span><span class="s2">, </span><span class="s1">step</span><span class="s2">]</span>
+            <span class="s1">typ </span><span class="s2">= </span><span class="s1">_nx</span><span class="s2">.</span><span class="s1">result_type</span><span class="s2">(*</span><span class="s1">num_list</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">sparse</span><span class="s2">:</span>
+                <span class="s1">nn </span><span class="s2">= [</span><span class="s1">_nx</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">_x</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">_t</span><span class="s2">)</span>
+                      <span class="s0">for </span><span class="s1">_x</span><span class="s2">, </span><span class="s1">_t </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">size</span><span class="s2">, (</span><span class="s1">typ</span><span class="s2">,) * </span><span class="s1">len</span><span class="s2">(</span><span class="s1">size</span><span class="s2">))]</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">nn </span><span class="s2">= </span><span class="s1">_nx</span><span class="s2">.</span><span class="s1">indices</span><span class="s2">(</span><span class="s1">size</span><span class="s2">, </span><span class="s1">typ</span><span class="s2">)</span>
+            <span class="s0">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">kk </span><span class="s0">in </span><span class="s1">enumerate</span><span class="s2">(</span><span class="s1">key</span><span class="s2">):</span>
+                <span class="s1">step </span><span class="s2">= </span><span class="s1">kk</span><span class="s2">.</span><span class="s1">step</span>
+                <span class="s1">start </span><span class="s2">= </span><span class="s1">kk</span><span class="s2">.</span><span class="s1">start</span>
+                <span class="s0">if </span><span class="s1">start </span><span class="s0">is None</span><span class="s2">:</span>
+                    <span class="s1">start </span><span class="s2">= </span><span class="s5">0</span>
+                <span class="s0">if </span><span class="s1">step </span><span class="s0">is None</span><span class="s2">:</span>
+                    <span class="s1">step </span><span class="s2">= </span><span class="s5">1</span>
+                <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">step</span><span class="s2">, (</span><span class="s1">_nx</span><span class="s2">.</span><span class="s1">complexfloating</span><span class="s2">, </span><span class="s1">complex</span><span class="s2">)):</span>
+                    <span class="s1">step </span><span class="s2">= </span><span class="s1">int</span><span class="s2">(</span><span class="s1">abs</span><span class="s2">(</span><span class="s1">step</span><span class="s2">))</span>
+                    <span class="s0">if </span><span class="s1">step </span><span class="s2">!= </span><span class="s5">1</span><span class="s2">:</span>
+                        <span class="s1">step </span><span class="s2">= (</span><span class="s1">kk</span><span class="s2">.</span><span class="s1">stop </span><span class="s2">- </span><span class="s1">start</span><span class="s2">) / </span><span class="s1">float</span><span class="s2">(</span><span class="s1">step </span><span class="s2">- </span><span class="s5">1</span><span class="s2">)</span>
+                <span class="s1">nn</span><span class="s2">[</span><span class="s1">k</span><span class="s2">] = (</span><span class="s1">nn</span><span class="s2">[</span><span class="s1">k</span><span class="s2">] * </span><span class="s1">step </span><span class="s2">+ </span><span class="s1">start</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">sparse</span><span class="s2">:</span>
+                <span class="s1">slobj </span><span class="s2">= [</span><span class="s1">_nx</span><span class="s2">.</span><span class="s1">newaxis</span><span class="s2">] * </span><span class="s1">len</span><span class="s2">(</span><span class="s1">size</span><span class="s2">)</span>
+                <span class="s0">for </span><span class="s1">k </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">size</span><span class="s2">)):</span>
+                    <span class="s1">slobj</span><span class="s2">[</span><span class="s1">k</span><span class="s2">] = </span><span class="s1">slice</span><span class="s2">(</span><span class="s0">None</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+                    <span class="s1">nn</span><span class="s2">[</span><span class="s1">k</span><span class="s2">] = </span><span class="s1">nn</span><span class="s2">[</span><span class="s1">k</span><span class="s2">][</span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">slobj</span><span class="s2">)]</span>
+                    <span class="s1">slobj</span><span class="s2">[</span><span class="s1">k</span><span class="s2">] = </span><span class="s1">_nx</span><span class="s2">.</span><span class="s1">newaxis</span>
+                <span class="s0">return </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">nn</span><span class="s2">)  </span><span class="s6"># ogrid -&gt; tuple of arrays</span>
+            <span class="s0">return </span><span class="s1">nn  </span><span class="s6"># mgrid -&gt; ndarray</span>
+        <span class="s0">except </span><span class="s2">(</span><span class="s1">IndexError</span><span class="s2">, </span><span class="s1">TypeError</span><span class="s2">):</span>
+            <span class="s1">step </span><span class="s2">= </span><span class="s1">key</span><span class="s2">.</span><span class="s1">step</span>
+            <span class="s1">stop </span><span class="s2">= </span><span class="s1">key</span><span class="s2">.</span><span class="s1">stop</span>
+            <span class="s1">start </span><span class="s2">= </span><span class="s1">key</span><span class="s2">.</span><span class="s1">start</span>
+            <span class="s0">if </span><span class="s1">start </span><span class="s0">is None</span><span class="s2">:</span>
+                <span class="s1">start </span><span class="s2">= </span><span class="s5">0</span>
+            <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">step</span><span class="s2">, (</span><span class="s1">_nx</span><span class="s2">.</span><span class="s1">complexfloating</span><span class="s2">, </span><span class="s1">complex</span><span class="s2">)):</span>
+                <span class="s6"># Prevent the (potential) creation of integer arrays</span>
+                <span class="s1">step_float </span><span class="s2">= </span><span class="s1">abs</span><span class="s2">(</span><span class="s1">step</span><span class="s2">)</span>
+                <span class="s1">step </span><span class="s2">= </span><span class="s1">length </span><span class="s2">= </span><span class="s1">int</span><span class="s2">(</span><span class="s1">step_float</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s1">step </span><span class="s2">!= </span><span class="s5">1</span><span class="s2">:</span>
+                    <span class="s1">step </span><span class="s2">= (</span><span class="s1">key</span><span class="s2">.</span><span class="s1">stop </span><span class="s2">- </span><span class="s1">start</span><span class="s2">) / </span><span class="s1">float</span><span class="s2">(</span><span class="s1">step </span><span class="s2">- </span><span class="s5">1</span><span class="s2">)</span>
+                <span class="s1">typ </span><span class="s2">= </span><span class="s1">_nx</span><span class="s2">.</span><span class="s1">result_type</span><span class="s2">(</span><span class="s1">start</span><span class="s2">, </span><span class="s1">stop</span><span class="s2">, </span><span class="s1">step_float</span><span class="s2">)</span>
+                <span class="s0">return </span><span class="s1">_nx</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s5">0</span><span class="s2">, </span><span class="s1">length</span><span class="s2">, </span><span class="s5">1</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">typ</span><span class="s2">) * </span><span class="s1">step </span><span class="s2">+ </span><span class="s1">start</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s0">return </span><span class="s1">_nx</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">start</span><span class="s2">, </span><span class="s1">stop</span><span class="s2">, </span><span class="s1">step</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">MGridClass</span><span class="s2">(</span><span class="s1">nd_grid</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    An instance which returns a dense multi-dimensional &quot;meshgrid&quot;. 
+ 
+    An instance which returns a dense (or fleshed out) mesh-grid 
+    when indexed, so that each returned argument has the same shape. 
+    The dimensions and number of the output arrays are equal to the 
+    number of indexing dimensions.  If the step length is not a complex 
+    number, then the stop is not inclusive. 
+ 
+    However, if the step length is a **complex number** (e.g. 5j), then 
+    the integer part of its magnitude is interpreted as specifying the 
+    number of points to create between the start and stop values, where 
+    the stop value **is inclusive**. 
+ 
+    Returns 
+    ------- 
+    mesh-grid : ndarray 
+        A single array, containing a set of `ndarray`\\ s all of the same 
+        dimensions. stacked along the first axis. 
+ 
+    See Also 
+    -------- 
+    ogrid : like `mgrid` but returns open (not fleshed out) mesh grids 
+    meshgrid: return coordinate matrices from coordinate vectors 
+    r_ : array concatenator 
+    :ref:`how-to-partition` 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+    &gt;&gt;&gt; np.mgrid[0:5, 0:5] 
+    array([[[0, 0, 0, 0, 0], 
+            [1, 1, 1, 1, 1], 
+            [2, 2, 2, 2, 2], 
+            [3, 3, 3, 3, 3], 
+            [4, 4, 4, 4, 4]], 
+           [[0, 1, 2, 3, 4], 
+            [0, 1, 2, 3, 4], 
+            [0, 1, 2, 3, 4], 
+            [0, 1, 2, 3, 4], 
+            [0, 1, 2, 3, 4]]]) 
+    &gt;&gt;&gt; np.mgrid[-1:1:5j] 
+    array([-1. , -0.5,  0. ,  0.5,  1. ]) 
+ 
+    &gt;&gt;&gt; np.mgrid[0:4].shape 
+    (4,) 
+    &gt;&gt;&gt; np.mgrid[0:4, 0:5].shape 
+    (2, 4, 5) 
+    &gt;&gt;&gt; np.mgrid[0:4, 0:5, 0:6].shape 
+    (3, 4, 5, 6) 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">__slots__ </span><span class="s2">= ()</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">sparse</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+
+
+<span class="s1">mgrid </span><span class="s2">= </span><span class="s1">MGridClass</span><span class="s2">()</span>
+
+
+<span class="s0">class </span><span class="s1">OGridClass</span><span class="s2">(</span><span class="s1">nd_grid</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    An instance which returns an open multi-dimensional &quot;meshgrid&quot;. 
+ 
+    An instance which returns an open (i.e. not fleshed out) mesh-grid 
+    when indexed, so that only one dimension of each returned array is 
+    greater than 1.  The dimension and number of the output arrays are 
+    equal to the number of indexing dimensions.  If the step length is 
+    not a complex number, then the stop is not inclusive. 
+ 
+    However, if the step length is a **complex number** (e.g. 5j), then 
+    the integer part of its magnitude is interpreted as specifying the 
+    number of points to create between the start and stop values, where 
+    the stop value **is inclusive**. 
+ 
+    Returns 
+    ------- 
+    mesh-grid : ndarray or tuple of ndarrays 
+        If the input is a single slice, returns an array. 
+        If the input is multiple slices, returns a tuple of arrays, with 
+        only one dimension not equal to 1. 
+ 
+    See Also 
+    -------- 
+    mgrid : like `ogrid` but returns dense (or fleshed out) mesh grids 
+    meshgrid: return coordinate matrices from coordinate vectors 
+    r_ : array concatenator 
+    :ref:`how-to-partition` 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; from numpy import ogrid 
+    &gt;&gt;&gt; ogrid[-1:1:5j] 
+    array([-1. , -0.5,  0. ,  0.5,  1. ]) 
+    &gt;&gt;&gt; ogrid[0:5, 0:5] 
+    (array([[0], 
+            [1], 
+            [2], 
+            [3], 
+            [4]]), 
+     array([[0, 1, 2, 3, 4]])) 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">__slots__ </span><span class="s2">= ()</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">sparse</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+
+<span class="s1">ogrid </span><span class="s2">= </span><span class="s1">OGridClass</span><span class="s2">()</span>
+
+
+<span class="s0">class </span><span class="s1">AxisConcatenator</span><span class="s2">:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Translates slice objects to concatenation along an axis. 
+ 
+    For detailed documentation on usage, see `r_`. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">__slots__ </span><span class="s2">= (</span><span class="s3">'axis'</span><span class="s2">, </span><span class="s3">'matrix'</span><span class="s2">, </span><span class="s3">'ndmin'</span><span class="s2">, </span><span class="s3">'trans1d'</span><span class="s2">)</span>
+
+    <span class="s6"># allow ma.mr_ to override this</span>
+    <span class="s1">concatenate </span><span class="s2">= </span><span class="s1">staticmethod</span><span class="s2">(</span><span class="s1">_nx</span><span class="s2">.</span><span class="s1">concatenate</span><span class="s2">)</span>
+    <span class="s1">makemat </span><span class="s2">= </span><span class="s1">staticmethod</span><span class="s2">(</span><span class="s1">matrixlib</span><span class="s2">.</span><span class="s1">matrix</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">axis</span><span class="s2">=</span><span class="s5">0</span><span class="s2">, </span><span class="s1">matrix</span><span class="s2">=</span><span class="s0">False</span><span class="s2">, </span><span class="s1">ndmin</span><span class="s2">=</span><span class="s5">1</span><span class="s2">, </span><span class="s1">trans1d</span><span class="s2">=-</span><span class="s5">1</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">axis </span><span class="s2">= </span><span class="s1">axis</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">matrix </span><span class="s2">= </span><span class="s1">matrix</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">trans1d </span><span class="s2">= </span><span class="s1">trans1d</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">ndmin </span><span class="s2">= </span><span class="s1">ndmin</span>
+
+    <span class="s0">def </span><span class="s1">__getitem__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">key</span><span class="s2">):</span>
+        <span class="s6"># handle matrix builder syntax</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">key</span><span class="s2">, </span><span class="s1">str</span><span class="s2">):</span>
+            <span class="s1">frame </span><span class="s2">= </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">_getframe</span><span class="s2">().</span><span class="s1">f_back</span>
+            <span class="s1">mymat </span><span class="s2">= </span><span class="s1">matrixlib</span><span class="s2">.</span><span class="s1">bmat</span><span class="s2">(</span><span class="s1">key</span><span class="s2">, </span><span class="s1">frame</span><span class="s2">.</span><span class="s1">f_globals</span><span class="s2">, </span><span class="s1">frame</span><span class="s2">.</span><span class="s1">f_locals</span><span class="s2">)</span>
+            <span class="s0">return </span><span class="s1">mymat</span>
+
+        <span class="s0">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">key</span><span class="s2">, </span><span class="s1">tuple</span><span class="s2">):</span>
+            <span class="s1">key </span><span class="s2">= (</span><span class="s1">key</span><span class="s2">,)</span>
+
+        <span class="s6"># copy attributes, since they can be overridden in the first argument</span>
+        <span class="s1">trans1d </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">trans1d</span>
+        <span class="s1">ndmin </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">ndmin</span>
+        <span class="s1">matrix </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">matrix</span>
+        <span class="s1">axis </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">axis</span>
+
+        <span class="s1">objs </span><span class="s2">= []</span>
+        <span class="s6"># dtypes or scalars for weak scalar handling in result_type</span>
+        <span class="s1">result_type_objs </span><span class="s2">= []</span>
+
+        <span class="s0">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">item </span><span class="s0">in </span><span class="s1">enumerate</span><span class="s2">(</span><span class="s1">key</span><span class="s2">):</span>
+            <span class="s1">scalar </span><span class="s2">= </span><span class="s0">False</span>
+            <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">item</span><span class="s2">, </span><span class="s1">slice</span><span class="s2">):</span>
+                <span class="s1">step </span><span class="s2">= </span><span class="s1">item</span><span class="s2">.</span><span class="s1">step</span>
+                <span class="s1">start </span><span class="s2">= </span><span class="s1">item</span><span class="s2">.</span><span class="s1">start</span>
+                <span class="s1">stop </span><span class="s2">= </span><span class="s1">item</span><span class="s2">.</span><span class="s1">stop</span>
+                <span class="s0">if </span><span class="s1">start </span><span class="s0">is None</span><span class="s2">:</span>
+                    <span class="s1">start </span><span class="s2">= </span><span class="s5">0</span>
+                <span class="s0">if </span><span class="s1">step </span><span class="s0">is None</span><span class="s2">:</span>
+                    <span class="s1">step </span><span class="s2">= </span><span class="s5">1</span>
+                <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">step</span><span class="s2">, (</span><span class="s1">_nx</span><span class="s2">.</span><span class="s1">complexfloating</span><span class="s2">, </span><span class="s1">complex</span><span class="s2">)):</span>
+                    <span class="s1">size </span><span class="s2">= </span><span class="s1">int</span><span class="s2">(</span><span class="s1">abs</span><span class="s2">(</span><span class="s1">step</span><span class="s2">))</span>
+                    <span class="s1">newobj </span><span class="s2">= </span><span class="s1">linspace</span><span class="s2">(</span><span class="s1">start</span><span class="s2">, </span><span class="s1">stop</span><span class="s2">, </span><span class="s1">num</span><span class="s2">=</span><span class="s1">size</span><span class="s2">)</span>
+                <span class="s0">else</span><span class="s2">:</span>
+                    <span class="s1">newobj </span><span class="s2">= </span><span class="s1">_nx</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">start</span><span class="s2">, </span><span class="s1">stop</span><span class="s2">, </span><span class="s1">step</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s1">ndmin </span><span class="s2">&gt; </span><span class="s5">1</span><span class="s2">:</span>
+                    <span class="s1">newobj </span><span class="s2">= </span><span class="s1">array</span><span class="s2">(</span><span class="s1">newobj</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">None</span><span class="s2">, </span><span class="s1">ndmin</span><span class="s2">=</span><span class="s1">ndmin</span><span class="s2">)</span>
+                    <span class="s0">if </span><span class="s1">trans1d </span><span class="s2">!= -</span><span class="s5">1</span><span class="s2">:</span>
+                        <span class="s1">newobj </span><span class="s2">= </span><span class="s1">newobj</span><span class="s2">.</span><span class="s1">swapaxes</span><span class="s2">(-</span><span class="s5">1</span><span class="s2">, </span><span class="s1">trans1d</span><span class="s2">)</span>
+            <span class="s0">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">item</span><span class="s2">, </span><span class="s1">str</span><span class="s2">):</span>
+                <span class="s0">if </span><span class="s1">k </span><span class="s2">!= </span><span class="s5">0</span><span class="s2">:</span>
+                    <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;special directives must be the &quot;</span>
+                                     <span class="s3">&quot;first entry.&quot;</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s1">item </span><span class="s0">in </span><span class="s2">(</span><span class="s3">'r'</span><span class="s2">, </span><span class="s3">'c'</span><span class="s2">):</span>
+                    <span class="s1">matrix </span><span class="s2">= </span><span class="s0">True</span>
+                    <span class="s1">col </span><span class="s2">= (</span><span class="s1">item </span><span class="s2">== </span><span class="s3">'c'</span><span class="s2">)</span>
+                    <span class="s0">continue</span>
+                <span class="s0">if </span><span class="s3">',' </span><span class="s0">in </span><span class="s1">item</span><span class="s2">:</span>
+                    <span class="s1">vec </span><span class="s2">= </span><span class="s1">item</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s3">','</span><span class="s2">)</span>
+                    <span class="s0">try</span><span class="s2">:</span>
+                        <span class="s1">axis</span><span class="s2">, </span><span class="s1">ndmin </span><span class="s2">= [</span><span class="s1">int</span><span class="s2">(</span><span class="s1">x</span><span class="s2">) </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">vec</span><span class="s2">[:</span><span class="s5">2</span><span class="s2">]]</span>
+                        <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">vec</span><span class="s2">) == </span><span class="s5">3</span><span class="s2">:</span>
+                            <span class="s1">trans1d </span><span class="s2">= </span><span class="s1">int</span><span class="s2">(</span><span class="s1">vec</span><span class="s2">[</span><span class="s5">2</span><span class="s2">])</span>
+                        <span class="s0">continue</span>
+                    <span class="s0">except </span><span class="s1">Exception </span><span class="s0">as </span><span class="s1">e</span><span class="s2">:</span>
+                        <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span>
+                            <span class="s3">f&quot;unknown special directive </span><span class="s0">{</span><span class="s1">item</span><span class="s0">!r}</span><span class="s3">&quot;</span>
+                        <span class="s2">) </span><span class="s0">from </span><span class="s1">e</span>
+                <span class="s0">try</span><span class="s2">:</span>
+                    <span class="s1">axis </span><span class="s2">= </span><span class="s1">int</span><span class="s2">(</span><span class="s1">item</span><span class="s2">)</span>
+                    <span class="s0">continue</span>
+                <span class="s0">except </span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">TypeError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">e</span><span class="s2">:</span>
+                    <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;unknown special directive&quot;</span><span class="s2">) </span><span class="s0">from </span><span class="s1">e</span>
+            <span class="s0">elif </span><span class="s1">type</span><span class="s2">(</span><span class="s1">item</span><span class="s2">) </span><span class="s0">in </span><span class="s1">ScalarType</span><span class="s2">:</span>
+                <span class="s1">scalar </span><span class="s2">= </span><span class="s0">True</span>
+                <span class="s1">newobj </span><span class="s2">= </span><span class="s1">item</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">item_ndim </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndim</span><span class="s2">(</span><span class="s1">item</span><span class="s2">)</span>
+                <span class="s1">newobj </span><span class="s2">= </span><span class="s1">array</span><span class="s2">(</span><span class="s1">item</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">None</span><span class="s2">, </span><span class="s1">subok</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">ndmin</span><span class="s2">=</span><span class="s1">ndmin</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s1">trans1d </span><span class="s2">!= -</span><span class="s5">1 </span><span class="s0">and </span><span class="s1">item_ndim </span><span class="s2">&lt; </span><span class="s1">ndmin</span><span class="s2">:</span>
+                    <span class="s1">k2 </span><span class="s2">= </span><span class="s1">ndmin </span><span class="s2">- </span><span class="s1">item_ndim</span>
+                    <span class="s1">k1 </span><span class="s2">= </span><span class="s1">trans1d</span>
+                    <span class="s0">if </span><span class="s1">k1 </span><span class="s2">&lt; </span><span class="s5">0</span><span class="s2">:</span>
+                        <span class="s1">k1 </span><span class="s2">+= </span><span class="s1">k2 </span><span class="s2">+ </span><span class="s5">1</span>
+                    <span class="s1">defaxes </span><span class="s2">= </span><span class="s1">list</span><span class="s2">(</span><span class="s1">range</span><span class="s2">(</span><span class="s1">ndmin</span><span class="s2">))</span>
+                    <span class="s1">axes </span><span class="s2">= </span><span class="s1">defaxes</span><span class="s2">[:</span><span class="s1">k1</span><span class="s2">] + </span><span class="s1">defaxes</span><span class="s2">[</span><span class="s1">k2</span><span class="s2">:] + </span><span class="s1">defaxes</span><span class="s2">[</span><span class="s1">k1</span><span class="s2">:</span><span class="s1">k2</span><span class="s2">]</span>
+                    <span class="s1">newobj </span><span class="s2">= </span><span class="s1">newobj</span><span class="s2">.</span><span class="s1">transpose</span><span class="s2">(</span><span class="s1">axes</span><span class="s2">)</span>
+
+            <span class="s1">objs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">newobj</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">scalar</span><span class="s2">:</span>
+                <span class="s1">result_type_objs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">item</span><span class="s2">)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">result_type_objs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">newobj</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">)</span>
+
+        <span class="s6"># Ensure that scalars won't up-cast unless warranted, for 0, drops</span>
+        <span class="s6"># through to error in concatenate.</span>
+        <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">result_type_objs</span><span class="s2">) != </span><span class="s5">0</span><span class="s2">:</span>
+            <span class="s1">final_dtype </span><span class="s2">= </span><span class="s1">_nx</span><span class="s2">.</span><span class="s1">result_type</span><span class="s2">(*</span><span class="s1">result_type_objs</span><span class="s2">)</span>
+            <span class="s6"># concatenate could do cast, but that can be overridden:</span>
+            <span class="s1">objs </span><span class="s2">= [</span><span class="s1">array</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">None</span><span class="s2">, </span><span class="s1">subok</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,</span>
+                          <span class="s1">ndmin</span><span class="s2">=</span><span class="s1">ndmin</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">final_dtype</span><span class="s2">) </span><span class="s0">for </span><span class="s1">obj </span><span class="s0">in </span><span class="s1">objs</span><span class="s2">]</span>
+
+        <span class="s1">res </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">concatenate</span><span class="s2">(</span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">objs</span><span class="s2">), </span><span class="s1">axis</span><span class="s2">=</span><span class="s1">axis</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">matrix</span><span class="s2">:</span>
+            <span class="s1">oldndim </span><span class="s2">= </span><span class="s1">res</span><span class="s2">.</span><span class="s1">ndim</span>
+            <span class="s1">res </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">makemat</span><span class="s2">(</span><span class="s1">res</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">oldndim </span><span class="s2">== </span><span class="s5">1 </span><span class="s0">and </span><span class="s1">col</span><span class="s2">:</span>
+                <span class="s1">res </span><span class="s2">= </span><span class="s1">res</span><span class="s2">.</span><span class="s1">T</span>
+        <span class="s0">return </span><span class="s1">res</span>
+
+    <span class="s0">def </span><span class="s1">__len__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s5">0</span>
+
+<span class="s6"># separate classes are used here instead of just making r_ = concatenator(0),</span>
+<span class="s6"># etc. because otherwise we couldn't get the doc string to come out right</span>
+<span class="s6"># in help(r_)</span>
+
+
+<span class="s0">class </span><span class="s1">RClass</span><span class="s2">(</span><span class="s1">AxisConcatenator</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Translates slice objects to concatenation along the first axis. 
+ 
+    This is a simple way to build up arrays quickly. There are two use cases. 
+ 
+    1. If the index expression contains comma separated arrays, then stack 
+       them along their first axis. 
+    2. If the index expression contains slice notation or scalars then create 
+       a 1-D array with a range indicated by the slice notation. 
+ 
+    If slice notation is used, the syntax ``start:stop:step`` is equivalent 
+    to ``np.arange(start, stop, step)`` inside of the brackets. However, if 
+    ``step`` is an imaginary number (i.e. 100j) then its integer portion is 
+    interpreted as a number-of-points desired and the start and stop are 
+    inclusive. In other words ``start:stop:stepj`` is interpreted as 
+    ``np.linspace(start, stop, step, endpoint=1)`` inside of the brackets. 
+    After expansion of slice notation, all comma separated sequences are 
+    concatenated together. 
+ 
+    Optional character strings placed as the first element of the index 
+    expression can be used to change the output. The strings 'r' or 'c' result 
+    in matrix output. If the result is 1-D and 'r' is specified a 1 x N (row) 
+    matrix is produced. If the result is 1-D and 'c' is specified, then 
+    an N x 1 (column) matrix is produced. 
+    If the result is 2-D then both provide the same matrix result. 
+ 
+    A string integer specifies which axis to stack multiple comma separated 
+    arrays along. A string of two comma-separated integers allows indication 
+    of the minimum number of dimensions to force each entry into as the 
+    second integer (the axis to concatenate along is still the first integer). 
+ 
+    A string with three comma-separated integers allows specification of the 
+    axis to concatenate along, the minimum number of dimensions to force the 
+    entries to, and which axis should contain the start of the arrays which 
+    are less than the specified number of dimensions. In other words the third 
+    integer allows you to specify where the 1's should be placed in the shape 
+    of the arrays that have their shapes upgraded. By default, they are placed 
+    in the front of the shape tuple. The third argument allows you to specify 
+    where the start of the array should be instead. Thus, a third argument of 
+    '0' would place the 1's at the end of the array shape. Negative integers 
+    specify where in the new shape tuple the last dimension of upgraded arrays 
+    should be placed, so the default is '-1'. 
+ 
+    Parameters 
+    ---------- 
+    Not a function, so takes no parameters 
+ 
+ 
+    Returns 
+    ------- 
+    A concatenated ndarray or matrix. 
+ 
+    See Also 
+    -------- 
+    concatenate : Join a sequence of arrays along an existing axis. 
+    c_ : Translates slice objects to concatenation along the second axis. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+    &gt;&gt;&gt; np.r_[np.array([1,2,3]), 0, 0, np.array([4,5,6])] 
+    array([1, 2, 3, ..., 4, 5, 6]) 
+    &gt;&gt;&gt; np.r_[-1:1:6j, [0]*3, 5, 6] 
+    array([-1. , -0.6, -0.2,  0.2,  0.6,  1. ,  0. ,  0. ,  0. ,  5. ,  6. ]) 
+ 
+    String integers specify the axis to concatenate along or the minimum 
+    number of dimensions to force entries into. 
+ 
+    &gt;&gt;&gt; a = np.array([[0, 1, 2], [3, 4, 5]]) 
+    &gt;&gt;&gt; np.r_['-1', a, a] # concatenate along last axis 
+    array([[0, 1, 2, 0, 1, 2], 
+           [3, 4, 5, 3, 4, 5]]) 
+    &gt;&gt;&gt; np.r_['0,2', [1,2,3], [4,5,6]] # concatenate along first axis, dim&gt;=2 
+    array([[1, 2, 3], 
+           [4, 5, 6]]) 
+ 
+    &gt;&gt;&gt; np.r_['0,2,0', [1,2,3], [4,5,6]] 
+    array([[1], 
+           [2], 
+           [3], 
+           [4], 
+           [5], 
+           [6]]) 
+    &gt;&gt;&gt; np.r_['1,2,0', [1,2,3], [4,5,6]] 
+    array([[1, 4], 
+           [2, 5], 
+           [3, 6]]) 
+ 
+    Using 'r' or 'c' as a first string argument creates a matrix. 
+ 
+    &gt;&gt;&gt; np.r_['r',[1,2,3], [4,5,6]] 
+    matrix([[1, 2, 3, 4, 5, 6]]) 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">__slots__ </span><span class="s2">= ()</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">AxisConcatenator</span><span class="s2">.</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s5">0</span><span class="s2">)</span>
+
+
+<span class="s1">r_ </span><span class="s2">= </span><span class="s1">RClass</span><span class="s2">()</span>
+
+
+<span class="s0">class </span><span class="s1">CClass</span><span class="s2">(</span><span class="s1">AxisConcatenator</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Translates slice objects to concatenation along the second axis. 
+ 
+    This is short-hand for ``np.r_['-1,2,0', index expression]``, which is 
+    useful because of its common occurrence. In particular, arrays will be 
+    stacked along their last axis after being upgraded to at least 2-D with 
+    1's post-pended to the shape (column vectors made out of 1-D arrays). 
+ 
+    See Also 
+    -------- 
+    column_stack : Stack 1-D arrays as columns into a 2-D array. 
+    r_ : For more detailed documentation. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+    &gt;&gt;&gt; np.c_[np.array([1,2,3]), np.array([4,5,6])] 
+    array([[1, 4], 
+           [2, 5], 
+           [3, 6]]) 
+    &gt;&gt;&gt; np.c_[np.array([[1,2,3]]), 0, 0, np.array([[4,5,6]])] 
+    array([[1, 2, 3, ..., 4, 5, 6]]) 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">__slots__ </span><span class="s2">= ()</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">AxisConcatenator</span><span class="s2">.</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, -</span><span class="s5">1</span><span class="s2">, </span><span class="s1">ndmin</span><span class="s2">=</span><span class="s5">2</span><span class="s2">, </span><span class="s1">trans1d</span><span class="s2">=</span><span class="s5">0</span><span class="s2">)</span>
+
+
+<span class="s1">c_ </span><span class="s2">= </span><span class="s1">CClass</span><span class="s2">()</span>
+
+
+<span class="s2">@</span><span class="s1">set_module</span><span class="s2">(</span><span class="s3">'numpy'</span><span class="s2">)</span>
+<span class="s0">class </span><span class="s1">ndenumerate</span><span class="s2">:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Multidimensional index iterator. 
+ 
+    Return an iterator yielding pairs of array coordinates and values. 
+ 
+    Parameters 
+    ---------- 
+    arr : ndarray 
+      Input array. 
+ 
+    See Also 
+    -------- 
+    ndindex, flatiter 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+    &gt;&gt;&gt; a = np.array([[1, 2], [3, 4]]) 
+    &gt;&gt;&gt; for index, x in np.ndenumerate(a): 
+    ...     print(index, x) 
+    (0, 0) 1 
+    (0, 1) 2 
+    (1, 0) 3 
+    (1, 1) 4 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">arr</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">iter </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">asarray</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">).</span><span class="s1">flat</span>
+
+    <span class="s0">def </span><span class="s1">__next__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Standard iterator method, returns the index tuple and array value. 
+ 
+        Returns 
+        ------- 
+        coords : tuple of ints 
+            The indices of the current iteration. 
+        val : scalar 
+            The array element of the current iteration. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">iter</span><span class="s2">.</span><span class="s1">coords</span><span class="s2">, </span><span class="s1">next</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">iter</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__iter__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">self</span>
+
+
+<span class="s2">@</span><span class="s1">set_module</span><span class="s2">(</span><span class="s3">'numpy'</span><span class="s2">)</span>
+<span class="s0">class </span><span class="s1">ndindex</span><span class="s2">:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    An N-dimensional iterator object to index arrays. 
+ 
+    Given the shape of an array, an `ndindex` instance iterates over 
+    the N-dimensional index of the array. At each iteration a tuple 
+    of indices is returned, the last dimension is iterated over first. 
+ 
+    Parameters 
+    ---------- 
+    shape : ints, or a single tuple of ints 
+        The size of each dimension of the array can be passed as 
+        individual parameters or as the elements of a tuple. 
+ 
+    See Also 
+    -------- 
+    ndenumerate, flatiter 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+ 
+    Dimensions as individual arguments 
+ 
+    &gt;&gt;&gt; for index in np.ndindex(3, 2, 1): 
+    ...     print(index) 
+    (0, 0, 0) 
+    (0, 1, 0) 
+    (1, 0, 0) 
+    (1, 1, 0) 
+    (2, 0, 0) 
+    (2, 1, 0) 
+ 
+    Same dimensions - but in a tuple ``(3, 2, 1)`` 
+ 
+    &gt;&gt;&gt; for index in np.ndindex((3, 2, 1)): 
+    ...     print(index) 
+    (0, 0, 0) 
+    (0, 1, 0) 
+    (1, 0, 0) 
+    (1, 1, 0) 
+    (2, 0, 0) 
+    (2, 1, 0) 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, *</span><span class="s1">shape</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">shape</span><span class="s2">) == </span><span class="s5">1 </span><span class="s0">and </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">shape</span><span class="s2">[</span><span class="s5">0</span><span class="s2">], </span><span class="s1">tuple</span><span class="s2">):</span>
+            <span class="s1">shape </span><span class="s2">= </span><span class="s1">shape</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]</span>
+        <span class="s0">if </span><span class="s1">min</span><span class="s2">(</span><span class="s1">shape</span><span class="s2">, </span><span class="s1">default</span><span class="s2">=</span><span class="s5">0</span><span class="s2">) &lt; </span><span class="s5">0</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;negative dimensions are not allowed&quot;</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_iter </span><span class="s2">= </span><span class="s1">product</span><span class="s2">(*</span><span class="s1">map</span><span class="s2">(</span><span class="s1">range</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">__iter__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">self</span>
+
+    <span class="s0">def </span><span class="s1">__next__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Standard iterator method, updates the index and returns the index 
+        tuple. 
+ 
+        Returns 
+        ------- 
+        val : tuple of ints 
+            Returns a tuple containing the indices of the current 
+            iteration. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s1">next</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_iter</span><span class="s2">)</span>
+
+
+<span class="s6"># You can do all this with slice() plus a few special objects,</span>
+<span class="s6"># but there's a lot to remember. This version is simpler because</span>
+<span class="s6"># it uses the standard array indexing syntax.</span>
+<span class="s6">#</span>
+<span class="s6"># Written by Konrad Hinsen &lt;hinsen@cnrs-orleans.fr&gt;</span>
+<span class="s6"># last revision: 1999-7-23</span>
+<span class="s6">#</span>
+<span class="s6"># Cosmetic changes by T. Oliphant 2001</span>
+<span class="s6">#</span>
+<span class="s6">#</span>
+
+<span class="s0">class </span><span class="s1">IndexExpression</span><span class="s2">:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    A nicer way to build up index tuples for arrays. 
+ 
+    .. note:: 
+       Use one of the two predefined instances ``index_exp`` or `s_` 
+       rather than directly using `IndexExpression`. 
+ 
+    For any index combination, including slicing and axis insertion, 
+    ``a[indices]`` is the same as ``a[np.index_exp[indices]]`` for any 
+    array `a`. However, ``np.index_exp[indices]`` can be used anywhere 
+    in Python code and returns a tuple of slice objects that can be 
+    used in the construction of complex index expressions. 
+ 
+    Parameters 
+    ---------- 
+    maketuple : bool 
+        If True, always returns a tuple. 
+ 
+    See Also 
+    -------- 
+    s_ : Predefined instance without tuple conversion: 
+       `s_ = IndexExpression(maketuple=False)`. 
+       The ``index_exp`` is another predefined instance that 
+       always returns a tuple: 
+       `index_exp = IndexExpression(maketuple=True)`. 
+ 
+    Notes 
+    ----- 
+    You can do all this with :class:`slice` plus a few special objects, 
+    but there's a lot to remember and this version is simpler because 
+    it uses the standard array indexing syntax. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+    &gt;&gt;&gt; np.s_[2::2] 
+    slice(2, None, 2) 
+    &gt;&gt;&gt; np.index_exp[2::2] 
+    (slice(2, None, 2),) 
+ 
+    &gt;&gt;&gt; np.array([0, 1, 2, 3, 4])[np.s_[2::2]] 
+    array([2, 4]) 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">__slots__ </span><span class="s2">= (</span><span class="s3">'maketuple'</span><span class="s2">,)</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">maketuple</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">maketuple </span><span class="s2">= </span><span class="s1">maketuple</span>
+
+    <span class="s0">def </span><span class="s1">__getitem__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">item</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">maketuple </span><span class="s0">and not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">item</span><span class="s2">, </span><span class="s1">tuple</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s2">(</span><span class="s1">item</span><span class="s2">,)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">item</span>
+
+
+<span class="s1">index_exp </span><span class="s2">= </span><span class="s1">IndexExpression</span><span class="s2">(</span><span class="s1">maketuple</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+<span class="s1">s_ </span><span class="s2">= </span><span class="s1">IndexExpression</span><span class="s2">(</span><span class="s1">maketuple</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+
+<span class="s6"># End contribution from Konrad.</span>
+
+
+<span class="s6"># The following functions complement those in twodim_base, but are</span>
+<span class="s6"># applicable to N-dimensions.</span>
+
+
+<span class="s0">def </span><span class="s1">_fill_diagonal_dispatcher</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">val</span><span class="s2">, </span><span class="s1">wrap</span><span class="s2">=</span><span class="s0">None</span><span class="s2">):</span>
+    <span class="s0">return </span><span class="s2">(</span><span class="s1">a</span><span class="s2">,)</span>
+
+
+<span class="s2">@</span><span class="s1">array_function_dispatch</span><span class="s2">(</span><span class="s1">_fill_diagonal_dispatcher</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">fill_diagonal</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">val</span><span class="s2">, </span><span class="s1">wrap</span><span class="s2">=</span><span class="s0">False</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot;Fill the main diagonal of the given array of any dimensionality. 
+ 
+    For an array `a` with ``a.ndim &gt;= 2``, the diagonal is the list of 
+    values ``a[i, ..., i]`` with indices ``i`` all identical.  This function 
+    modifies the input array in-place without returning a value. 
+ 
+    Parameters 
+    ---------- 
+    a : array, at least 2-D. 
+      Array whose diagonal is to be filled in-place. 
+    val : scalar or array_like 
+      Value(s) to write on the diagonal. If `val` is scalar, the value is 
+      written along the diagonal. If array-like, the flattened `val` is 
+      written along the diagonal, repeating if necessary to fill all 
+      diagonal entries. 
+ 
+    wrap : bool 
+      For tall matrices in NumPy version up to 1.6.2, the 
+      diagonal &quot;wrapped&quot; after N columns. You can have this behavior 
+      with this option. This affects only tall matrices. 
+ 
+    See also 
+    -------- 
+    diag_indices, diag_indices_from 
+ 
+    Notes 
+    ----- 
+    This functionality can be obtained via `diag_indices`, but internally 
+    this version uses a much faster implementation that never constructs the 
+    indices and uses simple slicing. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+    &gt;&gt;&gt; a = np.zeros((3, 3), int) 
+    &gt;&gt;&gt; np.fill_diagonal(a, 5) 
+    &gt;&gt;&gt; a 
+    array([[5, 0, 0], 
+           [0, 5, 0], 
+           [0, 0, 5]]) 
+ 
+    The same function can operate on a 4-D array: 
+ 
+    &gt;&gt;&gt; a = np.zeros((3, 3, 3, 3), int) 
+    &gt;&gt;&gt; np.fill_diagonal(a, 4) 
+ 
+    We only show a few blocks for clarity: 
+ 
+    &gt;&gt;&gt; a[0, 0] 
+    array([[4, 0, 0], 
+           [0, 0, 0], 
+           [0, 0, 0]]) 
+    &gt;&gt;&gt; a[1, 1] 
+    array([[0, 0, 0], 
+           [0, 4, 0], 
+           [0, 0, 0]]) 
+    &gt;&gt;&gt; a[2, 2] 
+    array([[0, 0, 0], 
+           [0, 0, 0], 
+           [0, 0, 4]]) 
+ 
+    The wrap option affects only tall matrices: 
+ 
+    &gt;&gt;&gt; # tall matrices no wrap 
+    &gt;&gt;&gt; a = np.zeros((5, 3), int) 
+    &gt;&gt;&gt; np.fill_diagonal(a, 4) 
+    &gt;&gt;&gt; a 
+    array([[4, 0, 0], 
+           [0, 4, 0], 
+           [0, 0, 4], 
+           [0, 0, 0], 
+           [0, 0, 0]]) 
+ 
+    &gt;&gt;&gt; # tall matrices wrap 
+    &gt;&gt;&gt; a = np.zeros((5, 3), int) 
+    &gt;&gt;&gt; np.fill_diagonal(a, 4, wrap=True) 
+    &gt;&gt;&gt; a 
+    array([[4, 0, 0], 
+           [0, 4, 0], 
+           [0, 0, 4], 
+           [0, 0, 0], 
+           [4, 0, 0]]) 
+ 
+    &gt;&gt;&gt; # wide matrices 
+    &gt;&gt;&gt; a = np.zeros((3, 5), int) 
+    &gt;&gt;&gt; np.fill_diagonal(a, 4, wrap=True) 
+    &gt;&gt;&gt; a 
+    array([[4, 0, 0, 0, 0], 
+           [0, 4, 0, 0, 0], 
+           [0, 0, 4, 0, 0]]) 
+ 
+    The anti-diagonal can be filled by reversing the order of elements 
+    using either `numpy.flipud` or `numpy.fliplr`. 
+ 
+    &gt;&gt;&gt; a = np.zeros((3, 3), int); 
+    &gt;&gt;&gt; np.fill_diagonal(np.fliplr(a), [1,2,3])  # Horizontal flip 
+    &gt;&gt;&gt; a 
+    array([[0, 0, 1], 
+           [0, 2, 0], 
+           [3, 0, 0]]) 
+    &gt;&gt;&gt; np.fill_diagonal(np.flipud(a), [1,2,3])  # Vertical flip 
+    &gt;&gt;&gt; a 
+    array([[0, 0, 3], 
+           [0, 2, 0], 
+           [1, 0, 0]]) 
+ 
+    Note that the order in which the diagonal is filled varies depending 
+    on the flip function. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">a</span><span class="s2">.</span><span class="s1">ndim </span><span class="s2">&lt; </span><span class="s5">2</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;array must be at least 2-d&quot;</span><span class="s2">)</span>
+    <span class="s1">end </span><span class="s2">= </span><span class="s0">None</span>
+    <span class="s0">if </span><span class="s1">a</span><span class="s2">.</span><span class="s1">ndim </span><span class="s2">== </span><span class="s5">2</span><span class="s2">:</span>
+        <span class="s6"># Explicit, fast formula for the common case.  For 2-d arrays, we</span>
+        <span class="s6"># accept rectangular ones.</span>
+        <span class="s1">step </span><span class="s2">= </span><span class="s1">a</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s5">1</span><span class="s2">] + </span><span class="s5">1</span>
+        <span class="s6"># This is needed to don't have tall matrix have the diagonal wrap.</span>
+        <span class="s0">if not </span><span class="s1">wrap</span><span class="s2">:</span>
+            <span class="s1">end </span><span class="s2">= </span><span class="s1">a</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s5">1</span><span class="s2">] * </span><span class="s1">a</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s5">1</span><span class="s2">]</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s6"># For more than d=2, the strided formula is only valid for arrays with</span>
+        <span class="s6"># all dimensions equal, so we check first.</span>
+        <span class="s0">if not </span><span class="s1">np</span><span class="s2">.</span><span class="s1">all</span><span class="s2">(</span><span class="s1">diff</span><span class="s2">(</span><span class="s1">a</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">) == </span><span class="s5">0</span><span class="s2">):</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;All dimensions of input must be of equal length&quot;</span><span class="s2">)</span>
+        <span class="s1">step </span><span class="s2">= </span><span class="s5">1 </span><span class="s2">+ (</span><span class="s1">np</span><span class="s2">.</span><span class="s1">cumprod</span><span class="s2">(</span><span class="s1">a</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[:-</span><span class="s5">1</span><span class="s2">])).</span><span class="s1">sum</span><span class="s2">()</span>
+
+    <span class="s6"># Write the value out into the diagonal.</span>
+    <span class="s1">a</span><span class="s2">.</span><span class="s1">flat</span><span class="s2">[:</span><span class="s1">end</span><span class="s2">:</span><span class="s1">step</span><span class="s2">] = </span><span class="s1">val</span>
+
+
+<span class="s2">@</span><span class="s1">set_module</span><span class="s2">(</span><span class="s3">'numpy'</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">diag_indices</span><span class="s2">(</span><span class="s1">n</span><span class="s2">, </span><span class="s1">ndim</span><span class="s2">=</span><span class="s5">2</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Return the indices to access the main diagonal of an array. 
+ 
+    This returns a tuple of indices that can be used to access the main 
+    diagonal of an array `a` with ``a.ndim &gt;= 2`` dimensions and shape 
+    (n, n, ..., n). For ``a.ndim = 2`` this is the usual diagonal, for 
+    ``a.ndim &gt; 2`` this is the set of indices to access ``a[i, i, ..., i]`` 
+    for ``i = [0..n-1]``. 
+ 
+    Parameters 
+    ---------- 
+    n : int 
+      The size, along each dimension, of the arrays for which the returned 
+      indices can be used. 
+ 
+    ndim : int, optional 
+      The number of dimensions. 
+ 
+    See Also 
+    -------- 
+    diag_indices_from 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+ 
+    Create a set of indices to access the diagonal of a (4, 4) array: 
+ 
+    &gt;&gt;&gt; di = np.diag_indices(4) 
+    &gt;&gt;&gt; di 
+    (array([0, 1, 2, 3]), array([0, 1, 2, 3])) 
+    &gt;&gt;&gt; a = np.arange(16).reshape(4, 4) 
+    &gt;&gt;&gt; a 
+    array([[ 0,  1,  2,  3], 
+           [ 4,  5,  6,  7], 
+           [ 8,  9, 10, 11], 
+           [12, 13, 14, 15]]) 
+    &gt;&gt;&gt; a[di] = 100 
+    &gt;&gt;&gt; a 
+    array([[100,   1,   2,   3], 
+           [  4, 100,   6,   7], 
+           [  8,   9, 100,  11], 
+           [ 12,  13,  14, 100]]) 
+ 
+    Now, we create indices to manipulate a 3-D array: 
+ 
+    &gt;&gt;&gt; d3 = np.diag_indices(2, 3) 
+    &gt;&gt;&gt; d3 
+    (array([0, 1]), array([0, 1]), array([0, 1])) 
+ 
+    And use it to set the diagonal of an array of zeros to 1: 
+ 
+    &gt;&gt;&gt; a = np.zeros((2, 2, 2), dtype=np.int_) 
+    &gt;&gt;&gt; a[d3] = 1 
+    &gt;&gt;&gt; a 
+    array([[[1, 0], 
+            [0, 0]], 
+           [[0, 0], 
+            [0, 1]]]) 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">idx </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">n</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s2">(</span><span class="s1">idx</span><span class="s2">,) * </span><span class="s1">ndim</span>
+
+
+<span class="s0">def </span><span class="s1">_diag_indices_from</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">):</span>
+    <span class="s0">return </span><span class="s2">(</span><span class="s1">arr</span><span class="s2">,)</span>
+
+
+<span class="s2">@</span><span class="s1">array_function_dispatch</span><span class="s2">(</span><span class="s1">_diag_indices_from</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">diag_indices_from</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Return the indices to access the main diagonal of an n-dimensional array. 
+ 
+    See `diag_indices` for full details. 
+ 
+    Parameters 
+    ---------- 
+    arr : array, at least 2-D 
+ 
+    See Also 
+    -------- 
+    diag_indices 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+ 
+    Create a 4 by 4 array. 
+ 
+    &gt;&gt;&gt; a = np.arange(16).reshape(4, 4) 
+    &gt;&gt;&gt; a 
+    array([[ 0,  1,  2,  3], 
+           [ 4,  5,  6,  7], 
+           [ 8,  9, 10, 11], 
+           [12, 13, 14, 15]]) 
+ 
+    Get the indices of the diagonal elements. 
+ 
+    &gt;&gt;&gt; di = np.diag_indices_from(a) 
+    &gt;&gt;&gt; di 
+    (array([0, 1, 2, 3]), array([0, 1, 2, 3])) 
+ 
+    &gt;&gt;&gt; a[di] 
+    array([ 0,  5, 10, 15]) 
+ 
+    This is simply syntactic sugar for diag_indices. 
+ 
+    &gt;&gt;&gt; np.diag_indices(a.shape[0]) 
+    (array([0, 1, 2, 3]), array([0, 1, 2, 3])) 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">if not </span><span class="s1">arr</span><span class="s2">.</span><span class="s1">ndim </span><span class="s2">&gt;= </span><span class="s5">2</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;input array must be at least 2-d&quot;</span><span class="s2">)</span>
+    <span class="s6"># For more than d=2, the strided formula is only valid for arrays with</span>
+    <span class="s6"># all dimensions equal, so we check first.</span>
+    <span class="s0">if not </span><span class="s1">np</span><span class="s2">.</span><span class="s1">all</span><span class="s2">(</span><span class="s1">diff</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">) == </span><span class="s5">0</span><span class="s2">):</span>
+        <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;All dimensions of input must be of equal length&quot;</span><span class="s2">)</span>
+
+    <span class="s0">return </span><span class="s1">diag_indices</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s5">0</span><span class="s2">], </span><span class="s1">arr</span><span class="s2">.</span><span class="s1">ndim</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

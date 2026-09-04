@@ -1,0 +1,769 @@
+<html>
+<head>
+<title>test_multithreading.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+.s6 { color: #5f826b; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_multithreading.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">concurrent</span><span class="s2">.</span><span class="s1">futures</span>
+<span class="s0">import </span><span class="s1">inspect</span>
+<span class="s0">import </span><span class="s1">random</span>
+<span class="s0">import </span><span class="s1">subprocess</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">import </span><span class="s1">textwrap</span>
+<span class="s0">import </span><span class="s1">threading</span>
+
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">_core </span><span class="s0">import </span><span class="s1">_rational_tests</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">_core</span><span class="s2">.</span><span class="s1">tests</span><span class="s2">.</span><span class="s1">test_stringdtype </span><span class="s0">import </span><span class="s1">random_unicode_string_list</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">testing </span><span class="s0">import </span><span class="s1">IS_64BIT</span><span class="s2">, </span><span class="s1">IS_WASM</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">testing</span><span class="s2">.</span><span class="s1">_private</span><span class="s2">.</span><span class="s1">utils </span><span class="s0">import </span><span class="s1">run_subprocess</span><span class="s2">, </span><span class="s1">run_threaded</span>
+
+<span class="s0">if </span><span class="s1">IS_WASM</span><span class="s2">:</span>
+    <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span><span class="s1">allow_module_level</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">reason</span><span class="s2">=</span><span class="s3">&quot;no threading support in wasm&quot;</span><span class="s2">)</span>
+
+<span class="s1">pytestmark </span><span class="s2">= </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">thread_unsafe</span><span class="s2">(</span>
+    <span class="s1">reason</span><span class="s2">=</span><span class="s3">&quot;tests in this module are already explicitly multi-threaded&quot;</span>
+<span class="s2">)</span>
+
+<span class="s0">def </span><span class="s1">test_parallel_randomstate</span><span class="s2">():</span>
+    <span class="s4"># if the coercion cache is enabled and not thread-safe, creating</span>
+    <span class="s4"># RandomState instances simultaneously leads to a data race</span>
+    <span class="s0">def </span><span class="s1">func</span><span class="s2">(</span><span class="s1">seed</span><span class="s2">):</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">RandomState</span><span class="s2">(</span><span class="s1">seed</span><span class="s2">)</span>
+
+    <span class="s1">run_threaded</span><span class="s2">(</span><span class="s1">func</span><span class="s2">, </span><span class="s5">500</span><span class="s2">, </span><span class="s1">pass_count</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s4"># seeding and setting state shouldn't race with generating RNG samples</span>
+    <span class="s1">rng </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">RandomState</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">func</span><span class="s2">(</span><span class="s1">seed</span><span class="s2">):</span>
+        <span class="s1">base_rng </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">RandomState</span><span class="s2">(</span><span class="s1">seed</span><span class="s2">)</span>
+        <span class="s1">state </span><span class="s2">= </span><span class="s1">base_rng</span><span class="s2">.</span><span class="s1">get_state</span><span class="s2">()</span>
+        <span class="s1">rng</span><span class="s2">.</span><span class="s1">seed</span><span class="s2">(</span><span class="s1">seed</span><span class="s2">)</span>
+        <span class="s1">rng</span><span class="s2">.</span><span class="s1">random</span><span class="s2">()</span>
+        <span class="s1">rng</span><span class="s2">.</span><span class="s1">set_state</span><span class="s2">(</span><span class="s1">state</span><span class="s2">)</span>
+
+    <span class="s1">run_threaded</span><span class="s2">(</span><span class="s1">func</span><span class="s2">, </span><span class="s5">8</span><span class="s2">, </span><span class="s1">pass_count</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+<span class="s0">def </span><span class="s1">test_parallel_seed_get_state</span><span class="s2">():</span>
+    <span class="s1">seeds </span><span class="s2">= [</span><span class="s5">12345</span><span class="s2">, </span><span class="s5">67890</span><span class="s2">]</span>
+    <span class="s1">rng </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">RandomState</span><span class="s2">()</span>
+    <span class="s1">expected </span><span class="s2">= []</span>
+    <span class="s0">for </span><span class="s1">seed </span><span class="s0">in </span><span class="s1">seeds</span><span class="s2">:</span>
+        <span class="s1">rng</span><span class="s2">.</span><span class="s1">seed</span><span class="s2">(</span><span class="s1">seed</span><span class="s2">)</span>
+        <span class="s1">expected</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">rng</span><span class="s2">.</span><span class="s1">get_state</span><span class="s2">()[</span><span class="s5">1</span><span class="s2">])</span>
+
+    <span class="s0">def </span><span class="s1">func</span><span class="s2">(</span><span class="s1">i</span><span class="s2">, </span><span class="s1">barrier</span><span class="s2">):</span>
+        <span class="s1">rnd </span><span class="s2">= </span><span class="s1">random</span><span class="s2">.</span><span class="s1">Random</span><span class="s2">(</span><span class="s1">i</span><span class="s2">)</span>
+        <span class="s1">barrier</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">()</span>
+        <span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">100</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s1">rnd</span><span class="s2">.</span><span class="s1">randrange</span><span class="s2">(</span><span class="s5">2</span><span class="s2">):</span>
+                <span class="s1">rng</span><span class="s2">.</span><span class="s1">seed</span><span class="s2">(</span><span class="s1">rnd</span><span class="s2">.</span><span class="s1">choice</span><span class="s2">(</span><span class="s1">seeds</span><span class="s2">))</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">key </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">get_state</span><span class="s2">()[</span><span class="s5">1</span><span class="s2">]</span>
+                <span class="s0">assert </span><span class="s1">any</span><span class="s2">((</span><span class="s1">key </span><span class="s2">== </span><span class="s1">exp</span><span class="s2">).</span><span class="s1">all</span><span class="s2">() </span><span class="s0">for </span><span class="s1">exp </span><span class="s0">in </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s1">run_threaded</span><span class="s2">(</span><span class="s1">func</span><span class="s2">, </span><span class="s1">pass_count</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">pass_barrier</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s3">&quot;bitgen_name&quot;</span><span class="s2">, [</span><span class="s3">&quot;MT19937&quot;</span><span class="s2">, </span><span class="s3">&quot;PCG64&quot;</span><span class="s2">, </span><span class="s3">&quot;PCG64DXSM&quot;</span><span class="s2">, </span><span class="s3">&quot;Philox&quot;</span><span class="s2">, </span><span class="s3">&quot;SFC64&quot;</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_parallel_bit_generator_state_access</span><span class="s2">(</span><span class="s1">bitgen_name</span><span class="s2">):</span>
+    <span class="s1">bg </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">, </span><span class="s1">bitgen_name</span><span class="s2">)(</span><span class="s5">12345</span><span class="s2">)</span>
+    <span class="s1">gen </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">Generator</span><span class="s2">(</span><span class="s1">bg</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">func</span><span class="s2">(</span><span class="s1">i</span><span class="s2">, </span><span class="s1">barrier</span><span class="s2">):</span>
+        <span class="s1">rnd </span><span class="s2">= </span><span class="s1">random</span><span class="s2">.</span><span class="s1">Random</span><span class="s2">(</span><span class="s1">i</span><span class="s2">)</span>
+        <span class="s1">barrier</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">()</span>
+        <span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">100</span><span class="s2">):</span>
+            <span class="s1">branch </span><span class="s2">= </span><span class="s1">rnd</span><span class="s2">.</span><span class="s1">randrange</span><span class="s2">(</span><span class="s5">3</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">branch </span><span class="s2">== </span><span class="s5">0</span><span class="s2">:</span>
+                <span class="s1">bg</span><span class="s2">.</span><span class="s1">state </span><span class="s2">= </span><span class="s1">bg</span><span class="s2">.</span><span class="s1">state</span>
+            <span class="s0">elif </span><span class="s1">branch </span><span class="s2">== </span><span class="s5">1</span><span class="s2">:</span>
+                <span class="s1">gen</span><span class="s2">.</span><span class="s1">random</span><span class="s2">(</span><span class="s5">10</span><span class="s2">)</span>
+            <span class="s0">elif </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">bg</span><span class="s2">, </span><span class="s3">&quot;advance&quot;</span><span class="s2">):</span>
+                <span class="s1">bg</span><span class="s2">.</span><span class="s1">advance</span><span class="s2">(</span><span class="s5">10</span><span class="s2">)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">_ </span><span class="s2">= </span><span class="s1">bg</span><span class="s2">.</span><span class="s1">state</span>
+
+    <span class="s1">run_threaded</span><span class="s2">(</span><span class="s1">func</span><span class="s2">, </span><span class="s1">pass_count</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">pass_barrier</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+<span class="s0">def </span><span class="s1">test_parallel_ufunc_execution</span><span class="s2">():</span>
+    <span class="s4"># if the loop data cache or dispatch cache are not thread-safe</span>
+    <span class="s4"># computing ufuncs simultaneously in multiple threads leads</span>
+    <span class="s4"># to a data race that causes crashes or spurious exceptions</span>
+    <span class="s0">for </span><span class="s1">dtype </span><span class="s0">in </span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">float32</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int32</span><span class="s2">]:</span>
+        <span class="s0">for </span><span class="s1">op </span><span class="s0">in </span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">random</span><span class="s2">((</span><span class="s5">25</span><span class="s2">,)).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">), </span><span class="s1">dtype</span><span class="s2">(</span><span class="s5">25</span><span class="s2">)]:</span>
+            <span class="s0">for </span><span class="s1">ufunc </span><span class="s0">in </span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">isnan</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">sin</span><span class="s2">]:</span>
+                <span class="s1">run_threaded</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s1">ufunc</span><span class="s2">(</span><span class="s1">op</span><span class="s2">), </span><span class="s5">500</span><span class="s2">)</span>
+
+    <span class="s4"># see gh-26690</span>
+    <span class="s1">NUM_THREADS </span><span class="s2">= </span><span class="s5">50</span>
+
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s5">1000</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">f</span><span class="s2">(</span><span class="s1">b</span><span class="s2">):</span>
+        <span class="s1">b</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s1">a</span><span class="s2">.</span><span class="s1">sum</span><span class="s2">()</span>
+
+    <span class="s1">run_threaded</span><span class="s2">(</span><span class="s1">f</span><span class="s2">, </span><span class="s1">NUM_THREADS</span><span class="s2">, </span><span class="s1">pass_barrier</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_temp_elision_thread_safety</span><span class="s2">():</span>
+    <span class="s1">amid </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s5">50000</span><span class="s2">)</span>
+    <span class="s1">bmid </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s5">50000</span><span class="s2">)</span>
+    <span class="s1">alarge </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s5">1000000</span><span class="s2">)</span>
+    <span class="s1">blarge </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s5">1000000</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">func</span><span class="s2">(</span><span class="s1">count</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">count </span><span class="s2">% </span><span class="s5">4 </span><span class="s2">== </span><span class="s5">0</span><span class="s2">:</span>
+            <span class="s2">(</span><span class="s1">amid </span><span class="s2">* </span><span class="s5">2</span><span class="s2">) + </span><span class="s1">bmid</span>
+        <span class="s0">elif </span><span class="s1">count </span><span class="s2">% </span><span class="s5">4 </span><span class="s2">== </span><span class="s5">1</span><span class="s2">:</span>
+            <span class="s2">(</span><span class="s1">amid </span><span class="s2">+ </span><span class="s1">bmid</span><span class="s2">) - </span><span class="s5">2</span>
+        <span class="s0">elif </span><span class="s1">count </span><span class="s2">% </span><span class="s5">4 </span><span class="s2">== </span><span class="s5">2</span><span class="s2">:</span>
+            <span class="s2">(</span><span class="s1">alarge </span><span class="s2">* </span><span class="s5">2</span><span class="s2">) + </span><span class="s1">blarge</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s2">(</span><span class="s1">alarge </span><span class="s2">+ </span><span class="s1">blarge</span><span class="s2">) - </span><span class="s5">2</span>
+
+    <span class="s1">run_threaded</span><span class="s2">(</span><span class="s1">func</span><span class="s2">, </span><span class="s5">100</span><span class="s2">, </span><span class="s1">pass_count</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_eigvalsh_thread_safety</span><span class="s2">():</span>
+    <span class="s4"># if lapack isn't thread safe this will randomly segfault or error</span>
+    <span class="s4"># see gh-24512</span>
+    <span class="s1">rng </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">RandomState</span><span class="s2">(</span><span class="s5">873699172</span><span class="s2">)</span>
+    <span class="s1">matrices </span><span class="s2">= (</span>
+        <span class="s1">rng</span><span class="s2">.</span><span class="s1">random</span><span class="s2">((</span><span class="s5">5</span><span class="s2">, </span><span class="s5">10</span><span class="s2">, </span><span class="s5">10</span><span class="s2">, </span><span class="s5">3</span><span class="s2">, </span><span class="s5">3</span><span class="s2">)),</span>
+        <span class="s1">rng</span><span class="s2">.</span><span class="s1">random</span><span class="s2">((</span><span class="s5">5</span><span class="s2">, </span><span class="s5">10</span><span class="s2">, </span><span class="s5">10</span><span class="s2">, </span><span class="s5">3</span><span class="s2">, </span><span class="s5">3</span><span class="s2">)),</span>
+    <span class="s2">)</span>
+
+    <span class="s1">run_threaded</span><span class="s2">(</span><span class="s0">lambda </span><span class="s1">i</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">linalg</span><span class="s2">.</span><span class="s1">eigvalsh</span><span class="s2">(</span><span class="s1">matrices</span><span class="s2">[</span><span class="s1">i</span><span class="s2">]), </span><span class="s5">2</span><span class="s2">,</span>
+                 <span class="s1">pass_count</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_detected_blas</span><span class="s2">():</span>
+    <span class="s1">blas </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">show_config</span><span class="s2">(</span><span class="s3">'dicts'</span><span class="s2">).</span><span class="s1">get</span><span class="s2">(</span><span class="s3">'Build Dependencies'</span><span class="s2">, {}).</span><span class="s1">get</span><span class="s2">(</span><span class="s3">'blas'</span><span class="s2">, {})</span>
+    <span class="s0">return </span><span class="s1">blas</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s3">'name'</span><span class="s2">, </span><span class="s3">'unknown'</span><span class="s2">), </span><span class="s1">blas</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s3">'version'</span><span class="s2">, </span><span class="s3">'unknown'</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_openblas_predates_gemm_fix</span><span class="s2">(</span><span class="s1">name</span><span class="s2">, </span><span class="s1">version</span><span class="s2">):</span>
+    <span class="s1">name </span><span class="s2">= (</span><span class="s1">name </span><span class="s0">or </span><span class="s3">''</span><span class="s2">).</span><span class="s1">lower</span><span class="s2">().</span><span class="s1">strip</span><span class="s2">()</span>
+    <span class="s4"># Assume failures using wrapper BLAS packages are buggy OpenBLAS.</span>
+    <span class="s4"># This may ignore a genuine bug but we can't do anything more fine-grained.</span>
+    <span class="s0">if </span><span class="s1">name </span><span class="s0">in </span><span class="s2">(</span><span class="s3">'blas'</span><span class="s2">, </span><span class="s3">'cblas'</span><span class="s2">, </span><span class="s3">'flexiblas'</span><span class="s2">, </span><span class="s3">'unknown'</span><span class="s2">, </span><span class="s3">''</span><span class="s2">):</span>
+        <span class="s0">return True</span>
+    <span class="s0">if </span><span class="s3">'openblas' </span><span class="s0">not in </span><span class="s1">name</span><span class="s2">:</span>
+        <span class="s4"># e.g. MKL, accelerate, where we'd want to know about a new failure</span>
+        <span class="s0">return False</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s1">parsed </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">int</span><span class="s2">(</span><span class="s1">p</span><span class="s2">) </span><span class="s0">for </span><span class="s1">p </span><span class="s0">in </span><span class="s1">version</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s3">'.'</span><span class="s2">))</span>
+    <span class="s0">except </span><span class="s1">ValueError</span><span class="s2">:</span>
+        <span class="s4"># unparseable OpenBLAS version so assume an old buggy version</span>
+        <span class="s0">return True</span>
+    <span class="s0">return </span><span class="s1">parsed </span><span class="s2">&lt; (</span><span class="s5">0</span><span class="s2">, </span><span class="s5">3</span><span class="s2">, </span><span class="s5">33</span><span class="s2">, </span><span class="s5">112</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_blas_gemm_thread_safety</span><span class="s2">():</span>
+    <span class="s4"># gh-31618: concurrently run transpose and no-transpose GEMM variants to</span>
+    <span class="s4"># exercise possible thread safety issues due to lock sharding between</span>
+    <span class="s4"># kernels, see OpenBLAS issue #5836.</span>
+    <span class="s1">num_threads </span><span class="s2">= </span><span class="s5">8</span>
+    <span class="s1">num_iters </span><span class="s2">= </span><span class="s5">10</span>
+    <span class="s1">M </span><span class="s2">= </span><span class="s5">512 </span><span class="s2">* </span><span class="s5">512</span>
+
+    <span class="s1">rng </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">default_rng</span><span class="s2">(</span><span class="s5">0x9e3779b9</span><span class="s2">)</span>
+    <span class="s1">no_trans </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">random</span><span class="s2">((</span><span class="s1">M</span><span class="s2">, </span><span class="s5">4</span><span class="s2">))            </span><span class="s4"># C-contiguous -&gt; NoTrans GEMM</span>
+    <span class="s1">no_trans_w </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">random</span><span class="s2">((</span><span class="s5">4</span><span class="s2">, </span><span class="s5">2</span><span class="s2">))</span>
+    <span class="s1">trans </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">random</span><span class="s2">((</span><span class="s5">2</span><span class="s2">, </span><span class="s1">M</span><span class="s2">)).</span><span class="s1">T             </span><span class="s4"># F-contiguous -&gt; Trans GEMM</span>
+    <span class="s1">trans_w </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">random</span><span class="s2">((</span><span class="s5">2</span><span class="s2">, </span><span class="s5">2</span><span class="s2">))</span>
+    <span class="s1">expected_no_trans </span><span class="s2">= </span><span class="s1">no_trans </span><span class="s2">@ </span><span class="s1">no_trans_w</span>
+    <span class="s1">expected_trans </span><span class="s2">= </span><span class="s1">trans </span><span class="s2">@ </span><span class="s1">trans_w</span>
+
+    <span class="s1">mismatches </span><span class="s2">= </span><span class="s5">0</span>
+    <span class="s1">lock </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Lock</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">closure</span><span class="s2">(</span><span class="s1">i</span><span class="s2">, </span><span class="s1">b</span><span class="s2">):</span>
+        <span class="s0">nonlocal </span><span class="s1">mismatches</span>
+        <span class="s1">count </span><span class="s2">= </span><span class="s5">0</span>
+        <span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">num_iters</span><span class="s2">):</span>
+            <span class="s1">b</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">()</span>
+            <span class="s0">if </span><span class="s1">i </span><span class="s2">% </span><span class="s5">2</span><span class="s2">:</span>
+                <span class="s1">ok </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array_equal</span><span class="s2">(</span><span class="s1">no_trans </span><span class="s2">@ </span><span class="s1">no_trans_w</span><span class="s2">, </span><span class="s1">expected_no_trans</span><span class="s2">)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">ok </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array_equal</span><span class="s2">(</span><span class="s1">trans </span><span class="s2">@ </span><span class="s1">trans_w</span><span class="s2">, </span><span class="s1">expected_trans</span><span class="s2">)</span>
+            <span class="s0">if not </span><span class="s1">ok</span><span class="s2">:</span>
+                <span class="s1">count </span><span class="s2">+= </span><span class="s5">1</span>
+        <span class="s0">with </span><span class="s1">lock</span><span class="s2">:</span>
+            <span class="s1">mismatches </span><span class="s2">+= </span><span class="s1">count</span>
+
+    <span class="s1">run_threaded</span><span class="s2">(</span><span class="s1">closure</span><span class="s2">, </span><span class="s1">num_threads</span><span class="s2">, </span><span class="s1">pass_count</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">pass_barrier</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s1">blas_name</span><span class="s2">, </span><span class="s1">blas_version </span><span class="s2">= </span><span class="s1">_detected_blas</span><span class="s2">()</span>
+    <span class="s0">if </span><span class="s1">mismatches </span><span class="s0">and </span><span class="s1">_openblas_predates_gemm_fix</span><span class="s2">(</span><span class="s1">blas_name</span><span class="s2">, </span><span class="s1">blas_version</span><span class="s2">):</span>
+        <span class="s1">pytest</span><span class="s2">.</span><span class="s1">xfail</span><span class="s2">(</span>
+            <span class="s3">f&quot;OpenBLAS version (</span><span class="s0">{</span><span class="s1">blas_version</span><span class="s0">}</span><span class="s3">) predates first OpenBLAS &quot;</span>
+            <span class="s3">&quot;version with a fix (0.3.33.112) or BLAS metadata is not &quot;</span>
+            <span class="s3">&quot;sufficient to identify the BLAS implementation.&quot;</span>
+        <span class="s2">)</span>
+
+    <span class="s0">assert </span><span class="s1">mismatches </span><span class="s2">== </span><span class="s5">0</span><span class="s2">, (</span>
+        <span class="s3">f&quot;</span><span class="s0">{</span><span class="s1">mismatches</span><span class="s0">} </span><span class="s3">concurrent matmul results were corrupted &quot;</span>
+        <span class="s3">f&quot;(</span><span class="s0">{</span><span class="s1">blas_name</span><span class="s0">} {</span><span class="s1">blas_version</span><span class="s0">}</span><span class="s3">)&quot;</span>
+    <span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_printoptions_thread_safety</span><span class="s2">():</span>
+    <span class="s4"># until NumPy 2.1 the printoptions state was stored in globals</span>
+    <span class="s4"># this verifies that they are now stored in a context variable</span>
+    <span class="s1">b </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Barrier</span><span class="s2">(</span><span class="s5">2</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">legacy_113</span><span class="s2">():</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">set_printoptions</span><span class="s2">(</span><span class="s1">legacy</span><span class="s2">=</span><span class="s3">'1.13'</span><span class="s2">, </span><span class="s1">precision</span><span class="s2">=</span><span class="s5">12</span><span class="s2">)</span>
+        <span class="s1">b</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">()</span>
+        <span class="s1">po </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">get_printoptions</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">po</span><span class="s2">[</span><span class="s3">'legacy'</span><span class="s2">] == </span><span class="s3">'1.13'</span>
+        <span class="s0">assert </span><span class="s1">po</span><span class="s2">[</span><span class="s3">'precision'</span><span class="s2">] == </span><span class="s5">12</span>
+        <span class="s1">orig_linewidth </span><span class="s2">= </span><span class="s1">po</span><span class="s2">[</span><span class="s3">'linewidth'</span><span class="s2">]</span>
+        <span class="s0">with </span><span class="s1">np</span><span class="s2">.</span><span class="s1">printoptions</span><span class="s2">(</span><span class="s1">linewidth</span><span class="s2">=</span><span class="s5">34</span><span class="s2">, </span><span class="s1">legacy</span><span class="s2">=</span><span class="s3">'1.21'</span><span class="s2">):</span>
+            <span class="s1">po </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">get_printoptions</span><span class="s2">()</span>
+            <span class="s0">assert </span><span class="s1">po</span><span class="s2">[</span><span class="s3">'legacy'</span><span class="s2">] == </span><span class="s3">'1.21'</span>
+            <span class="s0">assert </span><span class="s1">po</span><span class="s2">[</span><span class="s3">'precision'</span><span class="s2">] == </span><span class="s5">12</span>
+            <span class="s0">assert </span><span class="s1">po</span><span class="s2">[</span><span class="s3">'linewidth'</span><span class="s2">] == </span><span class="s5">34</span>
+        <span class="s1">po </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">get_printoptions</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">po</span><span class="s2">[</span><span class="s3">'linewidth'</span><span class="s2">] == </span><span class="s1">orig_linewidth</span>
+        <span class="s0">assert </span><span class="s1">po</span><span class="s2">[</span><span class="s3">'legacy'</span><span class="s2">] == </span><span class="s3">'1.13'</span>
+        <span class="s0">assert </span><span class="s1">po</span><span class="s2">[</span><span class="s3">'precision'</span><span class="s2">] == </span><span class="s5">12</span>
+
+    <span class="s0">def </span><span class="s1">legacy_125</span><span class="s2">():</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">set_printoptions</span><span class="s2">(</span><span class="s1">legacy</span><span class="s2">=</span><span class="s3">'1.25'</span><span class="s2">, </span><span class="s1">precision</span><span class="s2">=</span><span class="s5">7</span><span class="s2">)</span>
+        <span class="s1">b</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">()</span>
+        <span class="s1">po </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">get_printoptions</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">po</span><span class="s2">[</span><span class="s3">'legacy'</span><span class="s2">] == </span><span class="s3">'1.25'</span>
+        <span class="s0">assert </span><span class="s1">po</span><span class="s2">[</span><span class="s3">'precision'</span><span class="s2">] == </span><span class="s5">7</span>
+        <span class="s1">orig_linewidth </span><span class="s2">= </span><span class="s1">po</span><span class="s2">[</span><span class="s3">'linewidth'</span><span class="s2">]</span>
+        <span class="s0">with </span><span class="s1">np</span><span class="s2">.</span><span class="s1">printoptions</span><span class="s2">(</span><span class="s1">linewidth</span><span class="s2">=</span><span class="s5">6</span><span class="s2">, </span><span class="s1">legacy</span><span class="s2">=</span><span class="s3">'1.13'</span><span class="s2">):</span>
+            <span class="s1">po </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">get_printoptions</span><span class="s2">()</span>
+            <span class="s0">assert </span><span class="s1">po</span><span class="s2">[</span><span class="s3">'legacy'</span><span class="s2">] == </span><span class="s3">'1.13'</span>
+            <span class="s0">assert </span><span class="s1">po</span><span class="s2">[</span><span class="s3">'precision'</span><span class="s2">] == </span><span class="s5">7</span>
+            <span class="s0">assert </span><span class="s1">po</span><span class="s2">[</span><span class="s3">'linewidth'</span><span class="s2">] == </span><span class="s5">6</span>
+        <span class="s1">po </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">get_printoptions</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">po</span><span class="s2">[</span><span class="s3">'linewidth'</span><span class="s2">] == </span><span class="s1">orig_linewidth</span>
+        <span class="s0">assert </span><span class="s1">po</span><span class="s2">[</span><span class="s3">'legacy'</span><span class="s2">] == </span><span class="s3">'1.25'</span>
+        <span class="s0">assert </span><span class="s1">po</span><span class="s2">[</span><span class="s3">'precision'</span><span class="s2">] == </span><span class="s5">7</span>
+
+    <span class="s1">task1 </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Thread</span><span class="s2">(</span><span class="s1">target</span><span class="s2">=</span><span class="s1">legacy_113</span><span class="s2">)</span>
+    <span class="s1">task2 </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Thread</span><span class="s2">(</span><span class="s1">target</span><span class="s2">=</span><span class="s1">legacy_125</span><span class="s2">)</span>
+
+    <span class="s1">task1</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()</span>
+    <span class="s1">task2</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()</span>
+    <span class="s1">task1</span><span class="s2">.</span><span class="s1">join</span><span class="s2">()</span>
+    <span class="s1">task2</span><span class="s2">.</span><span class="s1">join</span><span class="s2">()</span>
+
+
+<span class="s0">def </span><span class="s1">test_parallel_reduction</span><span class="s2">():</span>
+    <span class="s4"># gh-28041</span>
+    <span class="s1">NUM_THREADS </span><span class="s2">= </span><span class="s5">50</span>
+
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s5">1000</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">closure</span><span class="s2">(</span><span class="s1">b</span><span class="s2">):</span>
+        <span class="s1">b</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">()</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">sum</span><span class="s2">(</span><span class="s1">x</span><span class="s2">)</span>
+
+    <span class="s1">run_threaded</span><span class="s2">(</span><span class="s1">closure</span><span class="s2">, </span><span class="s1">NUM_THREADS</span><span class="s2">, </span><span class="s1">pass_barrier</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_parallel_flat_iterator</span><span class="s2">():</span>
+    <span class="s4"># gh-28042</span>
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s5">20</span><span class="s2">).</span><span class="s1">reshape</span><span class="s2">(</span><span class="s5">5</span><span class="s2">, </span><span class="s5">4</span><span class="s2">).</span><span class="s1">T</span>
+
+    <span class="s0">def </span><span class="s1">closure</span><span class="s2">(</span><span class="s1">b</span><span class="s2">):</span>
+        <span class="s1">b</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">()</span>
+        <span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">100</span><span class="s2">):</span>
+            <span class="s1">list</span><span class="s2">(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">flat</span><span class="s2">)</span>
+
+    <span class="s1">run_threaded</span><span class="s2">(</span><span class="s1">closure</span><span class="s2">, </span><span class="s1">outer_iterations</span><span class="s2">=</span><span class="s5">100</span><span class="s2">, </span><span class="s1">pass_barrier</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s4"># gh-28143</span>
+    <span class="s0">def </span><span class="s1">prepare_args</span><span class="s2">():</span>
+        <span class="s0">return </span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s5">10</span><span class="s2">)]</span>
+
+    <span class="s0">def </span><span class="s1">closure</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">b</span><span class="s2">):</span>
+        <span class="s1">b</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">()</span>
+        <span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">100</span><span class="s2">):</span>
+            <span class="s1">y </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s5">10</span><span class="s2">)</span>
+            <span class="s1">y</span><span class="s2">.</span><span class="s1">flat</span><span class="s2">[</span><span class="s1">x</span><span class="s2">] = </span><span class="s1">x</span>
+
+    <span class="s1">run_threaded</span><span class="s2">(</span><span class="s1">closure</span><span class="s2">, </span><span class="s1">pass_barrier</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">prepare_args</span><span class="s2">=</span><span class="s1">prepare_args</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_multithreaded_repeat</span><span class="s2">():</span>
+    <span class="s1">x0 </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s5">10</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">closure</span><span class="s2">(</span><span class="s1">b</span><span class="s2">):</span>
+        <span class="s1">b</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">()</span>
+        <span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">100</span><span class="s2">):</span>
+            <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">repeat</span><span class="s2">(</span><span class="s1">x0</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s1">axis</span><span class="s2">=</span><span class="s5">0</span><span class="s2">)[::</span><span class="s5">2</span><span class="s2">]</span>
+
+    <span class="s1">run_threaded</span><span class="s2">(</span><span class="s1">closure</span><span class="s2">, </span><span class="s1">max_workers</span><span class="s2">=</span><span class="s5">10</span><span class="s2">, </span><span class="s1">pass_barrier</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_structured_advanced_indexing</span><span class="s2">():</span>
+    <span class="s4"># Test that copyswap(n) used by integer array indexing is threadsafe</span>
+    <span class="s4"># for structured datatypes, see gh-15387. This test can behave randomly.</span>
+
+    <span class="s4"># Create a deeply nested dtype to make a failure more likely:</span>
+    <span class="s1">dt </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">([(</span><span class="s3">&quot;&quot;</span><span class="s2">, </span><span class="s3">&quot;f8&quot;</span><span class="s2">)])</span>
+    <span class="s1">dt </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">([(</span><span class="s3">&quot;&quot;</span><span class="s2">, </span><span class="s1">dt</span><span class="s2">)] * </span><span class="s5">2</span><span class="s2">)</span>
+    <span class="s1">dt </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">([(</span><span class="s3">&quot;&quot;</span><span class="s2">, </span><span class="s1">dt</span><span class="s2">)] * </span><span class="s5">2</span><span class="s2">)</span>
+    <span class="s4"># The array should be large enough to likely run into threading issues</span>
+    <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">uniform</span><span class="s2">(</span><span class="s1">size</span><span class="s2">=(</span><span class="s5">6000</span><span class="s2">, </span><span class="s5">8</span><span class="s2">)).</span><span class="s1">view</span><span class="s2">(</span><span class="s1">dt</span><span class="s2">)[:, </span><span class="s5">0</span><span class="s2">]</span>
+
+    <span class="s1">rng </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">default_rng</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">func</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">):</span>
+        <span class="s1">indx </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">integers</span><span class="s2">(</span><span class="s5">0</span><span class="s2">, </span><span class="s1">len</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">), </span><span class="s1">size</span><span class="s2">=</span><span class="s5">6000</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">)</span>
+        <span class="s1">arr</span><span class="s2">[</span><span class="s1">indx</span><span class="s2">]</span>
+
+    <span class="s1">tpe </span><span class="s2">= </span><span class="s1">concurrent</span><span class="s2">.</span><span class="s1">futures</span><span class="s2">.</span><span class="s1">ThreadPoolExecutor</span><span class="s2">(</span><span class="s1">max_workers</span><span class="s2">=</span><span class="s5">8</span><span class="s2">)</span>
+    <span class="s1">futures </span><span class="s2">= [</span><span class="s1">tpe</span><span class="s2">.</span><span class="s1">submit</span><span class="s2">(</span><span class="s1">func</span><span class="s2">, </span><span class="s1">arr</span><span class="s2">) </span><span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">10</span><span class="s2">)]</span>
+    <span class="s0">for </span><span class="s1">f </span><span class="s0">in </span><span class="s1">futures</span><span class="s2">:</span>
+        <span class="s1">f</span><span class="s2">.</span><span class="s1">result</span><span class="s2">()</span>
+
+    <span class="s0">assert </span><span class="s1">arr</span><span class="s2">.</span><span class="s1">dtype </span><span class="s0">is </span><span class="s1">dt</span>
+
+
+<span class="s0">def </span><span class="s1">test_structured_threadsafety2</span><span class="s2">():</span>
+    <span class="s4"># Nonzero (and some other functions) should be threadsafe for</span>
+    <span class="s4"># structured datatypes, see gh-15387. This test can behave randomly.</span>
+    <span class="s0">from </span><span class="s1">concurrent</span><span class="s2">.</span><span class="s1">futures </span><span class="s0">import </span><span class="s1">ThreadPoolExecutor</span>
+
+    <span class="s4"># Create a deeply nested dtype to make a failure more likely:</span>
+    <span class="s1">dt </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">([(</span><span class="s3">&quot;&quot;</span><span class="s2">, </span><span class="s3">&quot;f8&quot;</span><span class="s2">)])</span>
+    <span class="s1">dt </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">([(</span><span class="s3">&quot;&quot;</span><span class="s2">, </span><span class="s1">dt</span><span class="s2">)])</span>
+    <span class="s1">dt </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">([(</span><span class="s3">&quot;&quot;</span><span class="s2">, </span><span class="s1">dt</span><span class="s2">)] * </span><span class="s5">2</span><span class="s2">)</span>
+    <span class="s4"># The array should be large enough to likely run into threading issues</span>
+    <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">uniform</span><span class="s2">(</span><span class="s1">size</span><span class="s2">=(</span><span class="s5">5000</span><span class="s2">, </span><span class="s5">4</span><span class="s2">)).</span><span class="s1">view</span><span class="s2">(</span><span class="s1">dt</span><span class="s2">)[:, </span><span class="s5">0</span><span class="s2">]</span>
+
+    <span class="s0">def </span><span class="s1">func</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">):</span>
+        <span class="s1">arr</span><span class="s2">.</span><span class="s1">nonzero</span><span class="s2">()</span>
+
+    <span class="s1">tpe </span><span class="s2">= </span><span class="s1">ThreadPoolExecutor</span><span class="s2">(</span><span class="s1">max_workers</span><span class="s2">=</span><span class="s5">8</span><span class="s2">)</span>
+    <span class="s1">futures </span><span class="s2">= [</span><span class="s1">tpe</span><span class="s2">.</span><span class="s1">submit</span><span class="s2">(</span><span class="s1">func</span><span class="s2">, </span><span class="s1">arr</span><span class="s2">) </span><span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">10</span><span class="s2">)]</span>
+    <span class="s0">for </span><span class="s1">f </span><span class="s0">in </span><span class="s1">futures</span><span class="s2">:</span>
+        <span class="s1">f</span><span class="s2">.</span><span class="s1">result</span><span class="s2">()</span>
+
+    <span class="s0">assert </span><span class="s1">arr</span><span class="s2">.</span><span class="s1">dtype </span><span class="s0">is </span><span class="s1">dt</span>
+
+
+<span class="s0">def </span><span class="s1">test_stringdtype_multithreaded_access_and_mutation</span><span class="s2">():</span>
+    <span class="s4"># this test uses an RNG and may crash or cause deadlocks if there is a</span>
+    <span class="s4"># threading bug</span>
+    <span class="s1">rng </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">default_rng</span><span class="s2">(</span><span class="s5">0x4D3D3D3</span><span class="s2">)</span>
+
+    <span class="s1">string_list </span><span class="s2">= </span><span class="s1">random_unicode_string_list</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">func</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">):</span>
+        <span class="s1">rnd </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">random</span><span class="s2">()</span>
+        <span class="s4"># either write to random locations in the array, compute a ufunc, or</span>
+        <span class="s4"># re-initialize the array</span>
+        <span class="s0">if </span><span class="s1">rnd </span><span class="s2">&lt; </span><span class="s5">0.25</span><span class="s2">:</span>
+            <span class="s1">num </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s5">0</span><span class="s2">, </span><span class="s1">arr</span><span class="s2">.</span><span class="s1">size</span><span class="s2">)</span>
+            <span class="s1">arr</span><span class="s2">[</span><span class="s1">num</span><span class="s2">] = </span><span class="s1">arr</span><span class="s2">[</span><span class="s1">num</span><span class="s2">] + </span><span class="s3">&quot;hello&quot;</span>
+        <span class="s0">elif </span><span class="s1">rnd </span><span class="s2">&lt; </span><span class="s5">0.5</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">rnd </span><span class="s2">&lt; </span><span class="s5">0.375</span><span class="s2">:</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">arr</span><span class="s2">)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">arr</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">arr</span><span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">rnd </span><span class="s2">&lt; </span><span class="s5">0.75</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">rnd </span><span class="s2">&lt; </span><span class="s5">0.875</span><span class="s2">:</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">multiply</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">(</span><span class="s5">2</span><span class="s2">))</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">multiply</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">(</span><span class="s5">2</span><span class="s2">), </span><span class="s1">out</span><span class="s2">=</span><span class="s1">arr</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">arr</span><span class="s2">[:] = </span><span class="s1">string_list</span>
+
+    <span class="s0">with </span><span class="s1">concurrent</span><span class="s2">.</span><span class="s1">futures</span><span class="s2">.</span><span class="s1">ThreadPoolExecutor</span><span class="s2">(</span><span class="s1">max_workers</span><span class="s2">=</span><span class="s5">8</span><span class="s2">) </span><span class="s0">as </span><span class="s1">tpe</span><span class="s2">:</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">string_list</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">&quot;T&quot;</span><span class="s2">)</span>
+        <span class="s1">futures </span><span class="s2">= [</span><span class="s1">tpe</span><span class="s2">.</span><span class="s1">submit</span><span class="s2">(</span><span class="s1">func</span><span class="s2">, </span><span class="s1">arr</span><span class="s2">) </span><span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">500</span><span class="s2">)]</span>
+
+        <span class="s0">for </span><span class="s1">f </span><span class="s0">in </span><span class="s1">futures</span><span class="s2">:</span>
+            <span class="s1">f</span><span class="s2">.</span><span class="s1">result</span><span class="s2">()</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span>
+    <span class="s0">not </span><span class="s1">IS_64BIT</span><span class="s2">,</span>
+    <span class="s1">reason</span><span class="s2">=</span><span class="s3">&quot;Sometimes causes failures or crashes due to OOM on 32 bit runners&quot;</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s3">&quot;rat_cls&quot;</span><span class="s2">, [</span>
+    <span class="s1">_rational_tests</span><span class="s2">.</span><span class="s1">rational</span><span class="s2">, </span><span class="s1">_rational_tests</span><span class="s2">.</span><span class="s1">rational2</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_legacy_usertype_cast_init_thread_safety</span><span class="s2">(</span><span class="s1">rat_cls</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">closure</span><span class="s2">(</span><span class="s1">b</span><span class="s2">):</span>
+        <span class="s1">b</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">()</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">full</span><span class="s2">((</span><span class="s5">10</span><span class="s2">, </span><span class="s5">10</span><span class="s2">), </span><span class="s5">1</span><span class="s2">, </span><span class="s1">rat_cls</span><span class="s2">)</span>
+
+    <span class="s1">run_threaded</span><span class="s2">(</span><span class="s1">closure</span><span class="s2">, </span><span class="s5">250</span><span class="s2">, </span><span class="s1">pass_barrier</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s3">&quot;dtype&quot;</span><span class="s2">, [</span><span class="s1">bool</span><span class="s2">, </span><span class="s1">int</span><span class="s2">, </span><span class="s1">float</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_nonzero</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">):</span>
+    <span class="s4"># See: gh-28361</span>
+    <span class="s4">#</span>
+    <span class="s4"># np.nonzero uses np.count_nonzero to determine the size of the output.</span>
+    <span class="s4"># array. In a second pass the indices of the non-zero elements are</span>
+    <span class="s4"># determined, but they can have changed</span>
+    <span class="s4">#</span>
+    <span class="s4"># This test triggers a data race which is suppressed in the TSAN CI.</span>
+    <span class="s4"># The test is to ensure np.nonzero does not generate a segmentation fault</span>
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s5">4</span><span class="s2">, </span><span class="s1">size</span><span class="s2">=</span><span class="s5">100</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+    <span class="s1">expected_warning </span><span class="s2">= (</span><span class="s3">'number of non-zero array elements changed'</span>
+                        <span class="s3">' during function execution'</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">func</span><span class="s2">(</span><span class="s1">index</span><span class="s2">):</span>
+        <span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">10</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s1">index </span><span class="s2">== </span><span class="s5">0</span><span class="s2">:</span>
+                <span class="s1">x</span><span class="s2">[::</span><span class="s5">2</span><span class="s2">] = </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s5">2</span><span class="s2">)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s0">try</span><span class="s2">:</span>
+                    <span class="s1">_ </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nonzero</span><span class="s2">(</span><span class="s1">x</span><span class="s2">)</span>
+                <span class="s0">except </span><span class="s1">RuntimeError </span><span class="s0">as </span><span class="s1">ex</span><span class="s2">:</span>
+                    <span class="s0">assert </span><span class="s1">expected_warning </span><span class="s0">in </span><span class="s1">str</span><span class="s2">(</span><span class="s1">ex</span><span class="s2">)</span>
+
+    <span class="s1">run_threaded</span><span class="s2">(</span><span class="s1">func</span><span class="s2">, </span><span class="s1">max_workers</span><span class="s2">=</span><span class="s5">10</span><span class="s2">, </span><span class="s1">pass_count</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">outer_iterations</span><span class="s2">=</span><span class="s5">5</span><span class="s2">)</span>
+
+
+<span class="s4"># These are all implemented using PySequence_Fast, which needs locking to be safe</span>
+<span class="s0">def </span><span class="s1">np_broadcast</span><span class="s2">(</span><span class="s1">arrs</span><span class="s2">):</span>
+    <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">50</span><span class="s2">):</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">broadcast</span><span class="s2">(</span><span class="s1">arrs</span><span class="s2">)</span>
+
+<span class="s0">def </span><span class="s1">create_array</span><span class="s2">(</span><span class="s1">arrs</span><span class="s2">):</span>
+    <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">50</span><span class="s2">):</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">arrs</span><span class="s2">)</span>
+
+<span class="s0">def </span><span class="s1">create_nditer</span><span class="s2">(</span><span class="s1">arrs</span><span class="s2">):</span>
+    <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">50</span><span class="s2">):</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">nditer</span><span class="s2">(</span><span class="s1">arrs</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s3">&quot;kernel, outcome&quot;</span><span class="s2">,</span>
+    <span class="s2">(</span>
+        <span class="s2">(</span><span class="s1">np_broadcast</span><span class="s2">, </span><span class="s3">&quot;error&quot;</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">create_array</span><span class="s2">, </span><span class="s3">&quot;error&quot;</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">create_nditer</span><span class="s2">, </span><span class="s3">&quot;success&quot;</span><span class="s2">),</span>
+    <span class="s2">),</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_arg_locking</span><span class="s2">(</span><span class="s1">kernel</span><span class="s2">, </span><span class="s1">outcome</span><span class="s2">):</span>
+    <span class="s4"># should complete without triggering races but may error</span>
+
+    <span class="s1">done </span><span class="s2">= </span><span class="s5">0</span>
+    <span class="s1">arrs </span><span class="s2">= [</span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">]) </span><span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">1000</span><span class="s2">)]</span>
+
+    <span class="s0">def </span><span class="s1">read_arrs</span><span class="s2">(</span><span class="s1">b</span><span class="s2">):</span>
+        <span class="s0">nonlocal </span><span class="s1">done</span>
+        <span class="s1">b</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">()</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">kernel</span><span class="s2">(</span><span class="s1">arrs</span><span class="s2">)</span>
+        <span class="s0">finally</span><span class="s2">:</span>
+            <span class="s1">done </span><span class="s2">+= </span><span class="s5">1</span>
+
+    <span class="s0">def </span><span class="s1">contract_and_expand_list</span><span class="s2">(</span><span class="s1">b</span><span class="s2">):</span>
+        <span class="s1">b</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">()</span>
+        <span class="s0">while </span><span class="s1">done </span><span class="s2">&lt; </span><span class="s5">4</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">arrs</span><span class="s2">) &gt; </span><span class="s5">10</span><span class="s2">:</span>
+                <span class="s1">arrs</span><span class="s2">.</span><span class="s1">pop</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)</span>
+            <span class="s0">elif </span><span class="s1">len</span><span class="s2">(</span><span class="s1">arrs</span><span class="s2">) &lt;= </span><span class="s5">10</span><span class="s2">:</span>
+                <span class="s1">arrs</span><span class="s2">.</span><span class="s1">extend</span><span class="s2">([</span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">]) </span><span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">1000</span><span class="s2">)])</span>
+
+    <span class="s0">def </span><span class="s1">replace_list_items</span><span class="s2">(</span><span class="s1">b</span><span class="s2">):</span>
+        <span class="s1">b</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">()</span>
+        <span class="s1">rng </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">RandomState</span><span class="s2">()</span>
+        <span class="s1">rng</span><span class="s2">.</span><span class="s1">seed</span><span class="s2">(</span><span class="s5">0x4d3d3d3</span><span class="s2">)</span>
+        <span class="s0">while </span><span class="s1">done </span><span class="s2">&lt; </span><span class="s5">4</span><span class="s2">:</span>
+            <span class="s1">data </span><span class="s2">= </span><span class="s1">rng</span><span class="s2">.</span><span class="s1">randint</span><span class="s2">(</span><span class="s5">0</span><span class="s2">, </span><span class="s5">1000</span><span class="s2">, </span><span class="s1">size</span><span class="s2">=</span><span class="s5">4</span><span class="s2">)</span>
+            <span class="s1">arrs</span><span class="s2">[</span><span class="s1">data</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]] = </span><span class="s1">data</span><span class="s2">[</span><span class="s5">1</span><span class="s2">:]</span>
+
+    <span class="s0">for </span><span class="s1">mutation_func </span><span class="s0">in </span><span class="s2">(</span><span class="s1">replace_list_items</span><span class="s2">, </span><span class="s1">contract_and_expand_list</span><span class="s2">):</span>
+        <span class="s1">b </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Barrier</span><span class="s2">(</span><span class="s5">5</span><span class="s2">)</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s0">with </span><span class="s1">concurrent</span><span class="s2">.</span><span class="s1">futures</span><span class="s2">.</span><span class="s1">ThreadPoolExecutor</span><span class="s2">(</span><span class="s1">max_workers</span><span class="s2">=</span><span class="s5">5</span><span class="s2">) </span><span class="s0">as </span><span class="s1">tpe</span><span class="s2">:</span>
+                <span class="s1">tasks </span><span class="s2">= [</span><span class="s1">tpe</span><span class="s2">.</span><span class="s1">submit</span><span class="s2">(</span><span class="s1">read_arrs</span><span class="s2">, </span><span class="s1">b</span><span class="s2">) </span><span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">4</span><span class="s2">)]</span>
+                <span class="s1">tasks</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">tpe</span><span class="s2">.</span><span class="s1">submit</span><span class="s2">(</span><span class="s1">mutation_func</span><span class="s2">, </span><span class="s1">b</span><span class="s2">))</span>
+                <span class="s0">for </span><span class="s1">t </span><span class="s0">in </span><span class="s1">tasks</span><span class="s2">:</span>
+                    <span class="s1">t</span><span class="s2">.</span><span class="s1">result</span><span class="s2">()</span>
+        <span class="s0">except </span><span class="s1">RuntimeError </span><span class="s0">as </span><span class="s1">e</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">outcome </span><span class="s2">== </span><span class="s3">&quot;success&quot;</span><span class="s2">:</span>
+                <span class="s0">raise</span>
+            <span class="s0">assert </span><span class="s3">&quot;Inconsistent object during array creation?&quot; </span><span class="s0">in </span><span class="s1">str</span><span class="s2">(</span><span class="s1">e</span><span class="s2">)</span>
+            <span class="s1">msg </span><span class="s2">= </span><span class="s3">&quot;replace_list_items should not raise errors&quot;</span>
+            <span class="s0">assert </span><span class="s1">mutation_func </span><span class="s0">is </span><span class="s1">contract_and_expand_list</span><span class="s2">, </span><span class="s1">msg</span>
+        <span class="s0">finally</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">tasks</span><span class="s2">) &lt; </span><span class="s5">5</span><span class="s2">:</span>
+                <span class="s1">b</span><span class="s2">.</span><span class="s1">abort</span><span class="s2">()</span>
+
+<span class="s0">def </span><span class="s1">test_array__buffer__thread_safety</span><span class="s2">():</span>
+    <span class="s0">import </span><span class="s1">inspect</span>
+    <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s5">1000</span><span class="s2">)</span>
+    <span class="s1">flags </span><span class="s2">= [</span><span class="s1">inspect</span><span class="s2">.</span><span class="s1">BufferFlags</span><span class="s2">.</span><span class="s1">STRIDED</span><span class="s2">, </span><span class="s1">inspect</span><span class="s2">.</span><span class="s1">BufferFlags</span><span class="s2">.</span><span class="s1">READ</span><span class="s2">]</span>
+
+    <span class="s0">def </span><span class="s1">func</span><span class="s2">(</span><span class="s1">b</span><span class="s2">):</span>
+        <span class="s1">b</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">()</span>
+        <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">100</span><span class="s2">):</span>
+            <span class="s1">arr</span><span class="s2">.</span><span class="s1">__buffer__</span><span class="s2">(</span><span class="s1">flags</span><span class="s2">[</span><span class="s1">i </span><span class="s2">% </span><span class="s5">2</span><span class="s2">])</span>
+
+    <span class="s1">run_threaded</span><span class="s2">(</span><span class="s1">func</span><span class="s2">, </span><span class="s1">max_workers</span><span class="s2">=</span><span class="s5">8</span><span class="s2">, </span><span class="s1">pass_barrier</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+<span class="s0">def </span><span class="s1">test_void_dtype__buffer__thread_safety</span><span class="s2">():</span>
+    <span class="s0">import </span><span class="s1">inspect</span>
+    <span class="s1">dt </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">([(</span><span class="s3">'name'</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">str_</span><span class="s2">, </span><span class="s5">16</span><span class="s2">), (</span><span class="s3">'grades'</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">, (</span><span class="s5">2</span><span class="s2">,))])</span>
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">((</span><span class="s3">'ndarray_scalar'</span><span class="s2">, (</span><span class="s5">1.2</span><span class="s2">, </span><span class="s5">3.0</span><span class="s2">)), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dt</span><span class="s2">)[()]</span>
+    <span class="s0">assert </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">void</span><span class="s2">)</span>
+    <span class="s1">flags </span><span class="s2">= [</span><span class="s1">inspect</span><span class="s2">.</span><span class="s1">BufferFlags</span><span class="s2">.</span><span class="s1">STRIDES</span><span class="s2">, </span><span class="s1">inspect</span><span class="s2">.</span><span class="s1">BufferFlags</span><span class="s2">.</span><span class="s1">READ</span><span class="s2">]</span>
+
+    <span class="s0">def </span><span class="s1">func</span><span class="s2">(</span><span class="s1">b</span><span class="s2">):</span>
+        <span class="s1">b</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">()</span>
+        <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">100</span><span class="s2">):</span>
+            <span class="s1">x</span><span class="s2">.</span><span class="s1">__buffer__</span><span class="s2">(</span><span class="s1">flags</span><span class="s2">[</span><span class="s1">i </span><span class="s2">% </span><span class="s5">2</span><span class="s2">])</span>
+
+    <span class="s1">run_threaded</span><span class="s2">(</span><span class="s1">func</span><span class="s2">, </span><span class="s1">max_workers</span><span class="s2">=</span><span class="s5">8</span><span class="s2">, </span><span class="s1">pass_barrier</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">assert_no_deadlock</span><span class="s2">(</span><span class="s1">workload</span><span class="s2">, *, </span><span class="s1">args</span><span class="s2">=(), </span><span class="s1">helpers</span><span class="s2">=(), </span><span class="s1">timeout</span><span class="s2">=</span><span class="s5">30</span><span class="s2">,</span>
+                       <span class="s1">reason</span><span class="s2">=</span><span class="s3">&quot;deadlock&quot;</span><span class="s2">):</span>
+    <span class="s6">&quot;&quot;&quot;Run ``workload`` in a fresh subprocess; fail if it does not finish in time. 
+ 
+    ``workload`` is a self-contained function: its source is extracted with 
+    ``inspect.getsource`` and executed in a clean interpreter. It must do its 
+    own imports and may only reference arguments and helpers explicitly passed 
+    to this function. 
+ 
+    For regression tests whose failure mode is a hang. Delegates to 
+    ``run_subprocess`` (which folds the child's output into the failure on a 
+    nonzero exit); this only adds the timeout watchdog, reporting a likely 
+    ``reason`` if the child is killed. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">source </span><span class="s2">= </span><span class="s3">&quot;</span><span class="s0">\n</span><span class="s3">&quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span>
+        <span class="s1">textwrap</span><span class="s2">.</span><span class="s1">dedent</span><span class="s2">(</span><span class="s1">inspect</span><span class="s2">.</span><span class="s1">getsource</span><span class="s2">(</span><span class="s1">helper</span><span class="s2">)) </span><span class="s0">for </span><span class="s1">helper </span><span class="s0">in </span><span class="s1">helpers</span>
+    <span class="s2">)</span>
+    <span class="s1">source </span><span class="s2">+= </span><span class="s3">&quot;</span><span class="s0">\n</span><span class="s3">&quot; </span><span class="s2">+ </span><span class="s1">textwrap</span><span class="s2">.</span><span class="s1">dedent</span><span class="s2">(</span><span class="s1">inspect</span><span class="s2">.</span><span class="s1">getsource</span><span class="s2">(</span><span class="s1">workload</span><span class="s2">))</span>
+    <span class="s1">script </span><span class="s2">= (</span>
+        <span class="s3">&quot;import faulthandler</span><span class="s0">\n</span><span class="s3">&quot;</span>
+        <span class="s3">f&quot;faulthandler.dump_traceback_later(</span><span class="s0">{</span><span class="s1">timeout</span><span class="s0">}</span><span class="s3">, exit=True)</span><span class="s0">\n</span><span class="s3">&quot;</span>
+        <span class="s3">f&quot;</span><span class="s0">{</span><span class="s1">source</span><span class="s0">}\n</span><span class="s3">&quot;</span>
+        <span class="s3">f&quot;</span><span class="s0">{</span><span class="s1">workload</span><span class="s2">.</span><span class="s1">__name__</span><span class="s0">}</span><span class="s3">(*</span><span class="s0">{</span><span class="s1">args</span><span class="s0">!r}</span><span class="s3">)</span><span class="s0">\n</span><span class="s3">&quot;</span>
+        <span class="s3">&quot;faulthandler.cancel_dump_traceback_later()</span><span class="s0">\n</span><span class="s3">&quot;</span>
+    <span class="s2">)</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s1">run_subprocess</span><span class="s2">([</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">executable</span><span class="s2">, </span><span class="s3">&quot;-c&quot;</span><span class="s2">, </span><span class="s1">script</span><span class="s2">], </span><span class="s1">timeout</span><span class="s2">=</span><span class="s1">timeout </span><span class="s2">+ </span><span class="s5">15</span><span class="s2">)</span>
+    <span class="s0">except </span><span class="s1">subprocess</span><span class="s2">.</span><span class="s1">TimeoutExpired</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">AssertionError</span><span class="s2">(</span>
+            <span class="s3">f&quot;subprocess did not finish within </span><span class="s0">{</span><span class="s1">timeout</span><span class="s0">}</span><span class="s3">s -- likely </span><span class="s0">{</span><span class="s1">reason</span><span class="s0">}</span><span class="s3">&quot;</span>
+        <span class="s2">) </span><span class="s0">from None</span>
+
+
+<span class="s0">def </span><span class="s1">threaded_deadlock_reproducer</span><span class="s2">(</span><span class="s1">operation</span><span class="s2">, </span><span class="s1">nworkers</span><span class="s2">, </span><span class="s1">niters</span><span class="s2">, </span><span class="s1">stall</span><span class="s2">):</span>
+    <span class="s0">import </span><span class="s1">faulthandler</span>
+    <span class="s0">import </span><span class="s1">os</span>
+    <span class="s0">import </span><span class="s1">sys</span>
+    <span class="s0">import </span><span class="s1">threading</span>
+    <span class="s0">import </span><span class="s1">time</span>
+
+    <span class="s1">progress </span><span class="s2">= [</span><span class="s5">0</span><span class="s2">] * </span><span class="s1">nworkers</span>
+    <span class="s1">errors </span><span class="s2">= []</span>
+    <span class="s1">barrier </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Barrier</span><span class="s2">(</span><span class="s1">nworkers</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">worker</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">):</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">barrier</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">()</span>
+            <span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">niters</span><span class="s2">):</span>
+                <span class="s1">operation</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">)</span>
+                <span class="s1">progress</span><span class="s2">[</span><span class="s1">idx</span><span class="s2">] += </span><span class="s5">1</span>
+        <span class="s0">except </span><span class="s1">BaseException </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">errors</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">)</span>
+            <span class="s0">raise</span>
+
+    <span class="s1">workers </span><span class="s2">= [</span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Thread</span><span class="s2">(</span><span class="s1">target</span><span class="s2">=</span><span class="s1">worker</span><span class="s2">, </span><span class="s1">args</span><span class="s2">=(</span><span class="s1">i</span><span class="s2">,), </span><span class="s1">daemon</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+               <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">nworkers</span><span class="s2">)]</span>
+    <span class="s0">for </span><span class="s1">t </span><span class="s0">in </span><span class="s1">workers</span><span class="s2">:</span>
+        <span class="s1">t</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()</span>
+
+    <span class="s1">last_total</span><span class="s2">, </span><span class="s1">last_change </span><span class="s2">= </span><span class="s5">0</span><span class="s2">, </span><span class="s1">time</span><span class="s2">.</span><span class="s1">monotonic</span><span class="s2">()</span>
+    <span class="s0">while </span><span class="s1">any</span><span class="s2">(</span><span class="s1">t</span><span class="s2">.</span><span class="s1">is_alive</span><span class="s2">() </span><span class="s0">for </span><span class="s1">t </span><span class="s0">in </span><span class="s1">workers</span><span class="s2">):</span>
+        <span class="s1">time</span><span class="s2">.</span><span class="s1">sleep</span><span class="s2">(</span><span class="s5">0.05</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">errors</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">AssertionError</span><span class="s2">(</span><span class="s3">f&quot;worker failed: </span><span class="s0">{</span><span class="s1">errors</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]</span><span class="s0">!r}</span><span class="s3">&quot;</span><span class="s2">) </span><span class="s0">from </span><span class="s1">errors</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]</span>
+        <span class="s1">total </span><span class="s2">= </span><span class="s1">sum</span><span class="s2">(</span><span class="s1">progress</span><span class="s2">)</span>
+        <span class="s1">now </span><span class="s2">= </span><span class="s1">time</span><span class="s2">.</span><span class="s1">monotonic</span><span class="s2">()</span>
+        <span class="s0">if </span><span class="s1">total </span><span class="s2">!= </span><span class="s1">last_total</span><span class="s2">:</span>
+            <span class="s1">last_total</span><span class="s2">, </span><span class="s1">last_change </span><span class="s2">= </span><span class="s1">total</span><span class="s2">, </span><span class="s1">now</span>
+        <span class="s0">elif </span><span class="s1">now </span><span class="s2">- </span><span class="s1">last_change </span><span class="s2">&gt; </span><span class="s1">stall</span><span class="s2">:</span>
+            <span class="s4"># dump the wedged threads' tracebacks, then os._exit to avoid a</span>
+            <span class="s4"># shutdown hang on the daemon threads.</span>
+            <span class="s1">sys</span><span class="s2">.</span><span class="s1">stderr</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s3">&quot;Probably deadlocked!</span><span class="s0">\n</span><span class="s3">&quot;</span><span class="s2">)</span>
+            <span class="s1">faulthandler</span><span class="s2">.</span><span class="s1">dump_traceback</span><span class="s2">()</span>
+            <span class="s1">sys</span><span class="s2">.</span><span class="s1">stderr</span><span class="s2">.</span><span class="s1">flush</span><span class="s2">()</span>
+            <span class="s1">os</span><span class="s2">.</span><span class="s1">_exit</span><span class="s2">(</span><span class="s5">1</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">errors</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">AssertionError</span><span class="s2">(</span><span class="s3">f&quot;worker failed: </span><span class="s0">{</span><span class="s1">errors</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]</span><span class="s0">!r}</span><span class="s3">&quot;</span><span class="s2">) </span><span class="s0">from </span><span class="s1">errors</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]</span>
+
+
+<span class="s0">def </span><span class="s1">allocator_lock_order_workload</span><span class="s2">(</span><span class="s1">case_</span><span class="s2">):</span>
+    <span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+
+    <span class="s1">N </span><span class="s2">= </span><span class="s5">1_000</span>
+    <span class="s1">NWORKERS </span><span class="s2">= </span><span class="s5">8</span>
+    <span class="s1">NITERS </span><span class="s2">= </span><span class="s5">1000</span>
+    <span class="s1">STALL </span><span class="s2">= </span><span class="s5">2.0</span>
+
+    <span class="s0">if </span><span class="s1">case_ </span><span class="s2">== </span><span class="s3">&quot;two-allocator&quot;</span><span class="s2">:</span>
+        <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s3">&quot;alpha&quot;</span><span class="s2">] * </span><span class="s1">N</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">&quot;T&quot;</span><span class="s2">)</span>
+        <span class="s1">b </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s3">&quot;bravo&quot;</span><span class="s2">] * </span><span class="s1">N</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">&quot;T&quot;</span><span class="s2">)</span>
+
+        <span class="s0">def </span><span class="s1">operation</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s1">idx </span><span class="s2">% </span><span class="s5">2 </span><span class="s2">== </span><span class="s5">0</span><span class="s2">:</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">less</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">)   </span><span class="s4"># locks alloc(a) then alloc(b)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">less</span><span class="s2">(</span><span class="s1">b</span><span class="s2">, </span><span class="s1">a</span><span class="s2">)   </span><span class="s4"># locks alloc(b) then alloc(a)</span>
+
+    <span class="s0">elif </span><span class="s1">case_ </span><span class="s2">== </span><span class="s3">&quot;three-allocator&quot;</span><span class="s2">:</span>
+        <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s3">&quot;alpha&quot;</span><span class="s2">] * </span><span class="s1">N</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">&quot;T&quot;</span><span class="s2">)</span>
+        <span class="s1">b </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s3">&quot;bravo&quot;</span><span class="s2">] * </span><span class="s1">N</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">&quot;T&quot;</span><span class="s2">)</span>
+        <span class="s1">c </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s3">&quot;charlie&quot;</span><span class="s2">] * </span><span class="s1">N</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">&quot;T&quot;</span><span class="s2">)</span>
+
+        <span class="s0">def </span><span class="s1">operation</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">):</span>
+            <span class="s1">order </span><span class="s2">= </span><span class="s1">idx </span><span class="s2">% </span><span class="s5">3</span>
+            <span class="s0">if </span><span class="s1">order </span><span class="s2">== </span><span class="s5">0</span><span class="s2">:</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">maximum</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">c</span><span class="s2">)   </span><span class="s4"># locks alloc(a), alloc(b), alloc(c)</span>
+            <span class="s0">elif </span><span class="s1">order </span><span class="s2">== </span><span class="s5">1</span><span class="s2">:</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">maximum</span><span class="s2">(</span><span class="s1">b</span><span class="s2">, </span><span class="s1">c</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">a</span><span class="s2">)   </span><span class="s4"># locks alloc(b), alloc(c), alloc(a)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">maximum</span><span class="s2">(</span><span class="s1">c</span><span class="s2">, </span><span class="s1">a</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">b</span><span class="s2">)   </span><span class="s4"># locks alloc(c), alloc(a), alloc(b)</span>
+
+    <span class="s0">elif </span><span class="s1">case_ </span><span class="s2">== </span><span class="s3">&quot;four-allocator&quot;</span><span class="s2">:</span>
+        <span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">_core</span><span class="s2">.</span><span class="s1">umath </span><span class="s0">import </span><span class="s1">_replace</span>
+
+        <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s3">&quot;a&quot;</span><span class="s2">] * </span><span class="s1">N</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">&quot;T&quot;</span><span class="s2">)</span>
+        <span class="s1">b </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s3">&quot;b&quot;</span><span class="s2">] * </span><span class="s1">N</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">&quot;T&quot;</span><span class="s2">)</span>
+        <span class="s1">c </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s3">&quot;c&quot;</span><span class="s2">] * </span><span class="s1">N</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">&quot;T&quot;</span><span class="s2">)</span>
+        <span class="s1">d </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s3">&quot;d&quot;</span><span class="s2">] * </span><span class="s1">N</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">&quot;T&quot;</span><span class="s2">)</span>
+        <span class="s1">counts </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s1">N</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+
+        <span class="s0">def </span><span class="s1">operation</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">):</span>
+            <span class="s1">order </span><span class="s2">= </span><span class="s1">idx </span><span class="s2">% </span><span class="s5">4</span>
+            <span class="s0">if </span><span class="s1">order </span><span class="s2">== </span><span class="s5">0</span><span class="s2">:</span>
+                <span class="s1">_replace</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">c</span><span class="s2">, </span><span class="s1">counts</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">d</span><span class="s2">)</span>
+            <span class="s0">elif </span><span class="s1">order </span><span class="s2">== </span><span class="s5">1</span><span class="s2">:</span>
+                <span class="s1">_replace</span><span class="s2">(</span><span class="s1">b</span><span class="s2">, </span><span class="s1">c</span><span class="s2">, </span><span class="s1">d</span><span class="s2">, </span><span class="s1">counts</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">a</span><span class="s2">)</span>
+            <span class="s0">elif </span><span class="s1">order </span><span class="s2">== </span><span class="s5">2</span><span class="s2">:</span>
+                <span class="s1">_replace</span><span class="s2">(</span><span class="s1">c</span><span class="s2">, </span><span class="s1">d</span><span class="s2">, </span><span class="s1">a</span><span class="s2">, </span><span class="s1">counts</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">b</span><span class="s2">)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">_replace</span><span class="s2">(</span><span class="s1">d</span><span class="s2">, </span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">counts</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">c</span><span class="s2">)</span>
+
+    <span class="s0">elif </span><span class="s1">case_ </span><span class="s2">== </span><span class="s3">&quot;duplicate-allocator&quot;</span><span class="s2">:</span>
+        <span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">_core</span><span class="s2">.</span><span class="s1">umath </span><span class="s0">import </span><span class="s1">_replace</span>
+
+        <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s3">&quot;same&quot;</span><span class="s2">] * </span><span class="s1">N</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">&quot;T&quot;</span><span class="s2">)</span>
+        <span class="s1">b </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s3">&quot;other&quot;</span><span class="s2">] * </span><span class="s1">N</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">&quot;T&quot;</span><span class="s2">)</span>
+        <span class="s1">c </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s3">&quot;out&quot;</span><span class="s2">] * </span><span class="s1">N</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">&quot;T&quot;</span><span class="s2">)</span>
+        <span class="s1">counts </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s1">N</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+
+        <span class="s0">def </span><span class="s1">operation</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s1">idx </span><span class="s2">% </span><span class="s5">2 </span><span class="s2">== </span><span class="s5">0</span><span class="s2">:</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">maximum</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">a</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">b</span><span class="s2">)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">_replace</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">counts</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">c</span><span class="s2">)</span>
+
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">f&quot;unknown allocator deadlock case: </span><span class="s0">{</span><span class="s1">case_</span><span class="s0">}</span><span class="s3">&quot;</span><span class="s2">)</span>
+
+    <span class="s1">threaded_deadlock_reproducer</span><span class="s2">(</span>
+        <span class="s1">operation</span><span class="s2">, </span><span class="s1">NWORKERS</span><span class="s2">, </span><span class="s1">NITERS</span><span class="s2">, </span><span class="s1">stall</span><span class="s2">=</span><span class="s1">STALL</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_setitem_reentrant_no_deadlock</span><span class="s2">():</span>
+    <span class="s0">def </span><span class="s1">workload</span><span class="s2">():</span>
+        <span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">empty</span><span class="s2">(</span><span class="s5">2</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">&quot;T&quot;</span><span class="s2">)</span>
+
+        <span class="s0">class </span><span class="s1">Reenter</span><span class="s2">:</span>
+            <span class="s0">def </span><span class="s1">__str__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+                <span class="s4"># re-enters stringdtype_setitem and re-acquires the allocator</span>
+                <span class="s1">arr</span><span class="s2">[</span><span class="s5">1</span><span class="s2">] = </span><span class="s3">&quot;inner&quot;</span>
+                <span class="s0">return </span><span class="s3">&quot;outer&quot;</span>
+
+        <span class="s1">arr</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] = </span><span class="s1">Reenter</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">arr</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] == </span><span class="s3">&quot;outer&quot;</span>
+        <span class="s0">assert </span><span class="s1">arr</span><span class="s2">[</span><span class="s5">1</span><span class="s2">] == </span><span class="s3">&quot;inner&quot;</span>
+
+    <span class="s1">assert_no_deadlock</span><span class="s2">(</span>
+        <span class="s1">workload</span><span class="s2">,</span>
+        <span class="s1">reason</span><span class="s2">=</span><span class="s3">&quot;re-entrant allocator acquire in stringdtype_setitem&quot;</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s3">&quot;case_&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span><span class="s3">&quot;two-allocator&quot;</span><span class="s2">, </span><span class="s3">&quot;three-allocator&quot;</span><span class="s2">, </span><span class="s3">&quot;four-allocator&quot;</span><span class="s2">,</span>
+     <span class="s3">&quot;duplicate-allocator&quot;</span><span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_concurrent_allocator_acquire_no_deadlock</span><span class="s2">(</span><span class="s1">case_</span><span class="s2">):</span>
+    <span class="s4"># NpyString_acquire_allocators must lock distinct allocators in a</span>
+    <span class="s4"># canonical order, otherwise deadlocks are possible from ABBA cycles</span>
+    <span class="s1">assert_no_deadlock</span><span class="s2">(</span>
+        <span class="s1">allocator_lock_order_workload</span><span class="s2">,</span>
+        <span class="s1">args</span><span class="s2">=(</span><span class="s1">case_</span><span class="s2">,),</span>
+        <span class="s1">helpers</span><span class="s2">=(</span><span class="s1">threaded_deadlock_reproducer</span><span class="s2">,),</span>
+        <span class="s1">reason</span><span class="s2">=</span><span class="s3">f&quot;allocator lock-ordering in </span><span class="s0">{</span><span class="s1">case_</span><span class="s0">}</span><span class="s3">&quot;</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">unique_deadlock_workload</span><span class="s2">():</span>
+    <span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+    <span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">_core</span><span class="s2">.</span><span class="s1">_multiarray_umath </span><span class="s0">import </span><span class="s1">_unique_hash</span>
+
+    <span class="s1">NWORKERS </span><span class="s2">= </span><span class="s5">8</span>
+    <span class="s1">NITERS </span><span class="s2">= </span><span class="s5">200</span>
+    <span class="s1">STALL </span><span class="s2">= </span><span class="s5">2.0</span>
+
+    <span class="s4"># _unique_hash (the engine under np.unique) rather than np.unique itself:</span>
+    <span class="s4"># it spends almost all its time in the GIL-released, allocator-locked load</span>
+    <span class="s4"># loop, so workers reliably overlap there. A single shared array with many</span>
+    <span class="s4"># duplicates concentrates contention on one allocator.</span>
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s3">f&quot;v</span><span class="s0">{</span><span class="s1">i </span><span class="s2">% </span><span class="s5">128</span><span class="s0">}</span><span class="s3">&quot; </span><span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">50_000</span><span class="s2">)], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">&quot;T&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">operation</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">):</span>
+        <span class="s1">_unique_hash</span><span class="s2">(</span><span class="s1">data</span><span class="s2">, </span><span class="s1">equal_nan</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+
+    <span class="s1">threaded_deadlock_reproducer</span><span class="s2">(</span><span class="s1">operation</span><span class="s2">, </span><span class="s1">NWORKERS</span><span class="s2">, </span><span class="s1">NITERS</span><span class="s2">, </span><span class="s1">stall</span><span class="s2">=</span><span class="s1">STALL</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_concurrent_unique_no_deadlock</span><span class="s2">():</span>
+    <span class="s4"># Concurrent unique on a shared array deadlocks the allocator lock against</span>
+    <span class="s4"># the GIL unless unique_vstring releases the GIL before locking. Only</span>
+    <span class="s4"># reproduces on Python &lt;= 3.12; PyMutex detaches on 3.13+.</span>
+    <span class="s1">assert_no_deadlock</span><span class="s2">(</span>
+        <span class="s1">unique_deadlock_workload</span><span class="s2">,</span>
+        <span class="s1">helpers</span><span class="s2">=(</span><span class="s1">threaded_deadlock_reproducer</span><span class="s2">,),</span>
+        <span class="s1">reason</span><span class="s2">=</span><span class="s3">&quot;unique allocator lock vs GIL&quot;</span><span class="s2">,</span>
+    <span class="s2">)</span>
+</pre>
+</body>
+</html>

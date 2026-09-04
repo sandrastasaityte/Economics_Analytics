@@ -1,0 +1,448 @@
+<html>
+<head>
+<title>css.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+css.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Utilities for interpreting CSS from Stylers for formatting non-HTML outputs. 
+&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">import </span><span class="s1">re</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">TYPE_CHECKING</span>
+<span class="s2">import </span><span class="s1">warnings</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">errors </span><span class="s2">import </span><span class="s1">CSSWarning</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">_exceptions </span><span class="s2">import </span><span class="s1">find_stack_level</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">collections</span><span class="s3">.</span><span class="s1">abc </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">Callable</span><span class="s3">,</span>
+        <span class="s1">Generator</span><span class="s3">,</span>
+        <span class="s1">Iterable</span><span class="s3">,</span>
+        <span class="s1">Iterator</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_side_expander</span><span class="s3">(</span><span class="s1">prop_fmt</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; Callable</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Wrapper to expand shorthand property into top, right, bottom, left properties 
+ 
+    Parameters 
+    ---------- 
+    side : str 
+        The border side to expand into properties 
+ 
+    Returns 
+    ------- 
+        function: Return to call when a 'border(-{side}): {value}' string is encountered 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">expand</span><span class="s3">(</span><span class="s1">self</span><span class="s3">: </span><span class="s1">CSSResolver</span><span class="s3">, </span><span class="s1">prop</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">value</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; Generator</span><span class="s3">[</span><span class="s1">tuple</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">]]:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Expand shorthand property into side-specific property (top, right, bottom, left) 
+ 
+        Parameters 
+        ---------- 
+            prop (str): CSS property name 
+            value (str): String token for property 
+ 
+        Yields 
+        ------ 
+            Tuple (str, str): Expanded property, value 
+        &quot;&quot;&quot;</span>
+        <span class="s1">tokens </span><span class="s3">= </span><span class="s1">value</span><span class="s3">.</span><span class="s1">split</span><span class="s3">()</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">mapping </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">SIDE_SHORTHANDS</span><span class="s3">[</span><span class="s1">len</span><span class="s3">(</span><span class="s1">tokens</span><span class="s3">)]</span>
+        <span class="s2">except </span><span class="s1">KeyError</span><span class="s3">:</span>
+            <span class="s1">warnings</span><span class="s3">.</span><span class="s1">warn</span><span class="s3">(</span>
+                <span class="s4">f'Could not expand &quot;</span><span class="s2">{</span><span class="s1">prop</span><span class="s2">}</span><span class="s4">: </span><span class="s2">{</span><span class="s1">value</span><span class="s2">}</span><span class="s4">&quot;'</span><span class="s3">,</span>
+                <span class="s1">CSSWarning</span><span class="s3">,</span>
+                <span class="s1">stacklevel</span><span class="s3">=</span><span class="s1">find_stack_level</span><span class="s3">(),</span>
+            <span class="s3">)</span>
+            <span class="s2">return</span>
+        <span class="s2">for </span><span class="s1">key</span><span class="s3">, </span><span class="s1">idx </span><span class="s2">in </span><span class="s1">zip</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">SIDES</span><span class="s3">, </span><span class="s1">mapping</span><span class="s3">, </span><span class="s1">strict</span><span class="s3">=</span><span class="s2">True</span><span class="s3">):</span>
+            <span class="s2">yield </span><span class="s1">prop_fmt</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">key</span><span class="s3">), </span><span class="s1">tokens</span><span class="s3">[</span><span class="s1">idx</span><span class="s3">]</span>
+
+    <span class="s2">return </span><span class="s1">expand</span>
+
+
+<span class="s2">def </span><span class="s1">_border_expander</span><span class="s3">(</span><span class="s1">side</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s4">&quot;&quot;</span><span class="s3">) </span><span class="s1">-&gt; Callable</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Wrapper to expand 'border' property into border color, style, and width properties 
+ 
+    Parameters 
+    ---------- 
+    side : str 
+        The border side to expand into properties 
+ 
+    Returns 
+    ------- 
+        function: Return to call when a 'border(-{side}): {value}' string is encountered 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">side </span><span class="s3">!= </span><span class="s4">&quot;&quot;</span><span class="s3">:</span>
+        <span class="s1">side </span><span class="s3">= </span><span class="s4">f&quot;-</span><span class="s2">{</span><span class="s1">side</span><span class="s2">}</span><span class="s4">&quot;</span>
+
+    <span class="s2">def </span><span class="s1">expand</span><span class="s3">(</span><span class="s1">self</span><span class="s3">: </span><span class="s1">CSSResolver</span><span class="s3">, </span><span class="s1">prop</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">value</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; Generator</span><span class="s3">[</span><span class="s1">tuple</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">]]:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Expand border into color, style, and width tuples 
+ 
+        Parameters 
+        ---------- 
+            prop : str 
+                CSS property name passed to styler 
+            value : str 
+                Value passed to styler for property 
+ 
+        Yields 
+        ------ 
+            Tuple (str, str): Expanded property, value 
+        &quot;&quot;&quot;</span>
+        <span class="s1">tokens </span><span class="s3">= </span><span class="s1">value</span><span class="s3">.</span><span class="s1">split</span><span class="s3">()</span>
+        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">tokens</span><span class="s3">) == </span><span class="s5">0 </span><span class="s2">or </span><span class="s1">len</span><span class="s3">(</span><span class="s1">tokens</span><span class="s3">) &gt; </span><span class="s5">3</span><span class="s3">:</span>
+            <span class="s1">warnings</span><span class="s3">.</span><span class="s1">warn</span><span class="s3">(</span>
+                <span class="s4">f'Too many tokens provided to &quot;</span><span class="s2">{</span><span class="s1">prop</span><span class="s2">}</span><span class="s4">&quot; (expected 1-3)'</span><span class="s3">,</span>
+                <span class="s1">CSSWarning</span><span class="s3">,</span>
+                <span class="s1">stacklevel</span><span class="s3">=</span><span class="s1">find_stack_level</span><span class="s3">(),</span>
+            <span class="s3">)</span>
+
+        <span class="s6"># TODO: Can we use current color as initial value to comply with CSS standards?</span>
+        <span class="s1">border_declarations </span><span class="s3">= {</span>
+            <span class="s4">f&quot;border</span><span class="s2">{</span><span class="s1">side</span><span class="s2">}</span><span class="s4">-color&quot;</span><span class="s3">: </span><span class="s4">&quot;black&quot;</span><span class="s3">,</span>
+            <span class="s4">f&quot;border</span><span class="s2">{</span><span class="s1">side</span><span class="s2">}</span><span class="s4">-style&quot;</span><span class="s3">: </span><span class="s4">&quot;none&quot;</span><span class="s3">,</span>
+            <span class="s4">f&quot;border</span><span class="s2">{</span><span class="s1">side</span><span class="s2">}</span><span class="s4">-width&quot;</span><span class="s3">: </span><span class="s4">&quot;medium&quot;</span><span class="s3">,</span>
+        <span class="s3">}</span>
+        <span class="s2">for </span><span class="s1">token </span><span class="s2">in </span><span class="s1">tokens</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">token</span><span class="s3">.</span><span class="s1">lower</span><span class="s3">() </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">BORDER_STYLES</span><span class="s3">:</span>
+                <span class="s1">border_declarations</span><span class="s3">[</span><span class="s4">f&quot;border</span><span class="s2">{</span><span class="s1">side</span><span class="s2">}</span><span class="s4">-style&quot;</span><span class="s3">] = </span><span class="s1">token</span>
+            <span class="s2">elif </span><span class="s1">any</span><span class="s3">(</span><span class="s1">ratio </span><span class="s2">in </span><span class="s1">token</span><span class="s3">.</span><span class="s1">lower</span><span class="s3">() </span><span class="s2">for </span><span class="s1">ratio </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">BORDER_WIDTH_RATIOS</span><span class="s3">):</span>
+                <span class="s1">border_declarations</span><span class="s3">[</span><span class="s4">f&quot;border</span><span class="s2">{</span><span class="s1">side</span><span class="s2">}</span><span class="s4">-width&quot;</span><span class="s3">] = </span><span class="s1">token</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">border_declarations</span><span class="s3">[</span><span class="s4">f&quot;border</span><span class="s2">{</span><span class="s1">side</span><span class="s2">}</span><span class="s4">-color&quot;</span><span class="s3">] = </span><span class="s1">token</span>
+            <span class="s6"># TODO: Warn user if item entered more than once (e.g. &quot;border: red green&quot;)</span>
+
+        <span class="s6"># Per CSS, &quot;border&quot; will reset previous &quot;border-*&quot; definitions</span>
+        <span class="s2">yield from </span><span class="s1">self</span><span class="s3">.</span><span class="s1">atomize</span><span class="s3">(</span><span class="s1">border_declarations</span><span class="s3">.</span><span class="s1">items</span><span class="s3">())</span>
+
+    <span class="s2">return </span><span class="s1">expand</span>
+
+
+<span class="s2">class </span><span class="s1">CSSResolver</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    A callable for parsing and resolving CSS to atomic properties. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">UNIT_RATIOS </span><span class="s3">= {</span>
+        <span class="s4">&quot;pt&quot;</span><span class="s3">: (</span><span class="s4">&quot;pt&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">),</span>
+        <span class="s4">&quot;em&quot;</span><span class="s3">: (</span><span class="s4">&quot;em&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">),</span>
+        <span class="s4">&quot;rem&quot;</span><span class="s3">: (</span><span class="s4">&quot;pt&quot;</span><span class="s3">, </span><span class="s5">12</span><span class="s3">),</span>
+        <span class="s4">&quot;ex&quot;</span><span class="s3">: (</span><span class="s4">&quot;em&quot;</span><span class="s3">, </span><span class="s5">0.5</span><span class="s3">),</span>
+        <span class="s6"># 'ch':</span>
+        <span class="s4">&quot;px&quot;</span><span class="s3">: (</span><span class="s4">&quot;pt&quot;</span><span class="s3">, </span><span class="s5">0.75</span><span class="s3">),</span>
+        <span class="s4">&quot;pc&quot;</span><span class="s3">: (</span><span class="s4">&quot;pt&quot;</span><span class="s3">, </span><span class="s5">12</span><span class="s3">),</span>
+        <span class="s4">&quot;in&quot;</span><span class="s3">: (</span><span class="s4">&quot;pt&quot;</span><span class="s3">, </span><span class="s5">72</span><span class="s3">),</span>
+        <span class="s4">&quot;cm&quot;</span><span class="s3">: (</span><span class="s4">&quot;in&quot;</span><span class="s3">, </span><span class="s5">1 </span><span class="s3">/ </span><span class="s5">2.54</span><span class="s3">),</span>
+        <span class="s4">&quot;mm&quot;</span><span class="s3">: (</span><span class="s4">&quot;in&quot;</span><span class="s3">, </span><span class="s5">1 </span><span class="s3">/ </span><span class="s5">25.4</span><span class="s3">),</span>
+        <span class="s4">&quot;q&quot;</span><span class="s3">: (</span><span class="s4">&quot;mm&quot;</span><span class="s3">, </span><span class="s5">0.25</span><span class="s3">),</span>
+        <span class="s4">&quot;!!default&quot;</span><span class="s3">: (</span><span class="s4">&quot;em&quot;</span><span class="s3">, </span><span class="s5">0</span><span class="s3">),</span>
+    <span class="s3">}</span>
+
+    <span class="s1">FONT_SIZE_RATIOS </span><span class="s3">= </span><span class="s1">UNIT_RATIOS</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+    <span class="s1">FONT_SIZE_RATIOS</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span>
+        <span class="s3">{</span>
+            <span class="s4">&quot;%&quot;</span><span class="s3">: (</span><span class="s4">&quot;em&quot;</span><span class="s3">, </span><span class="s5">0.01</span><span class="s3">),</span>
+            <span class="s4">&quot;xx-small&quot;</span><span class="s3">: (</span><span class="s4">&quot;rem&quot;</span><span class="s3">, </span><span class="s5">0.5</span><span class="s3">),</span>
+            <span class="s4">&quot;x-small&quot;</span><span class="s3">: (</span><span class="s4">&quot;rem&quot;</span><span class="s3">, </span><span class="s5">0.625</span><span class="s3">),</span>
+            <span class="s4">&quot;small&quot;</span><span class="s3">: (</span><span class="s4">&quot;rem&quot;</span><span class="s3">, </span><span class="s5">0.8</span><span class="s3">),</span>
+            <span class="s4">&quot;medium&quot;</span><span class="s3">: (</span><span class="s4">&quot;rem&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">),</span>
+            <span class="s4">&quot;large&quot;</span><span class="s3">: (</span><span class="s4">&quot;rem&quot;</span><span class="s3">, </span><span class="s5">1.125</span><span class="s3">),</span>
+            <span class="s4">&quot;x-large&quot;</span><span class="s3">: (</span><span class="s4">&quot;rem&quot;</span><span class="s3">, </span><span class="s5">1.5</span><span class="s3">),</span>
+            <span class="s4">&quot;xx-large&quot;</span><span class="s3">: (</span><span class="s4">&quot;rem&quot;</span><span class="s3">, </span><span class="s5">2</span><span class="s3">),</span>
+            <span class="s4">&quot;smaller&quot;</span><span class="s3">: (</span><span class="s4">&quot;em&quot;</span><span class="s3">, </span><span class="s5">1 </span><span class="s3">/ </span><span class="s5">1.2</span><span class="s3">),</span>
+            <span class="s4">&quot;larger&quot;</span><span class="s3">: (</span><span class="s4">&quot;em&quot;</span><span class="s3">, </span><span class="s5">1.2</span><span class="s3">),</span>
+            <span class="s4">&quot;!!default&quot;</span><span class="s3">: (</span><span class="s4">&quot;em&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">),</span>
+        <span class="s3">}</span>
+    <span class="s3">)</span>
+
+    <span class="s1">MARGIN_RATIOS </span><span class="s3">= </span><span class="s1">UNIT_RATIOS</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+    <span class="s1">MARGIN_RATIOS</span><span class="s3">.</span><span class="s1">update</span><span class="s3">({</span><span class="s4">&quot;none&quot;</span><span class="s3">: (</span><span class="s4">&quot;pt&quot;</span><span class="s3">, </span><span class="s5">0</span><span class="s3">)})</span>
+
+    <span class="s1">BORDER_WIDTH_RATIOS </span><span class="s3">= </span><span class="s1">UNIT_RATIOS</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+    <span class="s1">BORDER_WIDTH_RATIOS</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span>
+        <span class="s3">{</span>
+            <span class="s4">&quot;none&quot;</span><span class="s3">: (</span><span class="s4">&quot;pt&quot;</span><span class="s3">, </span><span class="s5">0</span><span class="s3">),</span>
+            <span class="s4">&quot;thick&quot;</span><span class="s3">: (</span><span class="s4">&quot;px&quot;</span><span class="s3">, </span><span class="s5">4</span><span class="s3">),</span>
+            <span class="s4">&quot;medium&quot;</span><span class="s3">: (</span><span class="s4">&quot;px&quot;</span><span class="s3">, </span><span class="s5">2</span><span class="s3">),</span>
+            <span class="s4">&quot;thin&quot;</span><span class="s3">: (</span><span class="s4">&quot;px&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">),</span>
+            <span class="s6"># Default: medium only if solid</span>
+        <span class="s3">}</span>
+    <span class="s3">)</span>
+
+    <span class="s1">BORDER_STYLES </span><span class="s3">= [</span>
+        <span class="s4">&quot;none&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;hidden&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;dotted&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;dashed&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;solid&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;double&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;groove&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;ridge&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;inset&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;outset&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;mediumdashdot&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;dashdotdot&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;hair&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;mediumdashdotdot&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;dashdot&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;slantdashdot&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;mediumdashed&quot;</span><span class="s3">,</span>
+    <span class="s3">]</span>
+
+    <span class="s1">SIDE_SHORTHANDS </span><span class="s3">= {</span>
+        <span class="s5">1</span><span class="s3">: [</span><span class="s5">0</span><span class="s3">, </span><span class="s5">0</span><span class="s3">, </span><span class="s5">0</span><span class="s3">, </span><span class="s5">0</span><span class="s3">],</span>
+        <span class="s5">2</span><span class="s3">: [</span><span class="s5">0</span><span class="s3">, </span><span class="s5">1</span><span class="s3">, </span><span class="s5">0</span><span class="s3">, </span><span class="s5">1</span><span class="s3">],</span>
+        <span class="s5">3</span><span class="s3">: [</span><span class="s5">0</span><span class="s3">, </span><span class="s5">1</span><span class="s3">, </span><span class="s5">2</span><span class="s3">, </span><span class="s5">1</span><span class="s3">],</span>
+        <span class="s5">4</span><span class="s3">: [</span><span class="s5">0</span><span class="s3">, </span><span class="s5">1</span><span class="s3">, </span><span class="s5">2</span><span class="s3">, </span><span class="s5">3</span><span class="s3">],</span>
+    <span class="s3">}</span>
+
+    <span class="s1">SIDES </span><span class="s3">= (</span><span class="s4">&quot;top&quot;</span><span class="s3">, </span><span class="s4">&quot;right&quot;</span><span class="s3">, </span><span class="s4">&quot;bottom&quot;</span><span class="s3">, </span><span class="s4">&quot;left&quot;</span><span class="s3">)</span>
+
+    <span class="s1">CSS_EXPANSIONS </span><span class="s3">= {</span>
+        <span class="s3">**{</span>
+            <span class="s3">(</span><span class="s4">f&quot;border-</span><span class="s2">{</span><span class="s1">prop</span><span class="s2">}</span><span class="s4">&quot; </span><span class="s2">if </span><span class="s1">prop </span><span class="s2">else </span><span class="s4">&quot;border&quot;</span><span class="s3">): </span><span class="s1">_border_expander</span><span class="s3">(</span><span class="s1">prop</span><span class="s3">)</span>
+            <span class="s2">for </span><span class="s1">prop </span><span class="s2">in </span><span class="s3">[</span><span class="s4">&quot;&quot;</span><span class="s3">, </span><span class="s4">&quot;top&quot;</span><span class="s3">, </span><span class="s4">&quot;right&quot;</span><span class="s3">, </span><span class="s4">&quot;bottom&quot;</span><span class="s3">, </span><span class="s4">&quot;left&quot;</span><span class="s3">]</span>
+        <span class="s3">},</span>
+        <span class="s3">**{</span>
+            <span class="s4">f&quot;border-</span><span class="s2">{</span><span class="s1">prop</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">: </span><span class="s1">_side_expander</span><span class="s3">(</span><span class="s4">f&quot;border-</span><span class="s2">{{</span><span class="s4">:s</span><span class="s2">}}</span><span class="s4">-</span><span class="s2">{</span><span class="s1">prop</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">)</span>
+            <span class="s2">for </span><span class="s1">prop </span><span class="s2">in </span><span class="s3">[</span><span class="s4">&quot;color&quot;</span><span class="s3">, </span><span class="s4">&quot;style&quot;</span><span class="s3">, </span><span class="s4">&quot;width&quot;</span><span class="s3">]</span>
+        <span class="s3">},</span>
+        <span class="s4">&quot;margin&quot;</span><span class="s3">: </span><span class="s1">_side_expander</span><span class="s3">(</span><span class="s4">&quot;margin-{:s}&quot;</span><span class="s3">),</span>
+        <span class="s4">&quot;padding&quot;</span><span class="s3">: </span><span class="s1">_side_expander</span><span class="s3">(</span><span class="s4">&quot;padding-{:s}&quot;</span><span class="s3">),</span>
+    <span class="s3">}</span>
+
+    <span class="s2">def </span><span class="s1">__call__</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">declarations</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s1">Iterable</span><span class="s3">[</span><span class="s1">tuple</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">]],</span>
+        <span class="s1">inherited</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">]:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        The given declarations to atomic properties. 
+ 
+        Parameters 
+        ---------- 
+        declarations_str : str | Iterable[tuple[str, str]] 
+            A CSS string or set of CSS declaration tuples 
+            e.g. &quot;font-weight: bold; background: blue&quot; or 
+            {(&quot;font-weight&quot;, &quot;bold&quot;), (&quot;background&quot;, &quot;blue&quot;)} 
+        inherited : dict, optional 
+            Atomic properties indicating the inherited style context in which 
+            declarations_str is to be resolved. ``inherited`` should already 
+            be resolved, i.e. valid output of this method. 
+ 
+        Returns 
+        ------- 
+        dict 
+            Atomic CSS 2.2 properties. 
+ 
+        Examples 
+        -------- 
+        &gt;&gt;&gt; resolve = CSSResolver() 
+        &gt;&gt;&gt; inherited = {&quot;font-family&quot;: &quot;serif&quot;, &quot;font-weight&quot;: &quot;bold&quot;} 
+        &gt;&gt;&gt; out = resolve( 
+        ...     ''' 
+        ...               border-color: BLUE RED; 
+        ...               font-size: 1em; 
+        ...               font-size: 2em; 
+        ...               font-weight: normal; 
+        ...               font-weight: inherit; 
+        ...               ''', 
+        ...     inherited, 
+        ... ) 
+        &gt;&gt;&gt; sorted(out.items())  # doctest: +NORMALIZE_WHITESPACE 
+        [('border-bottom-color', 'blue'), 
+         ('border-left-color', 'red'), 
+         ('border-right-color', 'red'), 
+         ('border-top-color', 'blue'), 
+         ('font-family', 'serif'), 
+         ('font-size', '24pt'), 
+         ('font-weight', 'bold')] 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">declarations</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+            <span class="s1">declarations </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">parse</span><span class="s3">(</span><span class="s1">declarations</span><span class="s3">)</span>
+        <span class="s1">props </span><span class="s3">= </span><span class="s1">dict</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">atomize</span><span class="s3">(</span><span class="s1">declarations</span><span class="s3">))</span>
+        <span class="s2">if </span><span class="s1">inherited </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">inherited </span><span class="s3">= {}</span>
+
+        <span class="s1">props </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_update_initial</span><span class="s3">(</span><span class="s1">props</span><span class="s3">, </span><span class="s1">inherited</span><span class="s3">)</span>
+        <span class="s1">props </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_update_font_size</span><span class="s3">(</span><span class="s1">props</span><span class="s3">, </span><span class="s1">inherited</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_update_other_units</span><span class="s3">(</span><span class="s1">props</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_update_initial</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">props</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">],</span>
+        <span class="s1">inherited</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">],</span>
+    <span class="s3">) </span><span class="s1">-&gt; dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">]:</span>
+        <span class="s6"># 1. resolve inherited, initial</span>
+        <span class="s2">for </span><span class="s1">prop</span><span class="s3">, </span><span class="s1">val </span><span class="s2">in </span><span class="s1">inherited</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+            <span class="s2">if </span><span class="s1">prop </span><span class="s2">not in </span><span class="s1">props</span><span class="s3">:</span>
+                <span class="s1">props</span><span class="s3">[</span><span class="s1">prop</span><span class="s3">] = </span><span class="s1">val</span>
+
+        <span class="s1">new_props </span><span class="s3">= </span><span class="s1">props</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+        <span class="s2">for </span><span class="s1">prop</span><span class="s3">, </span><span class="s1">val </span><span class="s2">in </span><span class="s1">props</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+            <span class="s2">if </span><span class="s1">val </span><span class="s3">== </span><span class="s4">&quot;inherit&quot;</span><span class="s3">:</span>
+                <span class="s1">val </span><span class="s3">= </span><span class="s1">inherited</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">prop</span><span class="s3">, </span><span class="s4">&quot;initial&quot;</span><span class="s3">)</span>
+
+            <span class="s2">if </span><span class="s1">val </span><span class="s2">in </span><span class="s3">(</span><span class="s4">&quot;initial&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">):</span>
+                <span class="s6"># we do not define a complete initial stylesheet</span>
+                <span class="s2">del </span><span class="s1">new_props</span><span class="s3">[</span><span class="s1">prop</span><span class="s3">]</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">new_props</span><span class="s3">[</span><span class="s1">prop</span><span class="s3">] = </span><span class="s1">val</span>
+        <span class="s2">return </span><span class="s1">new_props</span>
+
+    <span class="s2">def </span><span class="s1">_update_font_size</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">props</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">],</span>
+        <span class="s1">inherited</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">],</span>
+    <span class="s3">) </span><span class="s1">-&gt; dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">]:</span>
+        <span class="s6"># 2. resolve relative font size</span>
+        <span class="s2">if </span><span class="s1">props</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s4">&quot;font-size&quot;</span><span class="s3">):</span>
+            <span class="s1">props</span><span class="s3">[</span><span class="s4">&quot;font-size&quot;</span><span class="s3">] = </span><span class="s1">self</span><span class="s3">.</span><span class="s1">size_to_pt</span><span class="s3">(</span>
+                <span class="s1">props</span><span class="s3">[</span><span class="s4">&quot;font-size&quot;</span><span class="s3">],</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_get_font_size</span><span class="s3">(</span><span class="s1">inherited</span><span class="s3">),</span>
+                <span class="s1">conversions</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">FONT_SIZE_RATIOS</span><span class="s3">,</span>
+            <span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">props</span>
+
+    <span class="s2">def </span><span class="s1">_get_font_size</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">props</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">]) </span><span class="s1">-&gt; float </span><span class="s3">| </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">props</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s4">&quot;font-size&quot;</span><span class="s3">):</span>
+            <span class="s1">font_size_string </span><span class="s3">= </span><span class="s1">props</span><span class="s3">[</span><span class="s4">&quot;font-size&quot;</span><span class="s3">]</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_float_font_size_from_pt</span><span class="s3">(</span><span class="s1">font_size_string</span><span class="s3">)</span>
+        <span class="s2">return None</span>
+
+    <span class="s2">def </span><span class="s1">_get_float_font_size_from_pt</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">font_size_string</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; float</span><span class="s3">:</span>
+        <span class="s2">assert </span><span class="s1">font_size_string</span><span class="s3">.</span><span class="s1">endswith</span><span class="s3">(</span><span class="s4">&quot;pt&quot;</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">float</span><span class="s3">(</span><span class="s1">font_size_string</span><span class="s3">.</span><span class="s1">rstrip</span><span class="s3">(</span><span class="s4">&quot;pt&quot;</span><span class="s3">))</span>
+
+    <span class="s2">def </span><span class="s1">_update_other_units</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">props</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">]) </span><span class="s1">-&gt; dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">]:</span>
+        <span class="s1">font_size </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_font_size</span><span class="s3">(</span><span class="s1">props</span><span class="s3">)</span>
+        <span class="s6"># 3. TODO: resolve other font-relative units</span>
+        <span class="s2">for </span><span class="s1">side </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">SIDES</span><span class="s3">:</span>
+            <span class="s1">prop </span><span class="s3">= </span><span class="s4">f&quot;border-</span><span class="s2">{</span><span class="s1">side</span><span class="s2">}</span><span class="s4">-width&quot;</span>
+            <span class="s2">if </span><span class="s1">prop </span><span class="s2">in </span><span class="s1">props</span><span class="s3">:</span>
+                <span class="s1">props</span><span class="s3">[</span><span class="s1">prop</span><span class="s3">] = </span><span class="s1">self</span><span class="s3">.</span><span class="s1">size_to_pt</span><span class="s3">(</span>
+                    <span class="s1">props</span><span class="s3">[</span><span class="s1">prop</span><span class="s3">],</span>
+                    <span class="s1">em_pt</span><span class="s3">=</span><span class="s1">font_size</span><span class="s3">,</span>
+                    <span class="s1">conversions</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">BORDER_WIDTH_RATIOS</span><span class="s3">,</span>
+                <span class="s3">)</span>
+
+            <span class="s2">for </span><span class="s1">prop </span><span class="s2">in </span><span class="s3">[</span><span class="s4">f&quot;margin-</span><span class="s2">{</span><span class="s1">side</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">, </span><span class="s4">f&quot;padding-</span><span class="s2">{</span><span class="s1">side</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">]:</span>
+                <span class="s2">if </span><span class="s1">prop </span><span class="s2">in </span><span class="s1">props</span><span class="s3">:</span>
+                    <span class="s6"># TODO: support %</span>
+                    <span class="s1">props</span><span class="s3">[</span><span class="s1">prop</span><span class="s3">] = </span><span class="s1">self</span><span class="s3">.</span><span class="s1">size_to_pt</span><span class="s3">(</span>
+                        <span class="s1">props</span><span class="s3">[</span><span class="s1">prop</span><span class="s3">],</span>
+                        <span class="s1">em_pt</span><span class="s3">=</span><span class="s1">font_size</span><span class="s3">,</span>
+                        <span class="s1">conversions</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">MARGIN_RATIOS</span><span class="s3">,</span>
+                    <span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">props</span>
+
+    <span class="s2">def </span><span class="s1">size_to_pt</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">in_val</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">em_pt</span><span class="s3">: </span><span class="s1">float </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">, </span><span class="s1">conversions</span><span class="s3">: </span><span class="s1">dict </span><span class="s3">= </span><span class="s1">UNIT_RATIOS</span>
+    <span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s2">def </span><span class="s1">_error</span><span class="s3">() </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+            <span class="s1">warnings</span><span class="s3">.</span><span class="s1">warn</span><span class="s3">(</span>
+                <span class="s4">f&quot;Unhandled size: </span><span class="s2">{</span><span class="s1">in_val</span><span class="s2">!r}</span><span class="s4">&quot;</span><span class="s3">,</span>
+                <span class="s1">CSSWarning</span><span class="s3">,</span>
+                <span class="s1">stacklevel</span><span class="s3">=</span><span class="s1">find_stack_level</span><span class="s3">(),</span>
+            <span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">size_to_pt</span><span class="s3">(</span><span class="s4">&quot;1!!default&quot;</span><span class="s3">, </span><span class="s1">conversions</span><span class="s3">=</span><span class="s1">conversions</span><span class="s3">)</span>
+
+        <span class="s1">match </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s4">r&quot;^(\S*?)([a-zA-Z%!].*)&quot;</span><span class="s3">, </span><span class="s1">in_val</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">match </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">_error</span><span class="s3">()</span>
+
+        <span class="s1">val</span><span class="s3">, </span><span class="s1">unit </span><span class="s3">= </span><span class="s1">match</span><span class="s3">.</span><span class="s1">groups</span><span class="s3">()</span>
+        <span class="s2">if </span><span class="s1">val </span><span class="s3">== </span><span class="s4">&quot;&quot;</span><span class="s3">:</span>
+            <span class="s6"># hack for 'large' etc.</span>
+            <span class="s1">val </span><span class="s3">= </span><span class="s5">1</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">val </span><span class="s3">= </span><span class="s1">float</span><span class="s3">(</span><span class="s1">val</span><span class="s3">)</span>
+            <span class="s2">except </span><span class="s1">ValueError</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">_error</span><span class="s3">()</span>
+
+        <span class="s2">while </span><span class="s1">unit </span><span class="s3">!= </span><span class="s4">&quot;pt&quot;</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">unit </span><span class="s3">== </span><span class="s4">&quot;em&quot;</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">em_pt </span><span class="s2">is None</span><span class="s3">:</span>
+                    <span class="s1">unit </span><span class="s3">= </span><span class="s4">&quot;rem&quot;</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s1">val </span><span class="s3">*= </span><span class="s1">em_pt</span>
+                    <span class="s1">unit </span><span class="s3">= </span><span class="s4">&quot;pt&quot;</span>
+                <span class="s2">continue</span>
+
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">unit</span><span class="s3">, </span><span class="s1">mul </span><span class="s3">= </span><span class="s1">conversions</span><span class="s3">[</span><span class="s1">unit</span><span class="s3">]</span>
+            <span class="s2">except </span><span class="s1">KeyError</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">_error</span><span class="s3">()</span>
+            <span class="s1">val </span><span class="s3">*= </span><span class="s1">mul</span>
+
+        <span class="s1">val </span><span class="s3">= </span><span class="s1">round</span><span class="s3">(</span><span class="s1">val</span><span class="s3">, </span><span class="s5">5</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">int</span><span class="s3">(</span><span class="s1">val</span><span class="s3">) == </span><span class="s1">val</span><span class="s3">:</span>
+            <span class="s1">size_fmt </span><span class="s3">= </span><span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">int</span><span class="s3">(</span><span class="s1">val</span><span class="s3">)</span><span class="s2">:</span><span class="s4">d</span><span class="s2">}</span><span class="s4">pt&quot;</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">size_fmt </span><span class="s3">= </span><span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">val</span><span class="s2">:</span><span class="s4">f</span><span class="s2">}</span><span class="s4">pt&quot;</span>
+        <span class="s2">return </span><span class="s1">size_fmt</span>
+
+    <span class="s2">def </span><span class="s1">atomize</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">declarations</span><span class="s3">: </span><span class="s1">Iterable</span><span class="s3">) </span><span class="s1">-&gt; Generator</span><span class="s3">[</span><span class="s1">tuple</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">]]:</span>
+        <span class="s2">for </span><span class="s1">prop</span><span class="s3">, </span><span class="s1">value </span><span class="s2">in </span><span class="s1">declarations</span><span class="s3">:</span>
+            <span class="s1">prop </span><span class="s3">= </span><span class="s1">prop</span><span class="s3">.</span><span class="s1">lower</span><span class="s3">()</span>
+            <span class="s1">value </span><span class="s3">= </span><span class="s1">value</span><span class="s3">.</span><span class="s1">lower</span><span class="s3">()</span>
+            <span class="s2">if </span><span class="s1">prop </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">CSS_EXPANSIONS</span><span class="s3">:</span>
+                <span class="s1">expand </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">CSS_EXPANSIONS</span><span class="s3">[</span><span class="s1">prop</span><span class="s3">]</span>
+                <span class="s2">yield from </span><span class="s1">expand</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">prop</span><span class="s3">, </span><span class="s1">value</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s2">yield </span><span class="s1">prop</span><span class="s3">, </span><span class="s1">value</span>
+
+    <span class="s2">def </span><span class="s1">parse</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">declarations_str</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; Iterator</span><span class="s3">[</span><span class="s1">tuple</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">]]:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Generates (prop, value) pairs from declarations. 
+ 
+        In a future version may generate parsed tokens from tinycss/tinycss2 
+ 
+        Parameters 
+        ---------- 
+        declarations_str : str 
+        &quot;&quot;&quot;</span>
+        <span class="s2">for </span><span class="s1">decl </span><span class="s2">in </span><span class="s1">declarations_str</span><span class="s3">.</span><span class="s1">split</span><span class="s3">(</span><span class="s4">&quot;;&quot;</span><span class="s3">):</span>
+            <span class="s2">if not </span><span class="s1">decl</span><span class="s3">.</span><span class="s1">strip</span><span class="s3">():</span>
+                <span class="s2">continue</span>
+            <span class="s1">prop</span><span class="s3">, </span><span class="s1">sep</span><span class="s3">, </span><span class="s1">val </span><span class="s3">= </span><span class="s1">decl</span><span class="s3">.</span><span class="s1">partition</span><span class="s3">(</span><span class="s4">&quot;:&quot;</span><span class="s3">)</span>
+            <span class="s1">prop </span><span class="s3">= </span><span class="s1">prop</span><span class="s3">.</span><span class="s1">strip</span><span class="s3">().</span><span class="s1">lower</span><span class="s3">()</span>
+            <span class="s6"># TODO: don't lowercase case sensitive parts of values (strings)</span>
+            <span class="s1">val </span><span class="s3">= </span><span class="s1">val</span><span class="s3">.</span><span class="s1">strip</span><span class="s3">().</span><span class="s1">lower</span><span class="s3">()</span>
+            <span class="s2">if </span><span class="s1">sep</span><span class="s3">:</span>
+                <span class="s2">yield </span><span class="s1">prop</span><span class="s3">, </span><span class="s1">val</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">warnings</span><span class="s3">.</span><span class="s1">warn</span><span class="s3">(</span>
+                    <span class="s4">f&quot;Ill-formatted attribute: expected a colon in </span><span class="s2">{</span><span class="s1">decl</span><span class="s2">!r}</span><span class="s4">&quot;</span><span class="s3">,</span>
+                    <span class="s1">CSSWarning</span><span class="s3">,</span>
+                    <span class="s1">stacklevel</span><span class="s3">=</span><span class="s1">find_stack_level</span><span class="s3">(),</span>
+                <span class="s3">)</span>
+</pre>
+</body>
+</html>

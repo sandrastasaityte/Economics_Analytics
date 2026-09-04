@@ -1,0 +1,265 @@
+<html>
+<head>
+<title>test_moments_consistency_ewm.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #2aacb8;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_moments_consistency_ewm.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">from </span><span class="s1">pandas </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">DataFrame</span><span class="s2">,</span>
+    <span class="s1">Series</span><span class="s2">,</span>
+    <span class="s1">concat</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">import </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_testing </span><span class="s0">as </span><span class="s1">tm</span>
+
+
+<span class="s0">def </span><span class="s1">create_mock_weights</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">com</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">):</span>
+    <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">DataFrame</span><span class="s2">):</span>
+        <span class="s0">if not </span><span class="s1">len</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">columns</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">DataFrame</span><span class="s2">(</span><span class="s1">index</span><span class="s2">=</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">index</span><span class="s2">, </span><span class="s1">columns</span><span class="s2">=</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">columns</span><span class="s2">)</span>
+        <span class="s1">w </span><span class="s2">= </span><span class="s1">concat</span><span class="s2">(</span>
+            <span class="s2">[</span>
+                <span class="s1">create_mock_series_weights</span><span class="s2">(</span>
+                    <span class="s1">obj</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[:, </span><span class="s1">i</span><span class="s2">], </span><span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+                <span class="s2">)</span>
+                <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">columns</span><span class="s2">))</span>
+            <span class="s2">],</span>
+            <span class="s1">axis</span><span class="s2">=</span><span class="s3">1</span><span class="s2">,</span>
+        <span class="s2">)</span>
+        <span class="s1">w</span><span class="s2">.</span><span class="s1">index </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">index</span>
+        <span class="s1">w</span><span class="s2">.</span><span class="s1">columns </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">columns</span>
+        <span class="s0">return </span><span class="s1">w</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">create_mock_series_weights</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">com</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">create_mock_series_weights</span><span class="s2">(</span><span class="s1">s</span><span class="s2">, </span><span class="s1">com</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">):</span>
+    <span class="s1">w </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, </span><span class="s1">index</span><span class="s2">=</span><span class="s1">s</span><span class="s2">.</span><span class="s1">index</span><span class="s2">, </span><span class="s1">name</span><span class="s2">=</span><span class="s1">s</span><span class="s2">.</span><span class="s1">name</span><span class="s2">)</span>
+    <span class="s1">alpha </span><span class="s2">= </span><span class="s3">1.0 </span><span class="s2">/ (</span><span class="s3">1.0 </span><span class="s2">+ </span><span class="s1">com</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">adjust</span><span class="s2">:</span>
+        <span class="s1">count </span><span class="s2">= </span><span class="s3">0</span>
+        <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">s</span><span class="s2">)):</span>
+            <span class="s0">if </span><span class="s1">s</span><span class="s2">.</span><span class="s1">iat</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] == </span><span class="s1">s</span><span class="s2">.</span><span class="s1">iat</span><span class="s2">[</span><span class="s1">i</span><span class="s2">]:</span>
+                <span class="s1">w</span><span class="s2">.</span><span class="s1">iat</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s1">pow</span><span class="s2">(</span><span class="s3">1.0 </span><span class="s2">/ (</span><span class="s3">1.0 </span><span class="s2">- </span><span class="s1">alpha</span><span class="s2">), </span><span class="s1">count</span><span class="s2">)</span>
+                <span class="s1">count </span><span class="s2">+= </span><span class="s3">1</span>
+            <span class="s0">elif not </span><span class="s1">ignore_na</span><span class="s2">:</span>
+                <span class="s1">count </span><span class="s2">+= </span><span class="s3">1</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">sum_wts </span><span class="s2">= </span><span class="s3">0.0</span>
+        <span class="s1">prev_i </span><span class="s2">= -</span><span class="s3">1</span>
+        <span class="s1">count </span><span class="s2">= </span><span class="s3">0</span>
+        <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">s</span><span class="s2">)):</span>
+            <span class="s0">if </span><span class="s1">s</span><span class="s2">.</span><span class="s1">iat</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] == </span><span class="s1">s</span><span class="s2">.</span><span class="s1">iat</span><span class="s2">[</span><span class="s1">i</span><span class="s2">]:</span>
+                <span class="s0">if </span><span class="s1">prev_i </span><span class="s2">== -</span><span class="s3">1</span><span class="s2">:</span>
+                    <span class="s1">w</span><span class="s2">.</span><span class="s1">iat</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s3">1.0</span>
+                <span class="s0">else</span><span class="s2">:</span>
+                    <span class="s1">w</span><span class="s2">.</span><span class="s1">iat</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s1">alpha </span><span class="s2">* </span><span class="s1">sum_wts </span><span class="s2">/ </span><span class="s1">pow</span><span class="s2">(</span><span class="s3">1.0 </span><span class="s2">- </span><span class="s1">alpha</span><span class="s2">, </span><span class="s1">count </span><span class="s2">- </span><span class="s1">prev_i</span><span class="s2">)</span>
+                <span class="s1">sum_wts </span><span class="s2">+= </span><span class="s1">w</span><span class="s2">.</span><span class="s1">iat</span><span class="s2">[</span><span class="s1">i</span><span class="s2">]</span>
+                <span class="s1">prev_i </span><span class="s2">= </span><span class="s1">count</span>
+                <span class="s1">count </span><span class="s2">+= </span><span class="s3">1</span>
+            <span class="s0">elif not </span><span class="s1">ignore_na</span><span class="s2">:</span>
+                <span class="s1">count </span><span class="s2">+= </span><span class="s3">1</span>
+    <span class="s0">return </span><span class="s1">w</span>
+
+
+<span class="s0">def </span><span class="s1">test_ewm_consistency_mean</span><span class="s2">(</span><span class="s1">all_data</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">):</span>
+    <span class="s1">com </span><span class="s2">= </span><span class="s3">3.0</span>
+
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">all_data</span><span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span>
+        <span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+    <span class="s2">).</span><span class="s1">mean</span><span class="s2">()</span>
+    <span class="s1">weights </span><span class="s2">= </span><span class="s1">create_mock_weights</span><span class="s2">(</span><span class="s1">all_data</span><span class="s2">, </span><span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span><span class="s2">)</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">all_data</span><span class="s2">.</span><span class="s1">multiply</span><span class="s2">(</span><span class="s1">weights</span><span class="s2">).</span><span class="s1">cumsum</span><span class="s2">().</span><span class="s1">divide</span><span class="s2">(</span><span class="s1">weights</span><span class="s2">.</span><span class="s1">cumsum</span><span class="s2">()).</span><span class="s1">ffill</span><span class="s2">()</span>
+    <span class="s1">expected</span><span class="s2">[</span>
+        <span class="s1">all_data</span><span class="s2">.</span><span class="s1">expanding</span><span class="s2">().</span><span class="s1">count</span><span class="s2">() &lt; (</span><span class="s1">max</span><span class="s2">(</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s3">1</span><span class="s2">) </span><span class="s0">if </span><span class="s1">min_periods </span><span class="s0">else </span><span class="s3">1</span><span class="s2">)</span>
+    <span class="s2">] = </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s4">&quot;float64&quot;</span><span class="s2">))</span>
+
+
+<span class="s0">def </span><span class="s1">test_ewm_consistency_consistent</span><span class="s2">(</span><span class="s1">consistent_data</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">):</span>
+    <span class="s1">com </span><span class="s2">= </span><span class="s3">3.0</span>
+
+    <span class="s1">count_x </span><span class="s2">= </span><span class="s1">consistent_data</span><span class="s2">.</span><span class="s1">expanding</span><span class="s2">().</span><span class="s1">count</span><span class="s2">()</span>
+    <span class="s1">mean_x </span><span class="s2">= </span><span class="s1">consistent_data</span><span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span>
+        <span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+    <span class="s2">).</span><span class="s1">mean</span><span class="s2">()</span>
+    <span class="s5"># check that correlation of a series with itself is either 1 or NaN</span>
+    <span class="s1">corr_x_x </span><span class="s2">= </span><span class="s1">consistent_data</span><span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span>
+        <span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+    <span class="s2">).</span><span class="s1">corr</span><span class="s2">(</span><span class="s1">consistent_data</span><span class="s2">)</span>
+    <span class="s1">exp </span><span class="s2">= (</span>
+        <span class="s1">consistent_data</span><span class="s2">.</span><span class="s1">max</span><span class="s2">()</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">consistent_data</span><span class="s2">, </span><span class="s1">Series</span><span class="s2">)</span>
+        <span class="s0">else </span><span class="s1">consistent_data</span><span class="s2">.</span><span class="s1">max</span><span class="s2">().</span><span class="s1">max</span><span class="s2">()</span>
+    <span class="s2">)</span>
+
+    <span class="s5"># check mean of constant series</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">consistent_data </span><span class="s2">* </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span>
+    <span class="s1">expected</span><span class="s2">[</span><span class="s1">count_x </span><span class="s2">&gt;= </span><span class="s1">max</span><span class="s2">(</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s3">1</span><span class="s2">)] = </span><span class="s1">exp</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">mean_x</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s5"># check correlation of constant series with itself is NaN</span>
+    <span class="s1">expected</span><span class="s2">[:] = </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">corr_x_x</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_ewm_consistency_var_debiasing_factors</span><span class="s2">(</span>
+    <span class="s1">all_data</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">, </span><span class="s1">min_periods</span>
+<span class="s2">):</span>
+    <span class="s1">com </span><span class="s2">= </span><span class="s3">3.0</span>
+
+    <span class="s5"># check variance debiasing factors</span>
+    <span class="s1">var_unbiased_x </span><span class="s2">= </span><span class="s1">all_data</span><span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span>
+        <span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+    <span class="s2">).</span><span class="s1">var</span><span class="s2">(</span><span class="s1">bias</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+    <span class="s1">var_biased_x </span><span class="s2">= </span><span class="s1">all_data</span><span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span>
+        <span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+    <span class="s2">).</span><span class="s1">var</span><span class="s2">(</span><span class="s1">bias</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s1">weights </span><span class="s2">= </span><span class="s1">create_mock_weights</span><span class="s2">(</span><span class="s1">all_data</span><span class="s2">, </span><span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span><span class="s2">)</span>
+    <span class="s1">cum_sum </span><span class="s2">= </span><span class="s1">weights</span><span class="s2">.</span><span class="s1">cumsum</span><span class="s2">().</span><span class="s1">ffill</span><span class="s2">()</span>
+    <span class="s1">cum_sum_sq </span><span class="s2">= (</span><span class="s1">weights </span><span class="s2">* </span><span class="s1">weights</span><span class="s2">).</span><span class="s1">cumsum</span><span class="s2">().</span><span class="s1">ffill</span><span class="s2">()</span>
+    <span class="s1">numerator </span><span class="s2">= </span><span class="s1">cum_sum </span><span class="s2">* </span><span class="s1">cum_sum</span>
+    <span class="s1">denominator </span><span class="s2">= </span><span class="s1">numerator </span><span class="s2">- </span><span class="s1">cum_sum_sq</span>
+    <span class="s1">denominator</span><span class="s2">[</span><span class="s1">denominator </span><span class="s2">&lt;= </span><span class="s3">0.0</span><span class="s2">] = </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span>
+    <span class="s1">var_debiasing_factors_x </span><span class="s2">= </span><span class="s1">numerator </span><span class="s2">/ </span><span class="s1">denominator</span>
+
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">var_unbiased_x</span><span class="s2">, </span><span class="s1">var_biased_x </span><span class="s2">* </span><span class="s1">var_debiasing_factors_x</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;bias&quot;</span><span class="s2">, [</span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_moments_consistency_var</span><span class="s2">(</span><span class="s1">all_data</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">bias</span><span class="s2">):</span>
+    <span class="s1">com </span><span class="s2">= </span><span class="s3">3.0</span>
+
+    <span class="s1">mean_x </span><span class="s2">= </span><span class="s1">all_data</span><span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span>
+        <span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+    <span class="s2">).</span><span class="s1">mean</span><span class="s2">()</span>
+    <span class="s1">var_x </span><span class="s2">= </span><span class="s1">all_data</span><span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span>
+        <span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+    <span class="s2">).</span><span class="s1">var</span><span class="s2">(</span><span class="s1">bias</span><span class="s2">=</span><span class="s1">bias</span><span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s2">(</span><span class="s1">var_x </span><span class="s2">&lt; </span><span class="s3">0</span><span class="s2">).</span><span class="s1">any</span><span class="s2">(</span><span class="s1">axis</span><span class="s2">=</span><span class="s0">None</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">bias</span><span class="s2">:</span>
+        <span class="s5"># check that biased var(x) == mean(x^2) - mean(x)^2</span>
+        <span class="s1">mean_x2 </span><span class="s2">= (</span>
+            <span class="s2">(</span><span class="s1">all_data </span><span class="s2">* </span><span class="s1">all_data</span><span class="s2">)</span>
+            <span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span><span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span><span class="s2">)</span>
+            <span class="s2">.</span><span class="s1">mean</span><span class="s2">()</span>
+        <span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">var_x</span><span class="s2">, </span><span class="s1">mean_x2 </span><span class="s2">- (</span><span class="s1">mean_x </span><span class="s2">* </span><span class="s1">mean_x</span><span class="s2">))</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;bias&quot;</span><span class="s2">, [</span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_moments_consistency_var_constant</span><span class="s2">(</span>
+    <span class="s1">consistent_data</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">bias</span>
+<span class="s2">):</span>
+    <span class="s1">com </span><span class="s2">= </span><span class="s3">3.0</span>
+    <span class="s1">count_x </span><span class="s2">= </span><span class="s1">consistent_data</span><span class="s2">.</span><span class="s1">expanding</span><span class="s2">(</span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">).</span><span class="s1">count</span><span class="s2">()</span>
+    <span class="s1">var_x </span><span class="s2">= </span><span class="s1">consistent_data</span><span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span>
+        <span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+    <span class="s2">).</span><span class="s1">var</span><span class="s2">(</span><span class="s1">bias</span><span class="s2">=</span><span class="s1">bias</span><span class="s2">)</span>
+
+    <span class="s5"># check that variance of constant series is identically 0</span>
+    <span class="s0">assert not </span><span class="s2">(</span><span class="s1">var_x </span><span class="s2">&gt; </span><span class="s3">0</span><span class="s2">).</span><span class="s1">any</span><span class="s2">(</span><span class="s1">axis</span><span class="s2">=</span><span class="s0">None</span><span class="s2">)</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">consistent_data </span><span class="s2">* </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span>
+    <span class="s1">expected</span><span class="s2">[</span><span class="s1">count_x </span><span class="s2">&gt;= </span><span class="s1">max</span><span class="s2">(</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s3">1</span><span class="s2">)] = </span><span class="s3">0.0</span>
+    <span class="s0">if not </span><span class="s1">bias</span><span class="s2">:</span>
+        <span class="s1">expected</span><span class="s2">[</span><span class="s1">count_x </span><span class="s2">&lt; </span><span class="s3">2</span><span class="s2">] = </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">var_x</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;bias&quot;</span><span class="s2">, [</span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_ewm_consistency_std</span><span class="s2">(</span><span class="s1">all_data</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">bias</span><span class="s2">):</span>
+    <span class="s1">com </span><span class="s2">= </span><span class="s3">3.0</span>
+    <span class="s1">var_x </span><span class="s2">= </span><span class="s1">all_data</span><span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span>
+        <span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+    <span class="s2">).</span><span class="s1">var</span><span class="s2">(</span><span class="s1">bias</span><span class="s2">=</span><span class="s1">bias</span><span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s2">(</span><span class="s1">var_x </span><span class="s2">&lt; </span><span class="s3">0</span><span class="s2">).</span><span class="s1">any</span><span class="s2">(</span><span class="s1">axis</span><span class="s2">=</span><span class="s0">None</span><span class="s2">)</span>
+
+    <span class="s1">std_x </span><span class="s2">= </span><span class="s1">all_data</span><span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span>
+        <span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+    <span class="s2">).</span><span class="s1">std</span><span class="s2">(</span><span class="s1">bias</span><span class="s2">=</span><span class="s1">bias</span><span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s2">(</span><span class="s1">std_x </span><span class="s2">&lt; </span><span class="s3">0</span><span class="s2">).</span><span class="s1">any</span><span class="s2">(</span><span class="s1">axis</span><span class="s2">=</span><span class="s0">None</span><span class="s2">)</span>
+
+    <span class="s5"># check that var(x) == std(x)^2</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">var_x</span><span class="s2">, </span><span class="s1">std_x </span><span class="s2">* </span><span class="s1">std_x</span><span class="s2">)</span>
+
+    <span class="s1">cov_x_x </span><span class="s2">= </span><span class="s1">all_data</span><span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span>
+        <span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+    <span class="s2">).</span><span class="s1">cov</span><span class="s2">(</span><span class="s1">all_data</span><span class="s2">, </span><span class="s1">bias</span><span class="s2">=</span><span class="s1">bias</span><span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s2">(</span><span class="s1">cov_x_x </span><span class="s2">&lt; </span><span class="s3">0</span><span class="s2">).</span><span class="s1">any</span><span class="s2">(</span><span class="s1">axis</span><span class="s2">=</span><span class="s0">None</span><span class="s2">)</span>
+
+    <span class="s5"># check that var(x) == cov(x, x)</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">var_x</span><span class="s2">, </span><span class="s1">cov_x_x</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;bias&quot;</span><span class="s2">, [</span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_ewm_consistency_series_cov_corr</span><span class="s2">(</span>
+    <span class="s1">series_data</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">bias</span>
+<span class="s2">):</span>
+    <span class="s1">com </span><span class="s2">= </span><span class="s3">3.0</span>
+
+    <span class="s1">var_x_plus_y </span><span class="s2">= (</span>
+        <span class="s2">(</span><span class="s1">series_data </span><span class="s2">+ </span><span class="s1">series_data</span><span class="s2">)</span>
+        <span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span><span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span><span class="s2">)</span>
+        <span class="s2">.</span><span class="s1">var</span><span class="s2">(</span><span class="s1">bias</span><span class="s2">=</span><span class="s1">bias</span><span class="s2">)</span>
+    <span class="s2">)</span>
+    <span class="s1">var_x </span><span class="s2">= </span><span class="s1">series_data</span><span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span>
+        <span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+    <span class="s2">).</span><span class="s1">var</span><span class="s2">(</span><span class="s1">bias</span><span class="s2">=</span><span class="s1">bias</span><span class="s2">)</span>
+    <span class="s1">var_y </span><span class="s2">= </span><span class="s1">series_data</span><span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span>
+        <span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+    <span class="s2">).</span><span class="s1">var</span><span class="s2">(</span><span class="s1">bias</span><span class="s2">=</span><span class="s1">bias</span><span class="s2">)</span>
+    <span class="s1">cov_x_y </span><span class="s2">= </span><span class="s1">series_data</span><span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span>
+        <span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+    <span class="s2">).</span><span class="s1">cov</span><span class="s2">(</span><span class="s1">series_data</span><span class="s2">, </span><span class="s1">bias</span><span class="s2">=</span><span class="s1">bias</span><span class="s2">)</span>
+    <span class="s5"># check that cov(x, y) == (var(x+y) - var(x) -</span>
+    <span class="s5"># var(y)) / 2</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">cov_x_y</span><span class="s2">, </span><span class="s3">0.5 </span><span class="s2">* (</span><span class="s1">var_x_plus_y </span><span class="s2">- </span><span class="s1">var_x </span><span class="s2">- </span><span class="s1">var_y</span><span class="s2">))</span>
+
+    <span class="s5"># check that corr(x, y) == cov(x, y) / (std(x) *</span>
+    <span class="s5"># std(y))</span>
+    <span class="s1">corr_x_y </span><span class="s2">= </span><span class="s1">series_data</span><span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span>
+        <span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+    <span class="s2">).</span><span class="s1">corr</span><span class="s2">(</span><span class="s1">series_data</span><span class="s2">)</span>
+    <span class="s1">std_x </span><span class="s2">= </span><span class="s1">series_data</span><span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span>
+        <span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+    <span class="s2">).</span><span class="s1">std</span><span class="s2">(</span><span class="s1">bias</span><span class="s2">=</span><span class="s1">bias</span><span class="s2">)</span>
+    <span class="s1">std_y </span><span class="s2">= </span><span class="s1">series_data</span><span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span>
+        <span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+    <span class="s2">).</span><span class="s1">std</span><span class="s2">(</span><span class="s1">bias</span><span class="s2">=</span><span class="s1">bias</span><span class="s2">)</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">corr_x_y</span><span class="s2">, </span><span class="s1">cov_x_y </span><span class="s2">/ (</span><span class="s1">std_x </span><span class="s2">* </span><span class="s1">std_y</span><span class="s2">))</span>
+
+    <span class="s0">if </span><span class="s1">bias</span><span class="s2">:</span>
+        <span class="s5"># check that biased cov(x, y) == mean(x*y) -</span>
+        <span class="s5"># mean(x)*mean(y)</span>
+        <span class="s1">mean_x </span><span class="s2">= </span><span class="s1">series_data</span><span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span>
+            <span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+        <span class="s2">).</span><span class="s1">mean</span><span class="s2">()</span>
+        <span class="s1">mean_y </span><span class="s2">= </span><span class="s1">series_data</span><span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span>
+            <span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span>
+        <span class="s2">).</span><span class="s1">mean</span><span class="s2">()</span>
+        <span class="s1">mean_x_times_y </span><span class="s2">= (</span>
+            <span class="s2">(</span><span class="s1">series_data </span><span class="s2">* </span><span class="s1">series_data</span><span class="s2">)</span>
+            <span class="s2">.</span><span class="s1">ewm</span><span class="s2">(</span><span class="s1">com</span><span class="s2">=</span><span class="s1">com</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">adjust</span><span class="s2">=</span><span class="s1">adjust</span><span class="s2">, </span><span class="s1">ignore_na</span><span class="s2">=</span><span class="s1">ignore_na</span><span class="s2">)</span>
+            <span class="s2">.</span><span class="s1">mean</span><span class="s2">()</span>
+        <span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">cov_x_y</span><span class="s2">, </span><span class="s1">mean_x_times_y </span><span class="s2">- (</span><span class="s1">mean_x </span><span class="s2">* </span><span class="s1">mean_y</span><span class="s2">))</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,778 @@
+<html>
+<head>
+<title>f2py2e.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #7a7e85;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+f2py2e.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+ 
+f2py2e - Fortran to Python C/API generator. 2nd Edition. 
+         See __usage__ below. 
+ 
+Copyright 1999 -- 2011 Pearu Peterson all rights reserved. 
+Copyright 2011 -- present NumPy Developers. 
+Permission to use, modify, and distribute this software is given under the 
+terms of the NumPy License. 
+ 
+NO WARRANTY IS EXPRESSED OR IMPLIED.  USE AT YOUR OWN RISK. 
+&quot;&quot;&quot;</span>
+<span class="s2">import </span><span class="s1">argparse</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">pprint</span>
+<span class="s2">import </span><span class="s1">re</span>
+<span class="s2">import </span><span class="s1">sys</span>
+
+<span class="s2">from </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">f2py</span><span class="s3">.</span><span class="s1">_backends </span><span class="s2">import </span><span class="s1">f2py_build_generator</span>
+
+<span class="s2">from </span><span class="s3">. </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">__version__</span><span class="s3">,</span>
+    <span class="s1">auxfuncs</span><span class="s3">,</span>
+    <span class="s1">capi_maps</span><span class="s3">,</span>
+    <span class="s1">cb_rules</span><span class="s3">,</span>
+    <span class="s1">cfuncs</span><span class="s3">,</span>
+    <span class="s1">crackfortran</span><span class="s3">,</span>
+    <span class="s1">f90mod_rules</span><span class="s3">,</span>
+    <span class="s1">rules</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">cfuncs </span><span class="s2">import </span><span class="s1">errmess</span>
+
+<span class="s1">f2py_version </span><span class="s3">= </span><span class="s1">__version__</span><span class="s3">.</span><span class="s1">version</span>
+<span class="s1">numpy_version </span><span class="s3">= </span><span class="s1">__version__</span><span class="s3">.</span><span class="s1">version</span>
+
+<span class="s4"># outmess=sys.stdout.write</span>
+<span class="s1">show </span><span class="s3">= </span><span class="s1">pprint</span><span class="s3">.</span><span class="s1">pprint</span>
+<span class="s1">outmess </span><span class="s3">= </span><span class="s1">auxfuncs</span><span class="s3">.</span><span class="s1">outmess</span>
+
+<span class="s1">__usage__ </span><span class="s3">=</span><span class="s1">\</span>
+<span class="s5">f&quot;&quot;&quot;Usage:</span>
+
+<span class="s5">1) To construct extension module sources:</span>
+
+      <span class="s5">f2py [&lt;options&gt;] &lt;fortran files&gt; [[[only:]||[skip:]] </span><span class="s2">\\</span>
+                                        <span class="s5">&lt;fortran functions&gt; ] </span><span class="s2">\\</span>
+                                       <span class="s5">[: &lt;fortran files&gt; ...]</span>
+
+<span class="s5">2) To compile fortran files and build extension modules:</span>
+
+      <span class="s5">f2py -c [&lt;options&gt;, &lt;build_flib options&gt;, &lt;extra options&gt;] &lt;fortran files&gt;</span>
+
+<span class="s5">3) To generate signature files:</span>
+
+      <span class="s5">f2py -h &lt;filename.pyf&gt; ...&lt; same options as in (1) &gt;</span>
+
+<span class="s5">Description: This program generates a Python C/API file (&lt;modulename&gt;module.c)</span>
+             <span class="s5">that contains wrappers for given fortran functions so that they</span>
+             <span class="s5">can be called from Python. With the -c option the corresponding</span>
+             <span class="s5">extension modules are built.</span>
+
+<span class="s5">Options:</span>
+
+  <span class="s5">-h &lt;filename&gt;    Write signatures of the fortran routines to file &lt;filename&gt;</span>
+                   <span class="s5">and exit. You can then edit &lt;filename&gt; and use it instead</span>
+                   <span class="s5">of &lt;fortran files&gt;. If &lt;filename&gt;==stdout then the</span>
+                   <span class="s5">signatures are printed to stdout.</span>
+  <span class="s5">&lt;fortran functions&gt;  Names of fortran routines for which Python C/API</span>
+                   <span class="s5">functions will be generated. Default is all that are found</span>
+                   <span class="s5">in &lt;fortran files&gt;.</span>
+  <span class="s5">&lt;fortran files&gt;  Paths to fortran/signature files that will be scanned for</span>
+                   <span class="s5">&lt;fortran functions&gt; in order to determine their signatures.</span>
+  <span class="s5">skip:            Ignore fortran functions that follow until `:'.</span>
+  <span class="s5">only:            Use only fortran functions that follow until `:'.</span>
+  <span class="s5">:                Get back to &lt;fortran files&gt; mode.</span>
+
+  <span class="s5">-m &lt;modulename&gt;  Name of the module; f2py generates a Python/C API</span>
+                   <span class="s5">file &lt;modulename&gt;module.c or extension module &lt;modulename&gt;.</span>
+                   <span class="s5">Default is 'untitled'.</span>
+
+  <span class="s5">'-include&lt;header&gt;'  Writes additional headers in the C wrapper, can be passed</span>
+                      <span class="s5">multiple times, generates #include &lt;header&gt; each time.</span>
+
+  <span class="s5">--[no-]lower     Do [not] lower the cases in &lt;fortran files&gt;. By default,</span>
+                   <span class="s5">--lower is assumed with -h key, and --no-lower without -h key.</span>
+
+  <span class="s5">--build-dir &lt;dirname&gt;  All f2py generated files are created in &lt;dirname&gt;.</span>
+                   <span class="s5">Default is tempfile.mkdtemp().</span>
+
+  <span class="s5">--overwrite-signature  Overwrite existing signature file.</span>
+
+  <span class="s5">--[no-]latex-doc Create (or not) &lt;modulename&gt;module.tex.</span>
+                   <span class="s5">Default is --no-latex-doc.</span>
+  <span class="s5">--short-latex    Create 'incomplete' LaTeX document (without commands</span>
+                   <span class="s2">\\</span><span class="s5">documentclass, </span><span class="s2">\\</span><span class="s5">tableofcontents, and </span><span class="s2">\\</span><span class="s5">begin</span><span class="s2">{{</span><span class="s5">document</span><span class="s2">}}</span><span class="s5">,</span>
+                   <span class="s2">\\</span><span class="s5">end</span><span class="s2">{{</span><span class="s5">document</span><span class="s2">}}</span><span class="s5">).</span>
+
+  <span class="s5">--[no-]rest-doc Create (or not) &lt;modulename&gt;module.rst.</span>
+                   <span class="s5">Default is --no-rest-doc.</span>
+
+  <span class="s5">--debug-capi     Create C/API code that reports the state of the wrappers</span>
+                   <span class="s5">during runtime. Useful for debugging.</span>
+
+  <span class="s5">--[no-]wrap-functions    Create Fortran subroutine wrappers to Fortran 77</span>
+                   <span class="s5">functions. --wrap-functions is default because it ensures</span>
+                   <span class="s5">maximum portability/compiler independence.</span>
+
+  <span class="s5">--[no-]freethreading-compatible    Create a module that declares it does or</span>
+                   <span class="s5">doesn't require the GIL. The default is</span>
+                   <span class="s5">--freethreading-compatible for backward</span>
+                   <span class="s5">compatibility. Inspect the Fortran code you are wrapping for</span>
+                   <span class="s5">thread safety issues before passing</span>
+                   <span class="s5">--no-freethreading-compatible, as f2py does not analyze</span>
+                   <span class="s5">fortran code for thread safety issues.</span>
+
+  <span class="s5">--include-paths &lt;path1&gt;:&lt;path2&gt;:...   Search include files from the given</span>
+                   <span class="s5">directories.</span>
+
+  <span class="s5">--f2cmap &lt;filename&gt;  Load Fortran-to-Python KIND specification from the given</span>
+                   <span class="s5">file. Default: .f2py_f2cmap in current directory.</span>
+
+  <span class="s5">--quiet          Run quietly.</span>
+  <span class="s5">--verbose        Run with extra verbosity.</span>
+  <span class="s5">--skip-empty-wrappers   Only generate wrapper files when needed.</span>
+  <span class="s5">-v               Print f2py version ID and exit.</span>
+
+
+<span class="s5">build backend options (only effective with -c)</span>
+<span class="s5">[NO_MESON] is used to indicate an option not meant to be used</span>
+<span class="s5">with the meson backend or above Python 3.12:</span>
+
+  <span class="s5">--fcompiler=         Specify Fortran compiler type by vendor [NO_MESON]</span>
+  <span class="s5">--compiler=          Specify distutils C compiler type [NO_MESON]</span>
+
+  <span class="s5">--help-fcompiler     List available Fortran compilers and exit [NO_MESON]</span>
+  <span class="s5">--f77exec=           Specify the path to F77 compiler [NO_MESON]</span>
+  <span class="s5">--f90exec=           Specify the path to F90 compiler [NO_MESON]</span>
+  <span class="s5">--f77flags=          Specify F77 compiler flags</span>
+  <span class="s5">--f90flags=          Specify F90 compiler flags</span>
+  <span class="s5">--opt=               Specify optimization flags [NO_MESON]</span>
+  <span class="s5">--arch=              Specify architecture specific optimization flags [NO_MESON]</span>
+  <span class="s5">--noopt              Compile without optimization [NO_MESON]</span>
+  <span class="s5">--noarch             Compile without arch-dependent optimization [NO_MESON]</span>
+  <span class="s5">--debug              Compile with debugging information</span>
+
+  <span class="s5">--dep                &lt;dependency&gt;</span>
+                       <span class="s5">Specify a meson dependency for the module. This may</span>
+                       <span class="s5">be passed multiple times for multiple dependencies.</span>
+                       <span class="s5">Dependencies are stored in a list for further processing.</span>
+
+                       <span class="s5">Example: --dep lapack --dep scalapack</span>
+                       <span class="s5">This will identify &quot;lapack&quot; and &quot;scalapack&quot; as dependencies</span>
+                       <span class="s5">and remove them from argv, leaving a dependencies list</span>
+                       <span class="s5">containing [&quot;lapack&quot;, &quot;scalapack&quot;].</span>
+
+  <span class="s5">--backend            &lt;backend_type&gt;</span>
+                       <span class="s5">Specify the build backend for the compilation process.</span>
+                       <span class="s5">The supported backends are 'meson' and 'distutils'.</span>
+                       <span class="s5">If not specified, defaults to 'distutils'. On</span>
+                       <span class="s5">Python 3.12 or higher, the default is 'meson'.</span>
+
+<span class="s5">Extra options (only effective with -c):</span>
+
+  <span class="s5">--link-&lt;resource&gt;    Link extension module with &lt;resource&gt; as defined</span>
+                       <span class="s5">by numpy.distutils/system_info.py. E.g. to link</span>
+                       <span class="s5">with optimized LAPACK libraries (vecLib on MacOSX,</span>
+                       <span class="s5">ATLAS elsewhere), use --link-lapack_opt.</span>
+                       <span class="s5">See also --help-link switch. [NO_MESON]</span>
+
+  <span class="s5">-L/path/to/lib/ -l&lt;libname&gt;</span>
+  <span class="s5">-D&lt;define&gt; -U&lt;name&gt;</span>
+  <span class="s5">-I/path/to/include/</span>
+  <span class="s5">&lt;filename&gt;.o &lt;filename&gt;.so &lt;filename&gt;.a</span>
+
+  <span class="s5">Using the following macros may be required with non-gcc Fortran</span>
+  <span class="s5">compilers:</span>
+    <span class="s5">-DPREPEND_FORTRAN -DNO_APPEND_FORTRAN -DUPPERCASE_FORTRAN</span>
+
+  <span class="s5">When using -DF2PY_REPORT_ATEXIT, a performance report of F2PY</span>
+  <span class="s5">interface is printed out at exit (platforms: Linux).</span>
+
+  <span class="s5">When using -DF2PY_REPORT_ON_ARRAY_COPY=&lt;int&gt;, a message is</span>
+  <span class="s5">sent to stderr whenever F2PY interface makes a copy of an</span>
+  <span class="s5">array. Integer &lt;int&gt; sets the threshold for array sizes when</span>
+  <span class="s5">a message should be shown.</span>
+
+<span class="s5">Version:     </span><span class="s2">{</span><span class="s1">f2py_version</span><span class="s2">}</span>
+<span class="s5">numpy Version: </span><span class="s2">{</span><span class="s1">numpy_version</span><span class="s2">}</span>
+<span class="s5">License:     NumPy license (see LICENSE.txt in the NumPy source code)</span>
+<span class="s5">Copyright 1999 -- 2011 Pearu Peterson all rights reserved.</span>
+<span class="s5">Copyright 2011 -- present NumPy Developers.</span>
+<span class="s5">https://numpy.org/doc/stable/f2py/index.html</span><span class="s2">\n</span><span class="s5">&quot;&quot;&quot;</span>
+
+
+<span class="s2">def </span><span class="s1">scaninputline</span><span class="s3">(</span><span class="s1">inputline</span><span class="s3">):</span>
+    <span class="s1">files</span><span class="s3">, </span><span class="s1">skipfuncs</span><span class="s3">, </span><span class="s1">onlyfuncs</span><span class="s3">, </span><span class="s1">debug </span><span class="s3">= [], [], [], []</span>
+    <span class="s1">f</span><span class="s3">, </span><span class="s1">f2</span><span class="s3">, </span><span class="s1">f3</span><span class="s3">, </span><span class="s1">f5</span><span class="s3">, </span><span class="s1">f6</span><span class="s3">, </span><span class="s1">f8</span><span class="s3">, </span><span class="s1">f9</span><span class="s3">, </span><span class="s1">f10 </span><span class="s3">= </span><span class="s6">1</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, </span><span class="s6">0</span>
+    <span class="s1">verbose </span><span class="s3">= </span><span class="s6">1</span>
+    <span class="s1">emptygen </span><span class="s3">= </span><span class="s2">True</span>
+    <span class="s1">dolc </span><span class="s3">= -</span><span class="s6">1</span>
+    <span class="s1">dolatexdoc </span><span class="s3">= </span><span class="s6">0</span>
+    <span class="s1">dorestdoc </span><span class="s3">= </span><span class="s6">0</span>
+    <span class="s1">wrapfuncs </span><span class="s3">= </span><span class="s6">1</span>
+    <span class="s1">buildpath </span><span class="s3">= </span><span class="s5">'.'</span>
+    <span class="s1">include_paths</span><span class="s3">, </span><span class="s1">freethreading_compatible</span><span class="s3">, </span><span class="s1">inputline </span><span class="s3">= </span><span class="s1">get_newer_options</span><span class="s3">(</span><span class="s1">inputline</span><span class="s3">)</span>
+    <span class="s1">signsfile</span><span class="s3">, </span><span class="s1">modulename </span><span class="s3">= </span><span class="s2">None</span><span class="s3">, </span><span class="s2">None</span>
+    <span class="s1">options </span><span class="s3">= {</span><span class="s5">'buildpath'</span><span class="s3">: </span><span class="s1">buildpath</span><span class="s3">,</span>
+               <span class="s5">'coutput'</span><span class="s3">: </span><span class="s2">None</span><span class="s3">,</span>
+               <span class="s5">'f2py_wrapper_output'</span><span class="s3">: </span><span class="s2">None</span><span class="s3">}</span>
+    <span class="s2">for </span><span class="s1">l </span><span class="s2">in </span><span class="s1">inputline</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">l </span><span class="s3">== </span><span class="s5">''</span><span class="s3">:</span>
+            <span class="s2">pass</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'only:'</span><span class="s3">:</span>
+            <span class="s1">f </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'skip:'</span><span class="s3">:</span>
+            <span class="s1">f </span><span class="s3">= -</span><span class="s6">1</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">':'</span><span class="s3">:</span>
+            <span class="s1">f </span><span class="s3">= </span><span class="s6">1</span>
+        <span class="s2">elif </span><span class="s1">l</span><span class="s3">[:</span><span class="s6">8</span><span class="s3">] == </span><span class="s5">'--debug-'</span><span class="s3">:</span>
+            <span class="s1">debug</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">l</span><span class="s3">[</span><span class="s6">8</span><span class="s3">:])</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'--lower'</span><span class="s3">:</span>
+            <span class="s1">dolc </span><span class="s3">= </span><span class="s6">1</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'--build-dir'</span><span class="s3">:</span>
+            <span class="s1">f6 </span><span class="s3">= </span><span class="s6">1</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'--no-lower'</span><span class="s3">:</span>
+            <span class="s1">dolc </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'--quiet'</span><span class="s3">:</span>
+            <span class="s1">verbose </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'--verbose'</span><span class="s3">:</span>
+            <span class="s1">verbose </span><span class="s3">+= </span><span class="s6">1</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'--latex-doc'</span><span class="s3">:</span>
+            <span class="s1">dolatexdoc </span><span class="s3">= </span><span class="s6">1</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'--no-latex-doc'</span><span class="s3">:</span>
+            <span class="s1">dolatexdoc </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'--rest-doc'</span><span class="s3">:</span>
+            <span class="s1">dorestdoc </span><span class="s3">= </span><span class="s6">1</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'--no-rest-doc'</span><span class="s3">:</span>
+            <span class="s1">dorestdoc </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'--wrap-functions'</span><span class="s3">:</span>
+            <span class="s1">wrapfuncs </span><span class="s3">= </span><span class="s6">1</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'--no-wrap-functions'</span><span class="s3">:</span>
+            <span class="s1">wrapfuncs </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'--short-latex'</span><span class="s3">:</span>
+            <span class="s1">options</span><span class="s3">[</span><span class="s5">'shortlatex'</span><span class="s3">] = </span><span class="s6">1</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'--coutput'</span><span class="s3">:</span>
+            <span class="s1">f8 </span><span class="s3">= </span><span class="s6">1</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'--f2py-wrapper-output'</span><span class="s3">:</span>
+            <span class="s1">f9 </span><span class="s3">= </span><span class="s6">1</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'--f2cmap'</span><span class="s3">:</span>
+            <span class="s1">f10 </span><span class="s3">= </span><span class="s6">1</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'--overwrite-signature'</span><span class="s3">:</span>
+            <span class="s1">options</span><span class="s3">[</span><span class="s5">'h-overwrite'</span><span class="s3">] = </span><span class="s6">1</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'-h'</span><span class="s3">:</span>
+            <span class="s1">f2 </span><span class="s3">= </span><span class="s6">1</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'-m'</span><span class="s3">:</span>
+            <span class="s1">f3 </span><span class="s3">= </span><span class="s6">1</span>
+        <span class="s2">elif </span><span class="s1">l</span><span class="s3">[:</span><span class="s6">2</span><span class="s3">] == </span><span class="s5">'-v'</span><span class="s3">:</span>
+            <span class="s1">print</span><span class="s3">(</span><span class="s1">f2py_version</span><span class="s3">)</span>
+            <span class="s1">sys</span><span class="s3">.</span><span class="s1">exit</span><span class="s3">()</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'--show-compilers'</span><span class="s3">:</span>
+            <span class="s1">f5 </span><span class="s3">= </span><span class="s6">1</span>
+        <span class="s2">elif </span><span class="s1">l</span><span class="s3">[:</span><span class="s6">8</span><span class="s3">] == </span><span class="s5">'-include'</span><span class="s3">:</span>
+            <span class="s1">cfuncs</span><span class="s3">.</span><span class="s1">outneeds</span><span class="s3">[</span><span class="s5">'userincludes'</span><span class="s3">].</span><span class="s1">append</span><span class="s3">(</span><span class="s1">l</span><span class="s3">[</span><span class="s6">9</span><span class="s3">:-</span><span class="s6">1</span><span class="s3">])</span>
+            <span class="s1">cfuncs</span><span class="s3">.</span><span class="s1">userincludes</span><span class="s3">[</span><span class="s1">l</span><span class="s3">[</span><span class="s6">9</span><span class="s3">:-</span><span class="s6">1</span><span class="s3">]] = </span><span class="s5">'#include ' </span><span class="s3">+ </span><span class="s1">l</span><span class="s3">[</span><span class="s6">8</span><span class="s3">:]</span>
+        <span class="s2">elif </span><span class="s1">l </span><span class="s3">== </span><span class="s5">'--skip-empty-wrappers'</span><span class="s3">:</span>
+            <span class="s1">emptygen </span><span class="s3">= </span><span class="s2">False</span>
+        <span class="s2">elif </span><span class="s1">l</span><span class="s3">[</span><span class="s6">0</span><span class="s3">] == </span><span class="s5">'-'</span><span class="s3">:</span>
+            <span class="s1">errmess</span><span class="s3">(</span><span class="s5">f'Unknown option </span><span class="s2">{</span><span class="s1">repr</span><span class="s3">(</span><span class="s1">l</span><span class="s3">)</span><span class="s2">}\n</span><span class="s5">'</span><span class="s3">)</span>
+            <span class="s1">sys</span><span class="s3">.</span><span class="s1">exit</span><span class="s3">()</span>
+        <span class="s2">elif </span><span class="s1">f2</span><span class="s3">:</span>
+            <span class="s1">f2 </span><span class="s3">= </span><span class="s6">0</span>
+            <span class="s1">signsfile </span><span class="s3">= </span><span class="s1">l</span>
+        <span class="s2">elif </span><span class="s1">f3</span><span class="s3">:</span>
+            <span class="s1">f3 </span><span class="s3">= </span><span class="s6">0</span>
+            <span class="s1">modulename </span><span class="s3">= </span><span class="s1">l</span>
+        <span class="s2">elif </span><span class="s1">f6</span><span class="s3">:</span>
+            <span class="s1">f6 </span><span class="s3">= </span><span class="s6">0</span>
+            <span class="s1">buildpath </span><span class="s3">= </span><span class="s1">l</span>
+        <span class="s2">elif </span><span class="s1">f8</span><span class="s3">:</span>
+            <span class="s1">f8 </span><span class="s3">= </span><span class="s6">0</span>
+            <span class="s1">options</span><span class="s3">[</span><span class="s5">&quot;coutput&quot;</span><span class="s3">] = </span><span class="s1">l</span>
+        <span class="s2">elif </span><span class="s1">f9</span><span class="s3">:</span>
+            <span class="s1">f9 </span><span class="s3">= </span><span class="s6">0</span>
+            <span class="s1">options</span><span class="s3">[</span><span class="s5">&quot;f2py_wrapper_output&quot;</span><span class="s3">] = </span><span class="s1">l</span>
+        <span class="s2">elif </span><span class="s1">f10</span><span class="s3">:</span>
+            <span class="s1">f10 </span><span class="s3">= </span><span class="s6">0</span>
+            <span class="s1">options</span><span class="s3">[</span><span class="s5">&quot;f2cmap_file&quot;</span><span class="s3">] = </span><span class="s1">l</span>
+        <span class="s2">elif </span><span class="s1">f </span><span class="s3">== </span><span class="s6">1</span><span class="s3">:</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s2">with </span><span class="s1">open</span><span class="s3">(</span><span class="s1">l</span><span class="s3">):</span>
+                    <span class="s2">pass</span>
+                <span class="s1">files</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">l</span><span class="s3">)</span>
+            <span class="s2">except </span><span class="s1">OSError </span><span class="s2">as </span><span class="s1">detail</span><span class="s3">:</span>
+                <span class="s1">errmess</span><span class="s3">(</span><span class="s5">f'OSError: </span><span class="s2">{</span><span class="s1">detail</span><span class="s2">!s}</span><span class="s5">. Skipping file &quot;</span><span class="s2">{</span><span class="s1">l</span><span class="s2">!s}</span><span class="s5">&quot;.</span><span class="s2">\n</span><span class="s5">'</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">f </span><span class="s3">== -</span><span class="s6">1</span><span class="s3">:</span>
+            <span class="s1">skipfuncs</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">l</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">f </span><span class="s3">== </span><span class="s6">0</span><span class="s3">:</span>
+            <span class="s1">onlyfuncs</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">l</span><span class="s3">)</span>
+    <span class="s2">if not </span><span class="s1">f5 </span><span class="s2">and not </span><span class="s1">files </span><span class="s2">and not </span><span class="s1">modulename</span><span class="s3">:</span>
+        <span class="s1">print</span><span class="s3">(</span><span class="s1">__usage__</span><span class="s3">)</span>
+        <span class="s1">sys</span><span class="s3">.</span><span class="s1">exit</span><span class="s3">()</span>
+    <span class="s2">if not </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">isdir</span><span class="s3">(</span><span class="s1">buildpath</span><span class="s3">):</span>
+        <span class="s2">if not </span><span class="s1">verbose</span><span class="s3">:</span>
+            <span class="s1">outmess</span><span class="s3">(</span><span class="s5">f'Creating build directory </span><span class="s2">{</span><span class="s1">buildpath</span><span class="s2">}\n</span><span class="s5">'</span><span class="s3">)</span>
+        <span class="s1">os</span><span class="s3">.</span><span class="s1">mkdir</span><span class="s3">(</span><span class="s1">buildpath</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">signsfile</span><span class="s3">:</span>
+        <span class="s1">signsfile </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">buildpath</span><span class="s3">, </span><span class="s1">signsfile</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">signsfile </span><span class="s2">and </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">isfile</span><span class="s3">(</span><span class="s1">signsfile</span><span class="s3">) </span><span class="s2">and </span><span class="s5">'h-overwrite' </span><span class="s2">not in </span><span class="s1">options</span><span class="s3">:</span>
+        <span class="s1">errmess</span><span class="s3">(</span>
+            <span class="s5">f'Signature file &quot;</span><span class="s2">{</span><span class="s1">signsfile</span><span class="s2">}</span><span class="s5">&quot; exists!!! Use --overwrite-signature to overwrite.</span><span class="s2">\n</span><span class="s5">'</span><span class="s3">)</span>
+        <span class="s1">sys</span><span class="s3">.</span><span class="s1">exit</span><span class="s3">()</span>
+
+    <span class="s1">options</span><span class="s3">[</span><span class="s5">'emptygen'</span><span class="s3">] = </span><span class="s1">emptygen</span>
+    <span class="s1">options</span><span class="s3">[</span><span class="s5">'debug'</span><span class="s3">] = </span><span class="s1">debug</span>
+    <span class="s1">options</span><span class="s3">[</span><span class="s5">'verbose'</span><span class="s3">] = </span><span class="s1">verbose</span>
+    <span class="s2">if </span><span class="s1">dolc </span><span class="s3">== -</span><span class="s6">1 </span><span class="s2">and not </span><span class="s1">signsfile</span><span class="s3">:</span>
+        <span class="s1">options</span><span class="s3">[</span><span class="s5">'do-lower'</span><span class="s3">] = </span><span class="s6">0</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">options</span><span class="s3">[</span><span class="s5">'do-lower'</span><span class="s3">] = </span><span class="s1">dolc</span>
+    <span class="s2">if </span><span class="s1">modulename</span><span class="s3">:</span>
+        <span class="s1">options</span><span class="s3">[</span><span class="s5">'module'</span><span class="s3">] = </span><span class="s1">modulename</span>
+    <span class="s2">if </span><span class="s1">signsfile</span><span class="s3">:</span>
+        <span class="s1">options</span><span class="s3">[</span><span class="s5">'signsfile'</span><span class="s3">] = </span><span class="s1">signsfile</span>
+    <span class="s2">if </span><span class="s1">onlyfuncs</span><span class="s3">:</span>
+        <span class="s1">options</span><span class="s3">[</span><span class="s5">'onlyfuncs'</span><span class="s3">] = </span><span class="s1">onlyfuncs</span>
+    <span class="s2">if </span><span class="s1">skipfuncs</span><span class="s3">:</span>
+        <span class="s1">options</span><span class="s3">[</span><span class="s5">'skipfuncs'</span><span class="s3">] = </span><span class="s1">skipfuncs</span>
+    <span class="s1">options</span><span class="s3">[</span><span class="s5">'dolatexdoc'</span><span class="s3">] = </span><span class="s1">dolatexdoc</span>
+    <span class="s1">options</span><span class="s3">[</span><span class="s5">'dorestdoc'</span><span class="s3">] = </span><span class="s1">dorestdoc</span>
+    <span class="s1">options</span><span class="s3">[</span><span class="s5">'wrapfuncs'</span><span class="s3">] = </span><span class="s1">wrapfuncs</span>
+    <span class="s1">options</span><span class="s3">[</span><span class="s5">'buildpath'</span><span class="s3">] = </span><span class="s1">buildpath</span>
+    <span class="s1">options</span><span class="s3">[</span><span class="s5">'include_paths'</span><span class="s3">] = </span><span class="s1">include_paths</span>
+    <span class="s1">options</span><span class="s3">[</span><span class="s5">'requires_gil'</span><span class="s3">] = </span><span class="s2">not </span><span class="s1">freethreading_compatible</span>
+    <span class="s1">options</span><span class="s3">.</span><span class="s1">setdefault</span><span class="s3">(</span><span class="s5">'f2cmap_file'</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">files</span><span class="s3">, </span><span class="s1">options</span>
+
+
+<span class="s2">def </span><span class="s1">callcrackfortran</span><span class="s3">(</span><span class="s1">files</span><span class="s3">, </span><span class="s1">options</span><span class="s3">):</span>
+    <span class="s1">rules</span><span class="s3">.</span><span class="s1">options </span><span class="s3">= </span><span class="s1">options</span>
+    <span class="s1">crackfortran</span><span class="s3">.</span><span class="s1">debug </span><span class="s3">= </span><span class="s1">options</span><span class="s3">[</span><span class="s5">'debug'</span><span class="s3">]</span>
+    <span class="s1">crackfortran</span><span class="s3">.</span><span class="s1">verbose </span><span class="s3">= </span><span class="s1">options</span><span class="s3">[</span><span class="s5">'verbose'</span><span class="s3">]</span>
+    <span class="s2">if </span><span class="s5">'module' </span><span class="s2">in </span><span class="s1">options</span><span class="s3">:</span>
+        <span class="s1">crackfortran</span><span class="s3">.</span><span class="s1">f77modulename </span><span class="s3">= </span><span class="s1">options</span><span class="s3">[</span><span class="s5">'module'</span><span class="s3">]</span>
+    <span class="s2">if </span><span class="s5">'skipfuncs' </span><span class="s2">in </span><span class="s1">options</span><span class="s3">:</span>
+        <span class="s1">crackfortran</span><span class="s3">.</span><span class="s1">skipfuncs </span><span class="s3">= </span><span class="s1">options</span><span class="s3">[</span><span class="s5">'skipfuncs'</span><span class="s3">]</span>
+    <span class="s2">if </span><span class="s5">'onlyfuncs' </span><span class="s2">in </span><span class="s1">options</span><span class="s3">:</span>
+        <span class="s1">crackfortran</span><span class="s3">.</span><span class="s1">onlyfuncs </span><span class="s3">= </span><span class="s1">options</span><span class="s3">[</span><span class="s5">'onlyfuncs'</span><span class="s3">]</span>
+    <span class="s1">crackfortran</span><span class="s3">.</span><span class="s1">include_paths</span><span class="s3">[:] = </span><span class="s1">options</span><span class="s3">[</span><span class="s5">'include_paths'</span><span class="s3">]</span>
+    <span class="s1">crackfortran</span><span class="s3">.</span><span class="s1">dolowercase </span><span class="s3">= </span><span class="s1">options</span><span class="s3">[</span><span class="s5">'do-lower'</span><span class="s3">]</span>
+    <span class="s1">postlist </span><span class="s3">= </span><span class="s1">crackfortran</span><span class="s3">.</span><span class="s1">crackfortran</span><span class="s3">(</span><span class="s1">files</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s5">'signsfile' </span><span class="s2">in </span><span class="s1">options</span><span class="s3">:</span>
+        <span class="s1">outmess</span><span class="s3">(</span><span class="s5">f&quot;Saving signatures to file </span><span class="s2">\&quot;{</span><span class="s1">options</span><span class="s3">[</span><span class="s5">'signsfile'</span><span class="s3">]</span><span class="s2">}\&quot;\n</span><span class="s5">&quot;</span><span class="s3">)</span>
+        <span class="s1">pyf </span><span class="s3">= </span><span class="s1">crackfortran</span><span class="s3">.</span><span class="s1">crack2fortran</span><span class="s3">(</span><span class="s1">postlist</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">options</span><span class="s3">[</span><span class="s5">'signsfile'</span><span class="s3">][-</span><span class="s6">6</span><span class="s3">:] == </span><span class="s5">'stdout'</span><span class="s3">:</span>
+            <span class="s1">sys</span><span class="s3">.</span><span class="s1">stdout</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">pyf</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">with </span><span class="s1">open</span><span class="s3">(</span><span class="s1">options</span><span class="s3">[</span><span class="s5">'signsfile'</span><span class="s3">], </span><span class="s5">'w'</span><span class="s3">) </span><span class="s2">as </span><span class="s1">f</span><span class="s3">:</span>
+                <span class="s1">f</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">pyf</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">options</span><span class="s3">[</span><span class="s5">&quot;coutput&quot;</span><span class="s3">] </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s2">for </span><span class="s1">mod </span><span class="s2">in </span><span class="s1">postlist</span><span class="s3">:</span>
+            <span class="s1">mod</span><span class="s3">[</span><span class="s5">&quot;coutput&quot;</span><span class="s3">] = </span><span class="s5">f&quot;</span><span class="s2">{</span><span class="s1">mod</span><span class="s3">[</span><span class="s5">'name'</span><span class="s3">]</span><span class="s2">}</span><span class="s5">module.c&quot;</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">for </span><span class="s1">mod </span><span class="s2">in </span><span class="s1">postlist</span><span class="s3">:</span>
+            <span class="s1">mod</span><span class="s3">[</span><span class="s5">&quot;coutput&quot;</span><span class="s3">] = </span><span class="s1">options</span><span class="s3">[</span><span class="s5">&quot;coutput&quot;</span><span class="s3">]</span>
+    <span class="s2">if </span><span class="s1">options</span><span class="s3">[</span><span class="s5">&quot;f2py_wrapper_output&quot;</span><span class="s3">] </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s2">for </span><span class="s1">mod </span><span class="s2">in </span><span class="s1">postlist</span><span class="s3">:</span>
+            <span class="s1">mod</span><span class="s3">[</span><span class="s5">&quot;f2py_wrapper_output&quot;</span><span class="s3">] = </span><span class="s5">f&quot;</span><span class="s2">{</span><span class="s1">mod</span><span class="s3">[</span><span class="s5">'name'</span><span class="s3">]</span><span class="s2">}</span><span class="s5">-f2pywrappers.f&quot;</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">for </span><span class="s1">mod </span><span class="s2">in </span><span class="s1">postlist</span><span class="s3">:</span>
+            <span class="s1">mod</span><span class="s3">[</span><span class="s5">&quot;f2py_wrapper_output&quot;</span><span class="s3">] = </span><span class="s1">options</span><span class="s3">[</span><span class="s5">&quot;f2py_wrapper_output&quot;</span><span class="s3">]</span>
+    <span class="s2">for </span><span class="s1">mod </span><span class="s2">in </span><span class="s1">postlist</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">options</span><span class="s3">[</span><span class="s5">&quot;requires_gil&quot;</span><span class="s3">]:</span>
+            <span class="s1">mod</span><span class="s3">[</span><span class="s5">'gil_used'</span><span class="s3">] = </span><span class="s5">'Py_MOD_GIL_USED'</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">mod</span><span class="s3">[</span><span class="s5">'gil_used'</span><span class="s3">] = </span><span class="s5">'Py_MOD_GIL_NOT_USED'</span>
+    <span class="s4"># gh-26718 Reset global</span>
+    <span class="s1">crackfortran</span><span class="s3">.</span><span class="s1">f77modulename </span><span class="s3">= </span><span class="s5">''</span>
+    <span class="s2">return </span><span class="s1">postlist</span>
+
+
+<span class="s2">def </span><span class="s1">buildmodules</span><span class="s3">(</span><span class="s1">lst</span><span class="s3">):</span>
+    <span class="s1">cfuncs</span><span class="s3">.</span><span class="s1">buildcfuncs</span><span class="s3">()</span>
+    <span class="s1">outmess</span><span class="s3">(</span><span class="s5">'Building modules...</span><span class="s2">\n</span><span class="s5">'</span><span class="s3">)</span>
+    <span class="s1">modules</span><span class="s3">, </span><span class="s1">mnames</span><span class="s3">, </span><span class="s1">isusedby </span><span class="s3">= [], [], {}</span>
+    <span class="s2">for </span><span class="s1">item </span><span class="s2">in </span><span class="s1">lst</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s5">'__user__' </span><span class="s2">in </span><span class="s1">item</span><span class="s3">[</span><span class="s5">'name'</span><span class="s3">]:</span>
+            <span class="s1">cb_rules</span><span class="s3">.</span><span class="s1">buildcallbacks</span><span class="s3">(</span><span class="s1">item</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s5">'use' </span><span class="s2">in </span><span class="s1">item</span><span class="s3">:</span>
+                <span class="s2">for </span><span class="s1">u </span><span class="s2">in </span><span class="s1">item</span><span class="s3">[</span><span class="s5">'use'</span><span class="s3">].</span><span class="s1">keys</span><span class="s3">():</span>
+                    <span class="s2">if </span><span class="s1">u </span><span class="s2">not in </span><span class="s1">isusedby</span><span class="s3">:</span>
+                        <span class="s1">isusedby</span><span class="s3">[</span><span class="s1">u</span><span class="s3">] = []</span>
+                    <span class="s1">isusedby</span><span class="s3">[</span><span class="s1">u</span><span class="s3">].</span><span class="s1">append</span><span class="s3">(</span><span class="s1">item</span><span class="s3">[</span><span class="s5">'name'</span><span class="s3">])</span>
+            <span class="s1">modules</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">item</span><span class="s3">)</span>
+            <span class="s1">mnames</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">item</span><span class="s3">[</span><span class="s5">'name'</span><span class="s3">])</span>
+    <span class="s1">ret </span><span class="s3">= {}</span>
+    <span class="s2">for </span><span class="s1">module</span><span class="s3">, </span><span class="s1">name </span><span class="s2">in </span><span class="s1">zip</span><span class="s3">(</span><span class="s1">modules</span><span class="s3">, </span><span class="s1">mnames</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">name </span><span class="s2">in </span><span class="s1">isusedby</span><span class="s3">:</span>
+            <span class="s1">using_modules </span><span class="s3">= </span><span class="s5">','</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s5">f'&quot;</span><span class="s2">{</span><span class="s1">s</span><span class="s2">}</span><span class="s5">&quot;' </span><span class="s2">for </span><span class="s1">s </span><span class="s2">in </span><span class="s1">isusedby</span><span class="s3">[</span><span class="s1">name</span><span class="s3">])</span>
+            <span class="s1">outmess</span><span class="s3">(</span><span class="s5">f'</span><span class="s2">\t</span><span class="s5">Skipping module &quot;</span><span class="s2">{</span><span class="s1">name</span><span class="s2">}</span><span class="s5">&quot; which is used by </span><span class="s2">{</span><span class="s1">using_modules</span><span class="s2">}</span><span class="s5">.</span><span class="s2">\n</span><span class="s5">'</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">um </span><span class="s3">= []</span>
+            <span class="s2">if </span><span class="s5">'use' </span><span class="s2">in </span><span class="s1">module</span><span class="s3">:</span>
+                <span class="s2">for </span><span class="s1">u </span><span class="s2">in </span><span class="s1">module</span><span class="s3">[</span><span class="s5">'use'</span><span class="s3">].</span><span class="s1">keys</span><span class="s3">():</span>
+                    <span class="s2">if </span><span class="s1">u </span><span class="s2">in </span><span class="s1">isusedby </span><span class="s2">and </span><span class="s1">u </span><span class="s2">in </span><span class="s1">mnames</span><span class="s3">:</span>
+                        <span class="s1">um</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">modules</span><span class="s3">[</span><span class="s1">mnames</span><span class="s3">.</span><span class="s1">index</span><span class="s3">(</span><span class="s1">u</span><span class="s3">)])</span>
+                    <span class="s2">else</span><span class="s3">:</span>
+                        <span class="s1">outmess</span><span class="s3">(</span>
+                            <span class="s5">f'</span><span class="s2">\t</span><span class="s5">Module &quot;</span><span class="s2">{</span><span class="s1">name</span><span class="s2">}</span><span class="s5">&quot; uses nonexisting &quot;</span><span class="s2">{</span><span class="s1">u</span><span class="s2">}</span><span class="s5">&quot; '</span>
+                            <span class="s5">'which will be ignored.</span><span class="s2">\n</span><span class="s5">'</span><span class="s3">)</span>
+            <span class="s1">ret</span><span class="s3">[</span><span class="s1">name</span><span class="s3">] = {}</span>
+            <span class="s1">dict_append</span><span class="s3">(</span><span class="s1">ret</span><span class="s3">[</span><span class="s1">name</span><span class="s3">], </span><span class="s1">rules</span><span class="s3">.</span><span class="s1">buildmodule</span><span class="s3">(</span><span class="s1">module</span><span class="s3">, </span><span class="s1">um</span><span class="s3">))</span>
+    <span class="s2">return </span><span class="s1">ret</span>
+
+
+<span class="s2">def </span><span class="s1">dict_append</span><span class="s3">(</span><span class="s1">d_out</span><span class="s3">, </span><span class="s1">d_in</span><span class="s3">):</span>
+    <span class="s2">for </span><span class="s3">(</span><span class="s1">k</span><span class="s3">, </span><span class="s1">v</span><span class="s3">) </span><span class="s2">in </span><span class="s1">d_in</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+        <span class="s2">if </span><span class="s1">k </span><span class="s2">not in </span><span class="s1">d_out</span><span class="s3">:</span>
+            <span class="s1">d_out</span><span class="s3">[</span><span class="s1">k</span><span class="s3">] = []</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">v</span><span class="s3">, </span><span class="s1">list</span><span class="s3">):</span>
+            <span class="s1">d_out</span><span class="s3">[</span><span class="s1">k</span><span class="s3">] = </span><span class="s1">d_out</span><span class="s3">[</span><span class="s1">k</span><span class="s3">] + </span><span class="s1">v</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">d_out</span><span class="s3">[</span><span class="s1">k</span><span class="s3">].</span><span class="s1">append</span><span class="s3">(</span><span class="s1">v</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">run_main</span><span class="s3">(</span><span class="s1">comline_list</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Equivalent to running:: 
+ 
+        f2py &lt;args&gt; 
+ 
+    where ``&lt;args&gt;=string.join(&lt;list&gt;,' ')``, but in Python.  Unless 
+    ``-h`` is used, this function returns a dictionary containing 
+    information on generated modules and their dependencies on source 
+    files. 
+ 
+    You cannot build extension modules with this function, that is, 
+    using ``-c`` is not allowed. Use the ``compile`` command instead. 
+ 
+    Examples 
+    -------- 
+    The command ``f2py -m scalar scalar.f`` can be executed from Python as 
+    follows. 
+ 
+    .. literalinclude:: ../../source/f2py/code/results/run_main_session.dat 
+        :language: python 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">crackfortran</span><span class="s3">.</span><span class="s1">reset_global_f2py_vars</span><span class="s3">()</span>
+    <span class="s1">f2pydir </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">dirname</span><span class="s3">(</span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">abspath</span><span class="s3">(</span><span class="s1">cfuncs</span><span class="s3">.</span><span class="s1">__file__</span><span class="s3">))</span>
+    <span class="s1">fobjhsrc </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">f2pydir</span><span class="s3">, </span><span class="s5">'src'</span><span class="s3">, </span><span class="s5">'fortranobject.h'</span><span class="s3">)</span>
+    <span class="s1">fobjcsrc </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">f2pydir</span><span class="s3">, </span><span class="s5">'src'</span><span class="s3">, </span><span class="s5">'fortranobject.c'</span><span class="s3">)</span>
+    <span class="s4"># gh-22819 -- begin</span>
+    <span class="s1">parser </span><span class="s3">= </span><span class="s1">make_f2py_compile_parser</span><span class="s3">()</span>
+    <span class="s1">args</span><span class="s3">, </span><span class="s1">comline_list </span><span class="s3">= </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">parse_known_args</span><span class="s3">(</span><span class="s1">comline_list</span><span class="s3">)</span>
+    <span class="s1">pyf_files</span><span class="s3">, </span><span class="s1">_ </span><span class="s3">= </span><span class="s1">filter_files</span><span class="s3">(</span><span class="s5">&quot;&quot;</span><span class="s3">, </span><span class="s5">&quot;[.]pyf([.]src|)&quot;</span><span class="s3">, </span><span class="s1">comline_list</span><span class="s3">)</span>
+    <span class="s4"># Checks that no existing modulename is defined in a pyf file</span>
+    <span class="s4"># TODO: Remove all this when scaninputline is replaced</span>
+    <span class="s2">if </span><span class="s1">args</span><span class="s3">.</span><span class="s1">module_name</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s5">&quot;-h&quot; </span><span class="s2">in </span><span class="s1">comline_list</span><span class="s3">:</span>
+            <span class="s1">modname </span><span class="s3">= (</span>
+                <span class="s1">args</span><span class="s3">.</span><span class="s1">module_name</span>
+            <span class="s3">)  </span><span class="s4"># Directly use from args when -h is present</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">modname </span><span class="s3">= </span><span class="s1">validate_modulename</span><span class="s3">(</span>
+                <span class="s1">pyf_files</span><span class="s3">, </span><span class="s1">args</span><span class="s3">.</span><span class="s1">module_name</span>
+            <span class="s3">)  </span><span class="s4"># Validate modname when -h is not present</span>
+        <span class="s1">comline_list </span><span class="s3">+= [</span><span class="s5">'-m'</span><span class="s3">, </span><span class="s1">modname</span><span class="s3">]  </span><span class="s4"># needed for the rest of scaninputline</span>
+    <span class="s4"># gh-22819 -- end</span>
+    <span class="s1">files</span><span class="s3">, </span><span class="s1">options </span><span class="s3">= </span><span class="s1">scaninputline</span><span class="s3">(</span><span class="s1">comline_list</span><span class="s3">)</span>
+    <span class="s1">auxfuncs</span><span class="s3">.</span><span class="s1">options </span><span class="s3">= </span><span class="s1">options</span>
+    <span class="s1">capi_maps</span><span class="s3">.</span><span class="s1">load_f2cmap_file</span><span class="s3">(</span><span class="s1">options</span><span class="s3">[</span><span class="s5">'f2cmap_file'</span><span class="s3">])</span>
+    <span class="s1">postlist </span><span class="s3">= </span><span class="s1">callcrackfortran</span><span class="s3">(</span><span class="s1">files</span><span class="s3">, </span><span class="s1">options</span><span class="s3">)</span>
+    <span class="s1">isusedby </span><span class="s3">= {}</span>
+    <span class="s2">for </span><span class="s1">plist </span><span class="s2">in </span><span class="s1">postlist</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s5">'use' </span><span class="s2">in </span><span class="s1">plist</span><span class="s3">:</span>
+            <span class="s2">for </span><span class="s1">u </span><span class="s2">in </span><span class="s1">plist</span><span class="s3">[</span><span class="s5">'use'</span><span class="s3">].</span><span class="s1">keys</span><span class="s3">():</span>
+                <span class="s2">if </span><span class="s1">u </span><span class="s2">not in </span><span class="s1">isusedby</span><span class="s3">:</span>
+                    <span class="s1">isusedby</span><span class="s3">[</span><span class="s1">u</span><span class="s3">] = []</span>
+                <span class="s1">isusedby</span><span class="s3">[</span><span class="s1">u</span><span class="s3">].</span><span class="s1">append</span><span class="s3">(</span><span class="s1">plist</span><span class="s3">[</span><span class="s5">'name'</span><span class="s3">])</span>
+    <span class="s2">for </span><span class="s1">plist </span><span class="s2">in </span><span class="s1">postlist</span><span class="s3">:</span>
+        <span class="s1">module_name </span><span class="s3">= </span><span class="s1">plist</span><span class="s3">[</span><span class="s5">'name'</span><span class="s3">]</span>
+        <span class="s2">if </span><span class="s1">plist</span><span class="s3">[</span><span class="s5">'block'</span><span class="s3">] == </span><span class="s5">'python module' </span><span class="s2">and </span><span class="s5">'__user__' </span><span class="s2">in </span><span class="s1">module_name</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">module_name </span><span class="s2">in </span><span class="s1">isusedby</span><span class="s3">:</span>
+                <span class="s4"># if not quiet:</span>
+                <span class="s1">usedby </span><span class="s3">= </span><span class="s5">','</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s5">f'&quot;</span><span class="s2">{</span><span class="s1">s</span><span class="s2">}</span><span class="s5">&quot;' </span><span class="s2">for </span><span class="s1">s </span><span class="s2">in </span><span class="s1">isusedby</span><span class="s3">[</span><span class="s1">module_name</span><span class="s3">])</span>
+                <span class="s1">outmess</span><span class="s3">(</span>
+                    <span class="s5">f'Skipping Makefile build for module &quot;</span><span class="s2">{</span><span class="s1">module_name</span><span class="s2">}</span><span class="s5">&quot; '</span>
+                    <span class="s5">f'which is used by </span><span class="s2">{</span><span class="s1">usedby</span><span class="s2">}\n</span><span class="s5">'</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s5">'signsfile' </span><span class="s2">in </span><span class="s1">options</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">options</span><span class="s3">[</span><span class="s5">'verbose'</span><span class="s3">] &gt; </span><span class="s6">1</span><span class="s3">:</span>
+            <span class="s1">outmess</span><span class="s3">(</span>
+                <span class="s5">'Stopping. Edit the signature file and then run f2py on the signature file: '</span><span class="s3">)</span>
+            <span class="s1">outmess</span><span class="s3">(</span><span class="s5">f&quot;</span><span class="s2">{</span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">basename</span><span class="s3">(</span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s6">0</span><span class="s3">])</span><span class="s2">} {</span><span class="s1">options</span><span class="s3">[</span><span class="s5">'signsfile'</span><span class="s3">]</span><span class="s2">}\n</span><span class="s5">&quot;</span><span class="s3">)</span>
+        <span class="s2">return</span>
+    <span class="s2">for </span><span class="s1">plist </span><span class="s2">in </span><span class="s1">postlist</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">plist</span><span class="s3">[</span><span class="s5">'block'</span><span class="s3">] != </span><span class="s5">'python module'</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s5">'python module' </span><span class="s2">not in </span><span class="s1">options</span><span class="s3">:</span>
+                <span class="s1">errmess</span><span class="s3">(</span>
+                    <span class="s5">'Tip: If your original code is Fortran source then you must use -m option.</span><span class="s2">\n</span><span class="s5">'</span><span class="s3">)</span>
+            <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span><span class="s5">'All blocks must be python module blocks but got '</span>
+                            <span class="s5">f'</span><span class="s2">{</span><span class="s1">plist</span><span class="s3">[</span><span class="s5">&quot;block&quot;</span><span class="s3">]</span><span class="s2">!r}</span><span class="s5">'</span><span class="s3">)</span>
+    <span class="s1">auxfuncs</span><span class="s3">.</span><span class="s1">debugoptions </span><span class="s3">= </span><span class="s1">options</span><span class="s3">[</span><span class="s5">'debug'</span><span class="s3">]</span>
+    <span class="s1">f90mod_rules</span><span class="s3">.</span><span class="s1">options </span><span class="s3">= </span><span class="s1">options</span>
+    <span class="s1">auxfuncs</span><span class="s3">.</span><span class="s1">wrapfuncs </span><span class="s3">= </span><span class="s1">options</span><span class="s3">[</span><span class="s5">'wrapfuncs'</span><span class="s3">]</span>
+
+    <span class="s1">ret </span><span class="s3">= </span><span class="s1">buildmodules</span><span class="s3">(</span><span class="s1">postlist</span><span class="s3">)</span>
+
+    <span class="s2">for </span><span class="s1">mn </span><span class="s2">in </span><span class="s1">ret</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">():</span>
+        <span class="s1">dict_append</span><span class="s3">(</span><span class="s1">ret</span><span class="s3">[</span><span class="s1">mn</span><span class="s3">], {</span><span class="s5">'csrc'</span><span class="s3">: </span><span class="s1">fobjcsrc</span><span class="s3">, </span><span class="s5">'h'</span><span class="s3">: </span><span class="s1">fobjhsrc</span><span class="s3">})</span>
+    <span class="s2">return </span><span class="s1">ret</span>
+
+
+<span class="s2">def </span><span class="s1">filter_files</span><span class="s3">(</span><span class="s1">prefix</span><span class="s3">, </span><span class="s1">suffix</span><span class="s3">, </span><span class="s1">files</span><span class="s3">, </span><span class="s1">remove_prefix</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Filter files by prefix and suffix. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">filtered</span><span class="s3">, </span><span class="s1">rest </span><span class="s3">= [], []</span>
+    <span class="s1">match </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s1">prefix </span><span class="s3">+ </span><span class="s5">r'.*' </span><span class="s3">+ </span><span class="s1">suffix </span><span class="s3">+ </span><span class="s5">r'\Z'</span><span class="s3">).</span><span class="s1">match</span>
+    <span class="s2">if </span><span class="s1">remove_prefix</span><span class="s3">:</span>
+        <span class="s1">ind </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">prefix</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">ind </span><span class="s3">= </span><span class="s6">0</span>
+    <span class="s2">for </span><span class="s1">file </span><span class="s2">in </span><span class="s3">[</span><span class="s1">x</span><span class="s3">.</span><span class="s1">strip</span><span class="s3">() </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">files</span><span class="s3">]:</span>
+        <span class="s2">if </span><span class="s1">match</span><span class="s3">(</span><span class="s1">file</span><span class="s3">):</span>
+            <span class="s1">filtered</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">file</span><span class="s3">[</span><span class="s1">ind</span><span class="s3">:])</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">rest</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">file</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">filtered</span><span class="s3">, </span><span class="s1">rest</span>
+
+
+<span class="s2">def </span><span class="s1">get_prefix</span><span class="s3">(</span><span class="s1">module</span><span class="s3">):</span>
+    <span class="s1">p </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">dirname</span><span class="s3">(</span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">dirname</span><span class="s3">(</span><span class="s1">module</span><span class="s3">.</span><span class="s1">__file__</span><span class="s3">))</span>
+    <span class="s2">return </span><span class="s1">p</span>
+
+
+<span class="s2">class </span><span class="s1">CombineIncludePaths</span><span class="s3">(</span><span class="s1">argparse</span><span class="s3">.</span><span class="s1">Action</span><span class="s3">):</span>
+    <span class="s2">def </span><span class="s1">__call__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">parser</span><span class="s3">, </span><span class="s1">namespace</span><span class="s3">, </span><span class="s1">values</span><span class="s3">, </span><span class="s1">option_string</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s1">include_paths_set </span><span class="s3">= </span><span class="s1">set</span><span class="s3">(</span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">namespace</span><span class="s3">, </span><span class="s5">'include_paths'</span><span class="s3">, []) </span><span class="s2">or </span><span class="s3">[])</span>
+        <span class="s2">if </span><span class="s1">option_string </span><span class="s3">== </span><span class="s5">&quot;--include_paths&quot;</span><span class="s3">:</span>
+            <span class="s1">outmess</span><span class="s3">(</span><span class="s5">&quot;Use --include-paths or -I instead of --include_paths which will be removed&quot;</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">option_string </span><span class="s2">in </span><span class="s3">{</span><span class="s5">&quot;--include-paths&quot;</span><span class="s3">, </span><span class="s5">&quot;--include_paths&quot;</span><span class="s3">}:</span>
+            <span class="s1">include_paths_set</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">values</span><span class="s3">.</span><span class="s1">split</span><span class="s3">(</span><span class="s5">':'</span><span class="s3">))</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">include_paths_set</span><span class="s3">.</span><span class="s1">add</span><span class="s3">(</span><span class="s1">values</span><span class="s3">)</span>
+        <span class="s1">namespace</span><span class="s3">.</span><span class="s1">include_paths </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">include_paths_set</span><span class="s3">)</span>
+
+<span class="s2">def </span><span class="s1">f2py_parser</span><span class="s3">():</span>
+    <span class="s1">parser </span><span class="s3">= </span><span class="s1">argparse</span><span class="s3">.</span><span class="s1">ArgumentParser</span><span class="s3">(</span><span class="s1">add_help</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+    <span class="s1">parser</span><span class="s3">.</span><span class="s1">add_argument</span><span class="s3">(</span><span class="s5">&quot;-I&quot;</span><span class="s3">, </span><span class="s1">dest</span><span class="s3">=</span><span class="s5">&quot;include_paths&quot;</span><span class="s3">, </span><span class="s1">action</span><span class="s3">=</span><span class="s1">CombineIncludePaths</span><span class="s3">)</span>
+    <span class="s1">parser</span><span class="s3">.</span><span class="s1">add_argument</span><span class="s3">(</span><span class="s5">&quot;--include-paths&quot;</span><span class="s3">, </span><span class="s1">dest</span><span class="s3">=</span><span class="s5">&quot;include_paths&quot;</span><span class="s3">, </span><span class="s1">action</span><span class="s3">=</span><span class="s1">CombineIncludePaths</span><span class="s3">)</span>
+    <span class="s1">parser</span><span class="s3">.</span><span class="s1">add_argument</span><span class="s3">(</span><span class="s5">&quot;--include_paths&quot;</span><span class="s3">, </span><span class="s1">dest</span><span class="s3">=</span><span class="s5">&quot;include_paths&quot;</span><span class="s3">, </span><span class="s1">action</span><span class="s3">=</span><span class="s1">CombineIncludePaths</span><span class="s3">)</span>
+    <span class="s1">parser</span><span class="s3">.</span><span class="s1">add_argument</span><span class="s3">(</span><span class="s5">&quot;--freethreading-compatible&quot;</span><span class="s3">, </span><span class="s1">dest</span><span class="s3">=</span><span class="s5">&quot;ftcompat&quot;</span><span class="s3">, </span><span class="s1">action</span><span class="s3">=</span><span class="s1">argparse</span><span class="s3">.</span><span class="s1">BooleanOptionalAction</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">parser</span>
+
+<span class="s2">def </span><span class="s1">get_newer_options</span><span class="s3">(</span><span class="s1">iline</span><span class="s3">):</span>
+    <span class="s1">iline </span><span class="s3">= (</span><span class="s5">' '</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">iline</span><span class="s3">)).</span><span class="s1">split</span><span class="s3">()</span>
+    <span class="s1">parser </span><span class="s3">= </span><span class="s1">f2py_parser</span><span class="s3">()</span>
+    <span class="s1">args</span><span class="s3">, </span><span class="s1">remain </span><span class="s3">= </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">parse_known_args</span><span class="s3">(</span><span class="s1">iline</span><span class="s3">)</span>
+    <span class="s1">ipaths </span><span class="s3">= </span><span class="s1">args</span><span class="s3">.</span><span class="s1">include_paths</span>
+    <span class="s2">if </span><span class="s1">args</span><span class="s3">.</span><span class="s1">include_paths </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">ipaths </span><span class="s3">= []</span>
+    <span class="s2">return </span><span class="s1">ipaths</span><span class="s3">, </span><span class="s1">args</span><span class="s3">.</span><span class="s1">ftcompat</span><span class="s3">, </span><span class="s1">remain</span>
+
+<span class="s2">def </span><span class="s1">make_f2py_compile_parser</span><span class="s3">():</span>
+    <span class="s1">parser </span><span class="s3">= </span><span class="s1">argparse</span><span class="s3">.</span><span class="s1">ArgumentParser</span><span class="s3">(</span><span class="s1">add_help</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+    <span class="s1">parser</span><span class="s3">.</span><span class="s1">add_argument</span><span class="s3">(</span><span class="s5">&quot;--dep&quot;</span><span class="s3">, </span><span class="s1">action</span><span class="s3">=</span><span class="s5">&quot;append&quot;</span><span class="s3">, </span><span class="s1">dest</span><span class="s3">=</span><span class="s5">&quot;dependencies&quot;</span><span class="s3">)</span>
+    <span class="s1">parser</span><span class="s3">.</span><span class="s1">add_argument</span><span class="s3">(</span><span class="s5">&quot;--backend&quot;</span><span class="s3">, </span><span class="s1">choices</span><span class="s3">=[</span><span class="s5">'meson'</span><span class="s3">, </span><span class="s5">'distutils'</span><span class="s3">], </span><span class="s1">default</span><span class="s3">=</span><span class="s5">'distutils'</span><span class="s3">)</span>
+    <span class="s1">parser</span><span class="s3">.</span><span class="s1">add_argument</span><span class="s3">(</span><span class="s5">&quot;-m&quot;</span><span class="s3">, </span><span class="s1">dest</span><span class="s3">=</span><span class="s5">&quot;module_name&quot;</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">parser</span>
+
+<span class="s2">def </span><span class="s1">preparse_sysargv</span><span class="s3">():</span>
+    <span class="s4"># To keep backwards bug compatibility, newer flags are handled by argparse,</span>
+    <span class="s4"># and `sys.argv` is passed to the rest of `f2py` as is.</span>
+    <span class="s1">parser </span><span class="s3">= </span><span class="s1">make_f2py_compile_parser</span><span class="s3">()</span>
+
+    <span class="s1">args</span><span class="s3">, </span><span class="s1">remaining_argv </span><span class="s3">= </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">parse_known_args</span><span class="s3">()</span>
+    <span class="s1">sys</span><span class="s3">.</span><span class="s1">argv </span><span class="s3">= [</span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]] + </span><span class="s1">remaining_argv</span>
+
+    <span class="s1">backend_key </span><span class="s3">= </span><span class="s1">args</span><span class="s3">.</span><span class="s1">backend</span>
+    <span class="s2">if </span><span class="s1">backend_key </span><span class="s3">== </span><span class="s5">'distutils'</span><span class="s3">:</span>
+        <span class="s1">outmess</span><span class="s3">(</span><span class="s5">&quot;Cannot use distutils backend with Python&gt;=3.12,&quot;</span>
+                <span class="s5">&quot; using meson backend instead.</span><span class="s2">\n</span><span class="s5">&quot;</span><span class="s3">)</span>
+        <span class="s1">backend_key </span><span class="s3">= </span><span class="s5">&quot;meson&quot;</span>
+
+    <span class="s2">return </span><span class="s3">{</span>
+        <span class="s5">&quot;dependencies&quot;</span><span class="s3">: </span><span class="s1">args</span><span class="s3">.</span><span class="s1">dependencies </span><span class="s2">or </span><span class="s3">[],</span>
+        <span class="s5">&quot;backend&quot;</span><span class="s3">: </span><span class="s1">backend_key</span><span class="s3">,</span>
+        <span class="s5">&quot;modulename&quot;</span><span class="s3">: </span><span class="s1">args</span><span class="s3">.</span><span class="s1">module_name</span><span class="s3">,</span>
+    <span class="s3">}</span>
+
+<span class="s2">def </span><span class="s1">run_compile</span><span class="s3">():</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Do it all in one call! 
+    &quot;&quot;&quot;</span>
+    <span class="s2">import </span><span class="s1">tempfile</span>
+
+    <span class="s4"># Collect dependency flags, preprocess sys.argv</span>
+    <span class="s1">argy </span><span class="s3">= </span><span class="s1">preparse_sysargv</span><span class="s3">()</span>
+    <span class="s1">modulename </span><span class="s3">= </span><span class="s1">argy</span><span class="s3">[</span><span class="s5">&quot;modulename&quot;</span><span class="s3">]</span>
+    <span class="s2">if </span><span class="s1">modulename </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">modulename </span><span class="s3">= </span><span class="s5">'untitled'</span>
+    <span class="s1">dependencies </span><span class="s3">= </span><span class="s1">argy</span><span class="s3">[</span><span class="s5">&quot;dependencies&quot;</span><span class="s3">]</span>
+    <span class="s1">backend_key </span><span class="s3">= </span><span class="s1">argy</span><span class="s3">[</span><span class="s5">&quot;backend&quot;</span><span class="s3">]</span>
+    <span class="s1">build_backend </span><span class="s3">= </span><span class="s1">f2py_build_generator</span><span class="s3">(</span><span class="s1">backend_key</span><span class="s3">)</span>
+
+    <span class="s1">i </span><span class="s3">= </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">.</span><span class="s1">index</span><span class="s3">(</span><span class="s5">'-c'</span><span class="s3">)</span>
+    <span class="s2">del </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s1">i</span><span class="s3">]</span>
+
+    <span class="s1">remove_build_dir </span><span class="s3">= </span><span class="s6">0</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s1">i </span><span class="s3">= </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">.</span><span class="s1">index</span><span class="s3">(</span><span class="s5">'--build-dir'</span><span class="s3">)</span>
+    <span class="s2">except </span><span class="s1">ValueError</span><span class="s3">:</span>
+        <span class="s1">i </span><span class="s3">= </span><span class="s2">None</span>
+    <span class="s2">if </span><span class="s1">i </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s1">build_dir </span><span class="s3">= </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s1">i </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">]</span>
+        <span class="s2">del </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s1">i </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">]</span>
+        <span class="s2">del </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s1">i</span><span class="s3">]</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">remove_build_dir </span><span class="s3">= </span><span class="s6">1</span>
+        <span class="s1">build_dir </span><span class="s3">= </span><span class="s1">tempfile</span><span class="s3">.</span><span class="s1">mkdtemp</span><span class="s3">()</span>
+
+    <span class="s1">_reg1 </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s5">r'--link-'</span><span class="s3">)</span>
+    <span class="s1">sysinfo_flags </span><span class="s3">= [</span><span class="s1">_m </span><span class="s2">for </span><span class="s1">_m </span><span class="s2">in </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:] </span><span class="s2">if </span><span class="s1">_reg1</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s1">_m</span><span class="s3">)]</span>
+    <span class="s1">sys</span><span class="s3">.</span><span class="s1">argv </span><span class="s3">= [</span><span class="s1">_m </span><span class="s2">for </span><span class="s1">_m </span><span class="s2">in </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv </span><span class="s2">if </span><span class="s1">_m </span><span class="s2">not in </span><span class="s1">sysinfo_flags</span><span class="s3">]</span>
+    <span class="s2">if </span><span class="s1">sysinfo_flags</span><span class="s3">:</span>
+        <span class="s1">sysinfo_flags </span><span class="s3">= [</span><span class="s1">f</span><span class="s3">[</span><span class="s6">7</span><span class="s3">:] </span><span class="s2">for </span><span class="s1">f </span><span class="s2">in </span><span class="s1">sysinfo_flags</span><span class="s3">]</span>
+
+    <span class="s1">_reg2 </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span>
+        <span class="s5">r'--((no-|)(wrap-functions|lower|freethreading-compatible|latex-doc)|debug-capi|quiet|skip-empty-wrappers)|-include'</span><span class="s3">)</span>
+    <span class="s1">f2py_flags </span><span class="s3">= [</span><span class="s1">_m </span><span class="s2">for </span><span class="s1">_m </span><span class="s2">in </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:] </span><span class="s2">if </span><span class="s1">_reg2</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s1">_m</span><span class="s3">)]</span>
+    <span class="s1">sys</span><span class="s3">.</span><span class="s1">argv </span><span class="s3">= [</span><span class="s1">_m </span><span class="s2">for </span><span class="s1">_m </span><span class="s2">in </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv </span><span class="s2">if </span><span class="s1">_m </span><span class="s2">not in </span><span class="s1">f2py_flags</span><span class="s3">]</span>
+    <span class="s1">f2py_flags2 </span><span class="s3">= []</span>
+    <span class="s1">fl </span><span class="s3">= </span><span class="s6">0</span>
+    <span class="s2">for </span><span class="s1">a </span><span class="s2">in </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:]:</span>
+        <span class="s2">if </span><span class="s1">a </span><span class="s2">in </span><span class="s3">[</span><span class="s5">'only:'</span><span class="s3">, </span><span class="s5">'skip:'</span><span class="s3">]:</span>
+            <span class="s1">fl </span><span class="s3">= </span><span class="s6">1</span>
+        <span class="s2">elif </span><span class="s1">a </span><span class="s3">== </span><span class="s5">':'</span><span class="s3">:</span>
+            <span class="s1">fl </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s2">if </span><span class="s1">fl </span><span class="s2">or </span><span class="s1">a </span><span class="s3">== </span><span class="s5">':'</span><span class="s3">:</span>
+            <span class="s1">f2py_flags2</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">a</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">f2py_flags2 </span><span class="s2">and </span><span class="s1">f2py_flags2</span><span class="s3">[-</span><span class="s6">1</span><span class="s3">] != </span><span class="s5">':'</span><span class="s3">:</span>
+        <span class="s1">f2py_flags2</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s5">':'</span><span class="s3">)</span>
+    <span class="s1">f2py_flags</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">(</span><span class="s1">f2py_flags2</span><span class="s3">)</span>
+    <span class="s1">sys</span><span class="s3">.</span><span class="s1">argv </span><span class="s3">= [</span><span class="s1">_m </span><span class="s2">for </span><span class="s1">_m </span><span class="s2">in </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv </span><span class="s2">if </span><span class="s1">_m </span><span class="s2">not in </span><span class="s1">f2py_flags2</span><span class="s3">]</span>
+    <span class="s1">_reg3 </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span>
+        <span class="s5">r'--((f(90)?compiler(-exec|)|compiler)=|help-compiler)'</span><span class="s3">)</span>
+    <span class="s1">flib_flags </span><span class="s3">= [</span><span class="s1">_m </span><span class="s2">for </span><span class="s1">_m </span><span class="s2">in </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:] </span><span class="s2">if </span><span class="s1">_reg3</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s1">_m</span><span class="s3">)]</span>
+    <span class="s1">sys</span><span class="s3">.</span><span class="s1">argv </span><span class="s3">= [</span><span class="s1">_m </span><span class="s2">for </span><span class="s1">_m </span><span class="s2">in </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv </span><span class="s2">if </span><span class="s1">_m </span><span class="s2">not in </span><span class="s1">flib_flags</span><span class="s3">]</span>
+    <span class="s4"># TODO: Once distutils is dropped completely, i.e. min_ver &gt;= 3.12, unify into --fflags</span>
+    <span class="s1">reg_f77_f90_flags </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s5">r'--f(77|90)flags='</span><span class="s3">)</span>
+    <span class="s1">reg_distutils_flags </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s5">r'--((f(77|90)exec|opt|arch)=|(debug|noopt|noarch|help-fcompiler))'</span><span class="s3">)</span>
+    <span class="s1">fc_flags </span><span class="s3">= [</span><span class="s1">_m </span><span class="s2">for </span><span class="s1">_m </span><span class="s2">in </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:] </span><span class="s2">if </span><span class="s1">reg_f77_f90_flags</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s1">_m</span><span class="s3">)]</span>
+    <span class="s1">distutils_flags </span><span class="s3">= [</span><span class="s1">_m </span><span class="s2">for </span><span class="s1">_m </span><span class="s2">in </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:] </span><span class="s2">if </span><span class="s1">reg_distutils_flags</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s1">_m</span><span class="s3">)]</span>
+    <span class="s1">sys</span><span class="s3">.</span><span class="s1">argv </span><span class="s3">= [</span><span class="s1">_m </span><span class="s2">for </span><span class="s1">_m </span><span class="s2">in </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv </span><span class="s2">if </span><span class="s1">_m </span><span class="s2">not in </span><span class="s3">(</span><span class="s1">fc_flags </span><span class="s3">+ </span><span class="s1">distutils_flags</span><span class="s3">)]</span>
+
+    <span class="s1">del_list </span><span class="s3">= []</span>
+    <span class="s2">for </span><span class="s1">s </span><span class="s2">in </span><span class="s1">flib_flags</span><span class="s3">:</span>
+        <span class="s1">v </span><span class="s3">= </span><span class="s5">'--fcompiler='</span>
+        <span class="s2">if </span><span class="s1">s</span><span class="s3">[:</span><span class="s1">len</span><span class="s3">(</span><span class="s1">v</span><span class="s3">)] == </span><span class="s1">v</span><span class="s3">:</span>
+            <span class="s1">outmess</span><span class="s3">(</span>
+                <span class="s5">&quot;--fcompiler cannot be used with meson,&quot;</span>
+                <span class="s5">&quot;set compiler with the FC environment variable</span><span class="s2">\n</span><span class="s5">&quot;</span>
+                <span class="s3">)</span>
+    <span class="s2">for </span><span class="s1">s </span><span class="s2">in </span><span class="s1">del_list</span><span class="s3">:</span>
+        <span class="s1">i </span><span class="s3">= </span><span class="s1">flib_flags</span><span class="s3">.</span><span class="s1">index</span><span class="s3">(</span><span class="s1">s</span><span class="s3">)</span>
+        <span class="s2">del </span><span class="s1">flib_flags</span><span class="s3">[</span><span class="s1">i</span><span class="s3">]</span>
+    <span class="s2">assert </span><span class="s1">len</span><span class="s3">(</span><span class="s1">flib_flags</span><span class="s3">) &lt;= </span><span class="s6">2</span><span class="s3">, </span><span class="s1">repr</span><span class="s3">(</span><span class="s1">flib_flags</span><span class="s3">)</span>
+
+    <span class="s1">_reg5 </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s5">r'--(verbose)'</span><span class="s3">)</span>
+    <span class="s1">setup_flags </span><span class="s3">= [</span><span class="s1">_m </span><span class="s2">for </span><span class="s1">_m </span><span class="s2">in </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:] </span><span class="s2">if </span><span class="s1">_reg5</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s1">_m</span><span class="s3">)]</span>
+    <span class="s1">sys</span><span class="s3">.</span><span class="s1">argv </span><span class="s3">= [</span><span class="s1">_m </span><span class="s2">for </span><span class="s1">_m </span><span class="s2">in </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv </span><span class="s2">if </span><span class="s1">_m </span><span class="s2">not in </span><span class="s1">setup_flags</span><span class="s3">]</span>
+
+    <span class="s2">if </span><span class="s5">'--quiet' </span><span class="s2">in </span><span class="s1">f2py_flags</span><span class="s3">:</span>
+        <span class="s1">setup_flags</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s5">'--quiet'</span><span class="s3">)</span>
+
+    <span class="s4"># Ugly filter to remove everything but sources</span>
+    <span class="s1">sources </span><span class="s3">= </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:]</span>
+    <span class="s1">f2cmapopt </span><span class="s3">= </span><span class="s5">'--f2cmap'</span>
+    <span class="s2">if </span><span class="s1">f2cmapopt </span><span class="s2">in </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">:</span>
+        <span class="s1">i </span><span class="s3">= </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">.</span><span class="s1">index</span><span class="s3">(</span><span class="s1">f2cmapopt</span><span class="s3">)</span>
+        <span class="s1">f2py_flags</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">(</span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s1">i</span><span class="s3">:</span><span class="s1">i </span><span class="s3">+ </span><span class="s6">2</span><span class="s3">])</span>
+        <span class="s2">del </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s1">i </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">], </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s1">i</span><span class="s3">]</span>
+        <span class="s1">sources </span><span class="s3">= </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:]</span>
+
+    <span class="s1">pyf_files</span><span class="s3">, </span><span class="s1">_sources </span><span class="s3">= </span><span class="s1">filter_files</span><span class="s3">(</span><span class="s5">&quot;&quot;</span><span class="s3">, </span><span class="s5">&quot;[.]pyf([.]src|)&quot;</span><span class="s3">, </span><span class="s1">sources</span><span class="s3">)</span>
+    <span class="s1">sources </span><span class="s3">= </span><span class="s1">pyf_files </span><span class="s3">+ </span><span class="s1">_sources</span>
+    <span class="s1">modulename </span><span class="s3">= </span><span class="s1">validate_modulename</span><span class="s3">(</span><span class="s1">pyf_files</span><span class="s3">, </span><span class="s1">modulename</span><span class="s3">)</span>
+    <span class="s1">extra_objects</span><span class="s3">, </span><span class="s1">sources </span><span class="s3">= </span><span class="s1">filter_files</span><span class="s3">(</span><span class="s5">''</span><span class="s3">, </span><span class="s5">'[.](o|a|so|dylib)'</span><span class="s3">, </span><span class="s1">sources</span><span class="s3">)</span>
+    <span class="s1">library_dirs</span><span class="s3">, </span><span class="s1">sources </span><span class="s3">= </span><span class="s1">filter_files</span><span class="s3">(</span><span class="s5">'-L'</span><span class="s3">, </span><span class="s5">''</span><span class="s3">, </span><span class="s1">sources</span><span class="s3">, </span><span class="s1">remove_prefix</span><span class="s3">=</span><span class="s6">1</span><span class="s3">)</span>
+    <span class="s1">libraries</span><span class="s3">, </span><span class="s1">sources </span><span class="s3">= </span><span class="s1">filter_files</span><span class="s3">(</span><span class="s5">'-l'</span><span class="s3">, </span><span class="s5">''</span><span class="s3">, </span><span class="s1">sources</span><span class="s3">, </span><span class="s1">remove_prefix</span><span class="s3">=</span><span class="s6">1</span><span class="s3">)</span>
+    <span class="s1">undef_macros</span><span class="s3">, </span><span class="s1">sources </span><span class="s3">= </span><span class="s1">filter_files</span><span class="s3">(</span><span class="s5">'-U'</span><span class="s3">, </span><span class="s5">''</span><span class="s3">, </span><span class="s1">sources</span><span class="s3">, </span><span class="s1">remove_prefix</span><span class="s3">=</span><span class="s6">1</span><span class="s3">)</span>
+    <span class="s1">define_macros</span><span class="s3">, </span><span class="s1">sources </span><span class="s3">= </span><span class="s1">filter_files</span><span class="s3">(</span><span class="s5">'-D'</span><span class="s3">, </span><span class="s5">''</span><span class="s3">, </span><span class="s1">sources</span><span class="s3">, </span><span class="s1">remove_prefix</span><span class="s3">=</span><span class="s6">1</span><span class="s3">)</span>
+    <span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">define_macros</span><span class="s3">)):</span>
+        <span class="s1">name_value </span><span class="s3">= </span><span class="s1">define_macros</span><span class="s3">[</span><span class="s1">i</span><span class="s3">].</span><span class="s1">split</span><span class="s3">(</span><span class="s5">'='</span><span class="s3">, </span><span class="s6">1</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">name_value</span><span class="s3">) == </span><span class="s6">1</span><span class="s3">:</span>
+            <span class="s1">name_value</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s2">None</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">name_value</span><span class="s3">) == </span><span class="s6">2</span><span class="s3">:</span>
+            <span class="s1">define_macros</span><span class="s3">[</span><span class="s1">i</span><span class="s3">] = </span><span class="s1">tuple</span><span class="s3">(</span><span class="s1">name_value</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">print</span><span class="s3">(</span><span class="s5">'Invalid use of -D:'</span><span class="s3">, </span><span class="s1">name_value</span><span class="s3">)</span>
+
+    <span class="s4"># Construct wrappers / signatures / things</span>
+    <span class="s2">if </span><span class="s1">backend_key </span><span class="s3">== </span><span class="s5">'meson'</span><span class="s3">:</span>
+        <span class="s2">if not </span><span class="s1">pyf_files</span><span class="s3">:</span>
+            <span class="s1">outmess</span><span class="s3">(</span><span class="s5">'Using meson backend</span><span class="s2">\n</span><span class="s5">Will pass --lower to f2py</span><span class="s2">\n</span><span class="s5">See https://numpy.org/doc/stable/f2py/buildtools/meson.html</span><span class="s2">\n</span><span class="s5">'</span><span class="s3">)</span>
+            <span class="s1">f2py_flags</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s5">'--lower'</span><span class="s3">)</span>
+            <span class="s1">run_main</span><span class="s3">(</span><span class="s5">f&quot; </span><span class="s2">{</span><span class="s5">' '</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">f2py_flags</span><span class="s3">)</span><span class="s2">} </span><span class="s5">-m </span><span class="s2">{</span><span class="s1">modulename</span><span class="s2">} {</span><span class="s5">' '</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">sources</span><span class="s3">)</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s3">.</span><span class="s1">split</span><span class="s3">())</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">run_main</span><span class="s3">(</span><span class="s5">f&quot; </span><span class="s2">{</span><span class="s5">' '</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">f2py_flags</span><span class="s3">)</span><span class="s2">} {</span><span class="s5">' '</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">pyf_files</span><span class="s3">)</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s3">.</span><span class="s1">split</span><span class="s3">())</span>
+
+    <span class="s4"># Order matters here, includes are needed for run_main above</span>
+    <span class="s1">include_dirs</span><span class="s3">, </span><span class="s1">_</span><span class="s3">, </span><span class="s1">sources </span><span class="s3">= </span><span class="s1">get_newer_options</span><span class="s3">(</span><span class="s1">sources</span><span class="s3">)</span>
+    <span class="s4"># Now use the builder</span>
+    <span class="s1">builder </span><span class="s3">= </span><span class="s1">build_backend</span><span class="s3">(</span>
+        <span class="s1">modulename</span><span class="s3">,</span>
+        <span class="s1">sources</span><span class="s3">,</span>
+        <span class="s1">extra_objects</span><span class="s3">,</span>
+        <span class="s1">build_dir</span><span class="s3">,</span>
+        <span class="s1">include_dirs</span><span class="s3">,</span>
+        <span class="s1">library_dirs</span><span class="s3">,</span>
+        <span class="s1">libraries</span><span class="s3">,</span>
+        <span class="s1">define_macros</span><span class="s3">,</span>
+        <span class="s1">undef_macros</span><span class="s3">,</span>
+        <span class="s1">f2py_flags</span><span class="s3">,</span>
+        <span class="s1">sysinfo_flags</span><span class="s3">,</span>
+        <span class="s1">fc_flags</span><span class="s3">,</span>
+        <span class="s1">flib_flags</span><span class="s3">,</span>
+        <span class="s1">setup_flags</span><span class="s3">,</span>
+        <span class="s1">remove_build_dir</span><span class="s3">,</span>
+        <span class="s3">{</span><span class="s5">&quot;dependencies&quot;</span><span class="s3">: </span><span class="s1">dependencies</span><span class="s3">},</span>
+    <span class="s3">)</span>
+
+    <span class="s1">builder</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">()</span>
+
+
+<span class="s2">def </span><span class="s1">validate_modulename</span><span class="s3">(</span><span class="s1">pyf_files</span><span class="s3">, </span><span class="s1">modulename</span><span class="s3">=</span><span class="s5">'untitled'</span><span class="s3">):</span>
+    <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">pyf_files</span><span class="s3">) &gt; </span><span class="s6">1</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s5">&quot;Only one .pyf file per call&quot;</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">pyf_files</span><span class="s3">:</span>
+        <span class="s1">pyff </span><span class="s3">= </span><span class="s1">pyf_files</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]</span>
+        <span class="s1">pyf_modname </span><span class="s3">= </span><span class="s1">auxfuncs</span><span class="s3">.</span><span class="s1">get_f2py_modulename</span><span class="s3">(</span><span class="s1">pyff</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">modulename </span><span class="s3">!= </span><span class="s1">pyf_modname</span><span class="s3">:</span>
+            <span class="s1">outmess</span><span class="s3">(</span>
+                <span class="s5">f&quot;Ignoring -m </span><span class="s2">{</span><span class="s1">modulename</span><span class="s2">}</span><span class="s5">.</span><span class="s2">\n</span><span class="s5">&quot;</span>
+                <span class="s5">f&quot;</span><span class="s2">{</span><span class="s1">pyff</span><span class="s2">} </span><span class="s5">defines </span><span class="s2">{</span><span class="s1">pyf_modname</span><span class="s2">} </span><span class="s5">to be the modulename.</span><span class="s2">\n</span><span class="s5">&quot;</span>
+            <span class="s3">)</span>
+            <span class="s1">modulename </span><span class="s3">= </span><span class="s1">pyf_modname</span>
+    <span class="s2">return </span><span class="s1">modulename</span>
+
+<span class="s2">def </span><span class="s1">main</span><span class="s3">():</span>
+    <span class="s2">if </span><span class="s5">'-c' </span><span class="s2">in </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:]:</span>
+        <span class="s1">run_compile</span><span class="s3">()</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">run_main</span><span class="s3">(</span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:])</span>
+</pre>
+</body>
+</html>

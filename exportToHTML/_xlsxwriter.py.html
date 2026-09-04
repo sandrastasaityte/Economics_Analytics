@@ -1,0 +1,311 @@
+<html>
+<head>
+<title>_xlsxwriter.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_xlsxwriter.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">json</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s2">,</span>
+    <span class="s1">Any</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">io</span><span class="s2">.</span><span class="s1">excel</span><span class="s2">.</span><span class="s1">_base </span><span class="s0">import </span><span class="s1">ExcelWriter</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">io</span><span class="s2">.</span><span class="s1">excel</span><span class="s2">.</span><span class="s1">_util </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">combine_kwargs</span><span class="s2">,</span>
+    <span class="s1">validate_freeze_panes</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s0">if </span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_typing </span><span class="s0">import </span><span class="s2">(</span>
+        <span class="s1">ExcelWriterIfSheetExists</span><span class="s2">,</span>
+        <span class="s1">FilePath</span><span class="s2">,</span>
+        <span class="s1">StorageOptions</span><span class="s2">,</span>
+        <span class="s1">WriteExcelBuffer</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">_XlsxStyler</span><span class="s2">:</span>
+    <span class="s3"># Map from openpyxl-oriented styles to flatter xlsxwriter representation</span>
+    <span class="s3"># Ordering necessary for both determinism and because some are keyed by</span>
+    <span class="s3"># prefixes of others.</span>
+    <span class="s1">STYLE_MAPPING</span><span class="s2">: </span><span class="s1">dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">list</span><span class="s2">[</span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, ...], </span><span class="s1">str</span><span class="s2">]]] = {</span>
+        <span class="s4">&quot;font&quot;</span><span class="s2">: [</span>
+            <span class="s2">((</span><span class="s4">&quot;name&quot;</span><span class="s2">,), </span><span class="s4">&quot;font_name&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;sz&quot;</span><span class="s2">,), </span><span class="s4">&quot;font_size&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;size&quot;</span><span class="s2">,), </span><span class="s4">&quot;font_size&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;color&quot;</span><span class="s2">, </span><span class="s4">&quot;rgb&quot;</span><span class="s2">), </span><span class="s4">&quot;font_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;color&quot;</span><span class="s2">,), </span><span class="s4">&quot;font_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;b&quot;</span><span class="s2">,), </span><span class="s4">&quot;bold&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;bold&quot;</span><span class="s2">,), </span><span class="s4">&quot;bold&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;i&quot;</span><span class="s2">,), </span><span class="s4">&quot;italic&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;italic&quot;</span><span class="s2">,), </span><span class="s4">&quot;italic&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;u&quot;</span><span class="s2">,), </span><span class="s4">&quot;underline&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;underline&quot;</span><span class="s2">,), </span><span class="s4">&quot;underline&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;strike&quot;</span><span class="s2">,), </span><span class="s4">&quot;font_strikeout&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;vertAlign&quot;</span><span class="s2">,), </span><span class="s4">&quot;font_script&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;vertalign&quot;</span><span class="s2">,), </span><span class="s4">&quot;font_script&quot;</span><span class="s2">),</span>
+        <span class="s2">],</span>
+        <span class="s4">&quot;number_format&quot;</span><span class="s2">: [((</span><span class="s4">&quot;format_code&quot;</span><span class="s2">,), </span><span class="s4">&quot;num_format&quot;</span><span class="s2">), ((), </span><span class="s4">&quot;num_format&quot;</span><span class="s2">)],</span>
+        <span class="s4">&quot;protection&quot;</span><span class="s2">: [((</span><span class="s4">&quot;locked&quot;</span><span class="s2">,), </span><span class="s4">&quot;locked&quot;</span><span class="s2">), ((</span><span class="s4">&quot;hidden&quot;</span><span class="s2">,), </span><span class="s4">&quot;hidden&quot;</span><span class="s2">)],</span>
+        <span class="s4">&quot;alignment&quot;</span><span class="s2">: [</span>
+            <span class="s2">((</span><span class="s4">&quot;horizontal&quot;</span><span class="s2">,), </span><span class="s4">&quot;align&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;vertical&quot;</span><span class="s2">,), </span><span class="s4">&quot;valign&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;text_rotation&quot;</span><span class="s2">,), </span><span class="s4">&quot;rotation&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;wrap_text&quot;</span><span class="s2">,), </span><span class="s4">&quot;text_wrap&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;indent&quot;</span><span class="s2">,), </span><span class="s4">&quot;indent&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;shrink_to_fit&quot;</span><span class="s2">,), </span><span class="s4">&quot;shrink&quot;</span><span class="s2">),</span>
+        <span class="s2">],</span>
+        <span class="s4">&quot;fill&quot;</span><span class="s2">: [</span>
+            <span class="s2">((</span><span class="s4">&quot;patternType&quot;</span><span class="s2">,), </span><span class="s4">&quot;pattern&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;patterntype&quot;</span><span class="s2">,), </span><span class="s4">&quot;pattern&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;fill_type&quot;</span><span class="s2">,), </span><span class="s4">&quot;pattern&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;start_color&quot;</span><span class="s2">, </span><span class="s4">&quot;rgb&quot;</span><span class="s2">), </span><span class="s4">&quot;fg_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;fgColor&quot;</span><span class="s2">, </span><span class="s4">&quot;rgb&quot;</span><span class="s2">), </span><span class="s4">&quot;fg_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;fgcolor&quot;</span><span class="s2">, </span><span class="s4">&quot;rgb&quot;</span><span class="s2">), </span><span class="s4">&quot;fg_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;start_color&quot;</span><span class="s2">,), </span><span class="s4">&quot;fg_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;fgColor&quot;</span><span class="s2">,), </span><span class="s4">&quot;fg_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;fgcolor&quot;</span><span class="s2">,), </span><span class="s4">&quot;fg_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;end_color&quot;</span><span class="s2">, </span><span class="s4">&quot;rgb&quot;</span><span class="s2">), </span><span class="s4">&quot;bg_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;bgColor&quot;</span><span class="s2">, </span><span class="s4">&quot;rgb&quot;</span><span class="s2">), </span><span class="s4">&quot;bg_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;bgcolor&quot;</span><span class="s2">, </span><span class="s4">&quot;rgb&quot;</span><span class="s2">), </span><span class="s4">&quot;bg_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;end_color&quot;</span><span class="s2">,), </span><span class="s4">&quot;bg_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;bgColor&quot;</span><span class="s2">,), </span><span class="s4">&quot;bg_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;bgcolor&quot;</span><span class="s2">,), </span><span class="s4">&quot;bg_color&quot;</span><span class="s2">),</span>
+        <span class="s2">],</span>
+        <span class="s4">&quot;border&quot;</span><span class="s2">: [</span>
+            <span class="s2">((</span><span class="s4">&quot;color&quot;</span><span class="s2">, </span><span class="s4">&quot;rgb&quot;</span><span class="s2">), </span><span class="s4">&quot;border_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;color&quot;</span><span class="s2">,), </span><span class="s4">&quot;border_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;style&quot;</span><span class="s2">,), </span><span class="s4">&quot;border&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;top&quot;</span><span class="s2">, </span><span class="s4">&quot;color&quot;</span><span class="s2">, </span><span class="s4">&quot;rgb&quot;</span><span class="s2">), </span><span class="s4">&quot;top_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;top&quot;</span><span class="s2">, </span><span class="s4">&quot;color&quot;</span><span class="s2">), </span><span class="s4">&quot;top_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;top&quot;</span><span class="s2">, </span><span class="s4">&quot;style&quot;</span><span class="s2">), </span><span class="s4">&quot;top&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;top&quot;</span><span class="s2">,), </span><span class="s4">&quot;top&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;right&quot;</span><span class="s2">, </span><span class="s4">&quot;color&quot;</span><span class="s2">, </span><span class="s4">&quot;rgb&quot;</span><span class="s2">), </span><span class="s4">&quot;right_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;right&quot;</span><span class="s2">, </span><span class="s4">&quot;color&quot;</span><span class="s2">), </span><span class="s4">&quot;right_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;right&quot;</span><span class="s2">, </span><span class="s4">&quot;style&quot;</span><span class="s2">), </span><span class="s4">&quot;right&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;right&quot;</span><span class="s2">,), </span><span class="s4">&quot;right&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;bottom&quot;</span><span class="s2">, </span><span class="s4">&quot;color&quot;</span><span class="s2">, </span><span class="s4">&quot;rgb&quot;</span><span class="s2">), </span><span class="s4">&quot;bottom_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;bottom&quot;</span><span class="s2">, </span><span class="s4">&quot;color&quot;</span><span class="s2">), </span><span class="s4">&quot;bottom_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;bottom&quot;</span><span class="s2">, </span><span class="s4">&quot;style&quot;</span><span class="s2">), </span><span class="s4">&quot;bottom&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;bottom&quot;</span><span class="s2">,), </span><span class="s4">&quot;bottom&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;left&quot;</span><span class="s2">, </span><span class="s4">&quot;color&quot;</span><span class="s2">, </span><span class="s4">&quot;rgb&quot;</span><span class="s2">), </span><span class="s4">&quot;left_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;left&quot;</span><span class="s2">, </span><span class="s4">&quot;color&quot;</span><span class="s2">), </span><span class="s4">&quot;left_color&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;left&quot;</span><span class="s2">, </span><span class="s4">&quot;style&quot;</span><span class="s2">), </span><span class="s4">&quot;left&quot;</span><span class="s2">),</span>
+            <span class="s2">((</span><span class="s4">&quot;left&quot;</span><span class="s2">,), </span><span class="s4">&quot;left&quot;</span><span class="s2">),</span>
+        <span class="s2">],</span>
+    <span class="s2">}</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">convert</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">style_dict</span><span class="s2">, </span><span class="s1">num_format_str</span><span class="s2">=</span><span class="s0">None</span><span class="s2">) </span><span class="s1">-&gt; dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">]:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        converts a style_dict to an xlsxwriter format dict 
+ 
+        Parameters 
+        ---------- 
+        style_dict : style dictionary to convert 
+        num_format_str : optional number format string 
+        &quot;&quot;&quot;</span>
+        <span class="s3"># Create an XlsxWriter format object.</span>
+        <span class="s1">props </span><span class="s2">= {}</span>
+
+        <span class="s0">if </span><span class="s1">num_format_str </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s1">props</span><span class="s2">[</span><span class="s4">&quot;num_format&quot;</span><span class="s2">] = </span><span class="s1">num_format_str</span>
+
+        <span class="s0">if </span><span class="s1">style_dict </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">props</span>
+
+        <span class="s0">if </span><span class="s4">&quot;borders&quot; </span><span class="s0">in </span><span class="s1">style_dict</span><span class="s2">:</span>
+            <span class="s1">style_dict </span><span class="s2">= </span><span class="s1">style_dict</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+            <span class="s1">style_dict</span><span class="s2">[</span><span class="s4">&quot;border&quot;</span><span class="s2">] = </span><span class="s1">style_dict</span><span class="s2">.</span><span class="s1">pop</span><span class="s2">(</span><span class="s4">&quot;borders&quot;</span><span class="s2">)</span>
+
+        <span class="s0">for </span><span class="s1">style_group_key</span><span class="s2">, </span><span class="s1">style_group </span><span class="s0">in </span><span class="s1">style_dict</span><span class="s2">.</span><span class="s1">items</span><span class="s2">():</span>
+            <span class="s0">for </span><span class="s1">src</span><span class="s2">, </span><span class="s1">dst </span><span class="s0">in </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">STYLE_MAPPING</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">style_group_key</span><span class="s2">, []):</span>
+                <span class="s3"># src is a sequence of keys into a nested dict</span>
+                <span class="s3"># dst is a flat key</span>
+                <span class="s0">if </span><span class="s1">dst </span><span class="s0">in </span><span class="s1">props</span><span class="s2">:</span>
+                    <span class="s0">continue</span>
+                <span class="s1">v </span><span class="s2">= </span><span class="s1">style_group</span>
+                <span class="s0">for </span><span class="s1">k </span><span class="s0">in </span><span class="s1">src</span><span class="s2">:</span>
+                    <span class="s0">try</span><span class="s2">:</span>
+                        <span class="s1">v </span><span class="s2">= </span><span class="s1">v</span><span class="s2">[</span><span class="s1">k</span><span class="s2">]</span>
+                    <span class="s0">except </span><span class="s2">(</span><span class="s1">KeyError</span><span class="s2">, </span><span class="s1">TypeError</span><span class="s2">):</span>
+                        <span class="s0">break</span>
+                <span class="s0">else</span><span class="s2">:</span>
+                    <span class="s1">props</span><span class="s2">[</span><span class="s1">dst</span><span class="s2">] = </span><span class="s1">v</span>
+
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">props</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s4">&quot;pattern&quot;</span><span class="s2">), </span><span class="s1">str</span><span class="s2">):</span>
+            <span class="s3"># TODO: support other fill patterns</span>
+            <span class="s1">props</span><span class="s2">[</span><span class="s4">&quot;pattern&quot;</span><span class="s2">] = </span><span class="s6">0 </span><span class="s0">if </span><span class="s1">props</span><span class="s2">[</span><span class="s4">&quot;pattern&quot;</span><span class="s2">] == </span><span class="s4">&quot;none&quot; </span><span class="s0">else </span><span class="s6">1</span>
+
+        <span class="s0">for </span><span class="s1">k </span><span class="s0">in </span><span class="s2">[</span><span class="s4">&quot;border&quot;</span><span class="s2">, </span><span class="s4">&quot;top&quot;</span><span class="s2">, </span><span class="s4">&quot;right&quot;</span><span class="s2">, </span><span class="s4">&quot;bottom&quot;</span><span class="s2">, </span><span class="s4">&quot;left&quot;</span><span class="s2">]:</span>
+            <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">props</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">k</span><span class="s2">), </span><span class="s1">str</span><span class="s2">):</span>
+                <span class="s0">try</span><span class="s2">:</span>
+                    <span class="s1">props</span><span class="s2">[</span><span class="s1">k</span><span class="s2">] = [</span>
+                        <span class="s4">&quot;none&quot;</span><span class="s2">,</span>
+                        <span class="s4">&quot;thin&quot;</span><span class="s2">,</span>
+                        <span class="s4">&quot;medium&quot;</span><span class="s2">,</span>
+                        <span class="s4">&quot;dashed&quot;</span><span class="s2">,</span>
+                        <span class="s4">&quot;dotted&quot;</span><span class="s2">,</span>
+                        <span class="s4">&quot;thick&quot;</span><span class="s2">,</span>
+                        <span class="s4">&quot;double&quot;</span><span class="s2">,</span>
+                        <span class="s4">&quot;hair&quot;</span><span class="s2">,</span>
+                        <span class="s4">&quot;mediumDashed&quot;</span><span class="s2">,</span>
+                        <span class="s4">&quot;dashDot&quot;</span><span class="s2">,</span>
+                        <span class="s4">&quot;mediumDashDot&quot;</span><span class="s2">,</span>
+                        <span class="s4">&quot;dashDotDot&quot;</span><span class="s2">,</span>
+                        <span class="s4">&quot;mediumDashDotDot&quot;</span><span class="s2">,</span>
+                        <span class="s4">&quot;slantDashDot&quot;</span><span class="s2">,</span>
+                    <span class="s2">].</span><span class="s1">index</span><span class="s2">(</span><span class="s1">props</span><span class="s2">[</span><span class="s1">k</span><span class="s2">])</span>
+                <span class="s0">except </span><span class="s1">ValueError</span><span class="s2">:</span>
+                    <span class="s1">props</span><span class="s2">[</span><span class="s1">k</span><span class="s2">] = </span><span class="s6">2</span>
+
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">props</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s4">&quot;font_script&quot;</span><span class="s2">), </span><span class="s1">str</span><span class="s2">):</span>
+            <span class="s1">props</span><span class="s2">[</span><span class="s4">&quot;font_script&quot;</span><span class="s2">] = [</span><span class="s4">&quot;baseline&quot;</span><span class="s2">, </span><span class="s4">&quot;superscript&quot;</span><span class="s2">, </span><span class="s4">&quot;subscript&quot;</span><span class="s2">].</span><span class="s1">index</span><span class="s2">(</span>
+                <span class="s1">props</span><span class="s2">[</span><span class="s4">&quot;font_script&quot;</span><span class="s2">]</span>
+            <span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">props</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s4">&quot;underline&quot;</span><span class="s2">), </span><span class="s1">str</span><span class="s2">):</span>
+            <span class="s1">props</span><span class="s2">[</span><span class="s4">&quot;underline&quot;</span><span class="s2">] = {</span>
+                <span class="s4">&quot;none&quot;</span><span class="s2">: </span><span class="s6">0</span><span class="s2">,</span>
+                <span class="s4">&quot;single&quot;</span><span class="s2">: </span><span class="s6">1</span><span class="s2">,</span>
+                <span class="s4">&quot;double&quot;</span><span class="s2">: </span><span class="s6">2</span><span class="s2">,</span>
+                <span class="s4">&quot;singleAccounting&quot;</span><span class="s2">: </span><span class="s6">33</span><span class="s2">,</span>
+                <span class="s4">&quot;doubleAccounting&quot;</span><span class="s2">: </span><span class="s6">34</span><span class="s2">,</span>
+            <span class="s2">}[</span><span class="s1">props</span><span class="s2">[</span><span class="s4">&quot;underline&quot;</span><span class="s2">]]</span>
+
+        <span class="s3"># GH 30107 - xlsxwriter uses different name</span>
+        <span class="s0">if </span><span class="s1">props</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s4">&quot;valign&quot;</span><span class="s2">) == </span><span class="s4">&quot;center&quot;</span><span class="s2">:</span>
+            <span class="s1">props</span><span class="s2">[</span><span class="s4">&quot;valign&quot;</span><span class="s2">] = </span><span class="s4">&quot;vcenter&quot;</span>
+
+        <span class="s0">return </span><span class="s1">props</span>
+
+
+<span class="s0">class </span><span class="s1">XlsxWriter</span><span class="s2">(</span><span class="s1">ExcelWriter</span><span class="s2">):</span>
+    <span class="s1">_engine </span><span class="s2">= </span><span class="s4">&quot;xlsxwriter&quot;</span>
+    <span class="s1">_supported_extensions </span><span class="s2">= (</span><span class="s4">&quot;.xlsx&quot;</span><span class="s2">,)</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(  </span><span class="s3"># pyright: ignore[reportInconsistentConstructor]</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">path</span><span class="s2">: </span><span class="s1">FilePath </span><span class="s2">| </span><span class="s1">WriteExcelBuffer </span><span class="s2">| </span><span class="s1">ExcelWriter</span><span class="s2">,</span>
+        <span class="s1">engine</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">date_format</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">datetime_format</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">mode</span><span class="s2">: </span><span class="s1">str </span><span class="s2">= </span><span class="s4">&quot;w&quot;</span><span class="s2">,</span>
+        <span class="s1">storage_options</span><span class="s2">: </span><span class="s1">StorageOptions </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">if_sheet_exists</span><span class="s2">: </span><span class="s1">ExcelWriterIfSheetExists </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">engine_kwargs</span><span class="s2">: </span><span class="s1">dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s2">**</span><span class="s1">kwargs</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s3"># Use the xlsxwriter module as the Excel writer.</span>
+        <span class="s0">from </span><span class="s1">xlsxwriter </span><span class="s0">import </span><span class="s1">Workbook</span>
+
+        <span class="s1">engine_kwargs </span><span class="s2">= </span><span class="s1">combine_kwargs</span><span class="s2">(</span><span class="s1">engine_kwargs</span><span class="s2">, </span><span class="s1">kwargs</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">mode </span><span class="s2">== </span><span class="s4">&quot;a&quot;</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s4">&quot;Append mode is not supported with xlsxwriter!&quot;</span><span class="s2">)</span>
+
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span>
+            <span class="s1">path</span><span class="s2">,</span>
+            <span class="s1">engine</span><span class="s2">=</span><span class="s1">engine</span><span class="s2">,</span>
+            <span class="s1">date_format</span><span class="s2">=</span><span class="s1">date_format</span><span class="s2">,</span>
+            <span class="s1">datetime_format</span><span class="s2">=</span><span class="s1">datetime_format</span><span class="s2">,</span>
+            <span class="s1">mode</span><span class="s2">=</span><span class="s1">mode</span><span class="s2">,</span>
+            <span class="s1">storage_options</span><span class="s2">=</span><span class="s1">storage_options</span><span class="s2">,</span>
+            <span class="s1">if_sheet_exists</span><span class="s2">=</span><span class="s1">if_sheet_exists</span><span class="s2">,</span>
+            <span class="s1">engine_kwargs</span><span class="s2">=</span><span class="s1">engine_kwargs</span><span class="s2">,</span>
+        <span class="s2">)</span>
+
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_book </span><span class="s2">= </span><span class="s1">Workbook</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_handles</span><span class="s2">.</span><span class="s1">handle</span><span class="s2">, **</span><span class="s1">engine_kwargs</span><span class="s2">)</span>
+        <span class="s0">except </span><span class="s1">TypeError</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_handles</span><span class="s2">.</span><span class="s1">handle</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+            <span class="s0">raise</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">book</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Book instance of class xlsxwriter.Workbook. 
+ 
+        This attribute can be used to access engine-specific features. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_book</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">sheets</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">]:</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">book</span><span class="s2">.</span><span class="s1">sheetnames</span>
+        <span class="s0">return </span><span class="s1">result</span>
+
+    <span class="s0">def </span><span class="s1">_save</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Save workbook to disk. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">book</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">_write_cells</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">cells</span><span class="s2">,</span>
+        <span class="s1">sheet_name</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">startrow</span><span class="s2">: </span><span class="s1">int </span><span class="s2">= </span><span class="s6">0</span><span class="s2">,</span>
+        <span class="s1">startcol</span><span class="s2">: </span><span class="s1">int </span><span class="s2">= </span><span class="s6">0</span><span class="s2">,</span>
+        <span class="s1">freeze_panes</span><span class="s2">: </span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">int</span><span class="s2">, </span><span class="s1">int</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">autofilter_range</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s3"># Write the frame cells using xlsxwriter.</span>
+        <span class="s1">sheet_name </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_sheet_name</span><span class="s2">(</span><span class="s1">sheet_name</span><span class="s2">)</span>
+
+        <span class="s1">wks </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">book</span><span class="s2">.</span><span class="s1">get_worksheet_by_name</span><span class="s2">(</span><span class="s1">sheet_name</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">wks </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">wks </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">book</span><span class="s2">.</span><span class="s1">add_worksheet</span><span class="s2">(</span><span class="s1">sheet_name</span><span class="s2">)</span>
+
+        <span class="s1">style_dict </span><span class="s2">= {</span><span class="s4">&quot;null&quot;</span><span class="s2">: </span><span class="s0">None</span><span class="s2">}</span>
+
+        <span class="s0">if </span><span class="s1">validate_freeze_panes</span><span class="s2">(</span><span class="s1">freeze_panes</span><span class="s2">):</span>
+            <span class="s1">wks</span><span class="s2">.</span><span class="s1">freeze_panes</span><span class="s2">(*(</span><span class="s1">freeze_panes</span><span class="s2">))</span>
+
+        <span class="s0">for </span><span class="s1">cell </span><span class="s0">in </span><span class="s1">cells</span><span class="s2">:</span>
+            <span class="s1">val</span><span class="s2">, </span><span class="s1">fmt </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_value_with_fmt</span><span class="s2">(</span><span class="s1">cell</span><span class="s2">.</span><span class="s1">val</span><span class="s2">)</span>
+
+            <span class="s1">stylekey </span><span class="s2">= </span><span class="s1">json</span><span class="s2">.</span><span class="s1">dumps</span><span class="s2">(</span><span class="s1">cell</span><span class="s2">.</span><span class="s1">style</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">fmt</span><span class="s2">:</span>
+                <span class="s1">stylekey </span><span class="s2">+= </span><span class="s1">fmt</span>
+
+            <span class="s0">if </span><span class="s1">stylekey </span><span class="s0">in </span><span class="s1">style_dict</span><span class="s2">:</span>
+                <span class="s1">style </span><span class="s2">= </span><span class="s1">style_dict</span><span class="s2">[</span><span class="s1">stylekey</span><span class="s2">]</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">style </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">book</span><span class="s2">.</span><span class="s1">add_format</span><span class="s2">(</span><span class="s1">_XlsxStyler</span><span class="s2">.</span><span class="s1">convert</span><span class="s2">(</span><span class="s1">cell</span><span class="s2">.</span><span class="s1">style</span><span class="s2">, </span><span class="s1">fmt</span><span class="s2">))</span>
+                <span class="s1">style_dict</span><span class="s2">[</span><span class="s1">stylekey</span><span class="s2">] = </span><span class="s1">style</span>
+
+            <span class="s0">if </span><span class="s1">cell</span><span class="s2">.</span><span class="s1">mergestart </span><span class="s0">is not None and </span><span class="s1">cell</span><span class="s2">.</span><span class="s1">mergeend </span><span class="s0">is not None</span><span class="s2">:</span>
+                <span class="s1">wks</span><span class="s2">.</span><span class="s1">merge_range</span><span class="s2">(</span>
+                    <span class="s1">startrow </span><span class="s2">+ </span><span class="s1">cell</span><span class="s2">.</span><span class="s1">row</span><span class="s2">,</span>
+                    <span class="s1">startcol </span><span class="s2">+ </span><span class="s1">cell</span><span class="s2">.</span><span class="s1">col</span><span class="s2">,</span>
+                    <span class="s1">startrow </span><span class="s2">+ </span><span class="s1">cell</span><span class="s2">.</span><span class="s1">mergestart</span><span class="s2">,</span>
+                    <span class="s1">startcol </span><span class="s2">+ </span><span class="s1">cell</span><span class="s2">.</span><span class="s1">mergeend</span><span class="s2">,</span>
+                    <span class="s1">val</span><span class="s2">,</span>
+                    <span class="s1">style</span><span class="s2">,</span>
+                <span class="s2">)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">wks</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s1">startrow </span><span class="s2">+ </span><span class="s1">cell</span><span class="s2">.</span><span class="s1">row</span><span class="s2">, </span><span class="s1">startcol </span><span class="s2">+ </span><span class="s1">cell</span><span class="s2">.</span><span class="s1">col</span><span class="s2">, </span><span class="s1">val</span><span class="s2">, </span><span class="s1">style</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">autofilter_range</span><span class="s2">:</span>
+            <span class="s1">wks</span><span class="s2">.</span><span class="s1">autofilter</span><span class="s2">(</span><span class="s1">autofilter_range</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

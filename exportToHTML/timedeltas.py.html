@@ -1,0 +1,440 @@
+<html>
+<head>
+<title>timedeltas.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+timedeltas.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;implement the TimedeltaIndex&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s3">,</span>
+    <span class="s1">cast</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">index </span><span class="s2">as </span><span class="s1">libindex</span><span class="s3">,</span>
+    <span class="s1">lib</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs</span><span class="s3">.</span><span class="s1">tslibs </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">Resolution</span><span class="s3">,</span>
+    <span class="s1">Timedelta</span><span class="s3">,</span>
+    <span class="s1">to_offset</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs</span><span class="s3">.</span><span class="s1">tslibs</span><span class="s3">.</span><span class="s1">dtypes </span><span class="s2">import </span><span class="s1">abbrev_to_npy_unit</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">_decorators </span><span class="s2">import </span><span class="s1">set_module</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">common </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">is_scalar</span><span class="s3">,</span>
+    <span class="s1">pandas_dtype</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">dtypes </span><span class="s2">import </span><span class="s1">ArrowDtype</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">generic </span><span class="s2">import </span><span class="s1">ABCSeries</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">arrays</span><span class="s3">.</span><span class="s1">timedeltas </span><span class="s2">import </span><span class="s1">TimedeltaArray</span>
+<span class="s2">import </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">common </span><span class="s2">as </span><span class="s1">com</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">indexes</span><span class="s3">.</span><span class="s1">base </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">Index</span><span class="s3">,</span>
+    <span class="s1">maybe_extract_name</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">indexes</span><span class="s3">.</span><span class="s1">datetimelike </span><span class="s2">import </span><span class="s1">DatetimeTimedeltaMixin</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">indexes</span><span class="s3">.</span><span class="s1">extension </span><span class="s2">import </span><span class="s1">inherit_names</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs </span><span class="s2">import </span><span class="s1">NaTType</span>
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs</span><span class="s3">.</span><span class="s1">tslibs </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">Day</span><span class="s3">,</span>
+        <span class="s1">Tick</span><span class="s3">,</span>
+    <span class="s3">)</span>
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_typing </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">DtypeObj</span><span class="s3">,</span>
+        <span class="s1">TimeUnit</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">inherit_names</span><span class="s3">(</span>
+    <span class="s3">[</span>
+        <span class="s4">&quot;__neg__&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;__pos__&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;__abs__&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;total_seconds&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;round&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;floor&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;ceil&quot;</span><span class="s3">,</span>
+        <span class="s3">*</span><span class="s1">TimedeltaArray</span><span class="s3">.</span><span class="s1">_field_ops</span><span class="s3">,</span>
+    <span class="s3">],</span>
+    <span class="s1">TimedeltaArray</span><span class="s3">,</span>
+    <span class="s1">wrap</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s3">@</span><span class="s1">inherit_names</span><span class="s3">(</span>
+    <span class="s3">[</span>
+        <span class="s4">&quot;components&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;to_pytimedelta&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;sum&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;std&quot;</span><span class="s3">,</span>
+        <span class="s4">&quot;median&quot;</span><span class="s3">,</span>
+    <span class="s3">],</span>
+    <span class="s1">TimedeltaArray</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;pandas&quot;</span><span class="s3">)</span>
+<span class="s2">class </span><span class="s1">TimedeltaIndex</span><span class="s3">(</span><span class="s1">DatetimeTimedeltaMixin</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Immutable Index of timedelta64 data. 
+ 
+    Represented internally as int64, and scalars returned Timedelta objects. 
+ 
+    Parameters 
+    ---------- 
+    data : array-like (1-dimensional), optional 
+        Optional timedelta-like data to construct index with. 
+    freq : str or pandas offset object, optional 
+        One of pandas date offset strings or corresponding objects. The string 
+        ``'infer'`` can be passed in order to set the frequency of the index as 
+        the inferred frequency upon creation. 
+    dtype : numpy.dtype or str, default None 
+        Valid ``numpy`` dtypes are ``timedelta64[ns]``, ``timedelta64[us]``, 
+        ``timedelta64[ms]``, and ``timedelta64[s]``. 
+    copy : bool, default None 
+        Whether to copy input data, only relevant for array, Series, and Index 
+        inputs (for other input, e.g. a list, a new array is created anyway). 
+        Defaults to True for array input and False for Index/Series. 
+        Set to False to avoid copying array input at your own risk (if you 
+        know the input data won't be modified elsewhere). 
+        Set to True to force copying Series/Index input up front. 
+    name : object 
+        Name to be stored in the index. 
+ 
+    Attributes 
+    ---------- 
+    days 
+    seconds 
+    microseconds 
+    nanoseconds 
+    components 
+    inferred_freq 
+ 
+    Methods 
+    ------- 
+    to_pytimedelta 
+    to_series 
+    round 
+    floor 
+    ceil 
+    to_frame 
+    mean 
+ 
+    See Also 
+    -------- 
+    Index : The base pandas Index type. 
+    Timedelta : Represents a duration between two dates or times. 
+    DatetimeIndex : Index of datetime64 data. 
+    PeriodIndex : Index of Period data. 
+    timedelta_range : Create a fixed-frequency TimedeltaIndex. 
+ 
+    Notes 
+    ----- 
+    To learn more about the frequency strings, please see 
+    :ref:`this link&lt;timeseries.offset_aliases&gt;`. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; pd.TimedeltaIndex([&quot;0 days&quot;, &quot;1 days&quot;, &quot;2 days&quot;, &quot;3 days&quot;, &quot;4 days&quot;]) 
+    TimedeltaIndex(['0 days', '1 days', '2 days', '3 days', '4 days'], 
+                   dtype='timedelta64[us]', freq=None) 
+ 
+    We can also let pandas infer the frequency when possible. 
+ 
+    &gt;&gt;&gt; pd.TimedeltaIndex(np.arange(5) * 24 * 3600 * 1e9, freq=&quot;infer&quot;) 
+    TimedeltaIndex(['0 days', '1 days', '2 days', '3 days', '4 days'], 
+                   dtype='timedelta64[ns]', freq='D') 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">_typ </span><span class="s3">= </span><span class="s4">&quot;timedeltaindex&quot;</span>
+
+    <span class="s1">_data_cls </span><span class="s3">= </span><span class="s1">TimedeltaArray</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">_engine_type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; type</span><span class="s3">[</span><span class="s1">libindex</span><span class="s3">.</span><span class="s1">TimedeltaEngine</span><span class="s3">]:</span>
+        <span class="s2">return </span><span class="s1">libindex</span><span class="s3">.</span><span class="s1">TimedeltaEngine</span>
+
+    <span class="s1">_data</span><span class="s3">: </span><span class="s1">TimedeltaArray</span>
+
+    <span class="s5"># Use base class method instead of DatetimeTimedeltaMixin._get_string_slice</span>
+    <span class="s1">_get_string_slice </span><span class="s3">= </span><span class="s1">Index</span><span class="s3">.</span><span class="s1">_get_string_slice</span>
+
+    <span class="s5"># error: Signature of &quot;_resolution_obj&quot; incompatible with supertype</span>
+    <span class="s5"># &quot;DatetimeIndexOpsMixin&quot;</span>
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">_resolution_obj</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; Resolution </span><span class="s3">| </span><span class="s2">None</span><span class="s3">:  </span><span class="s5"># type: ignore[override]</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_resolution_obj</span>
+
+    <span class="s5"># -------------------------------------------------------------------</span>
+    <span class="s5"># Constructors</span>
+
+    <span class="s2">def </span><span class="s1">__new__</span><span class="s3">(</span>
+        <span class="s1">cls</span><span class="s3">,</span>
+        <span class="s1">data</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">freq</span><span class="s3">=</span><span class="s1">lib</span><span class="s3">.</span><span class="s1">no_default</span><span class="s3">,</span>
+        <span class="s1">dtype</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">copy</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">name</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">):</span>
+        <span class="s1">name </span><span class="s3">= </span><span class="s1">maybe_extract_name</span><span class="s3">(</span><span class="s1">name</span><span class="s3">, </span><span class="s1">data</span><span class="s3">, </span><span class="s1">cls</span><span class="s3">)</span>
+
+        <span class="s5"># GH#63388</span>
+        <span class="s1">data</span><span class="s3">, </span><span class="s1">copy </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">_maybe_copy_array_input</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">is_scalar</span><span class="s3">(</span><span class="s1">data</span><span class="s3">):</span>
+            <span class="s1">cls</span><span class="s3">.</span><span class="s1">_raise_scalar_data_error</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">dtype </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">dtype </span><span class="s3">= </span><span class="s1">pandas_dtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s3">(</span>
+            <span class="s1">isinstance</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">TimedeltaArray</span><span class="s3">)</span>
+            <span class="s2">and </span><span class="s1">freq </span><span class="s2">is </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">no_default</span>
+            <span class="s2">and </span><span class="s3">(</span><span class="s1">dtype </span><span class="s2">is None or </span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">data</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">copy</span><span class="s3">:</span>
+                <span class="s1">data </span><span class="s3">= </span><span class="s1">data</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+            <span class="s2">return </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">_simple_new</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s1">name</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s3">(</span>
+            <span class="s1">isinstance</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">TimedeltaIndex</span><span class="s3">)</span>
+            <span class="s2">and </span><span class="s1">freq </span><span class="s2">is </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">no_default</span>
+            <span class="s2">and </span><span class="s1">name </span><span class="s2">is None</span>
+            <span class="s2">and </span><span class="s3">(</span><span class="s1">dtype </span><span class="s2">is None or </span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">data</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">copy</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">data</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">data</span><span class="s3">.</span><span class="s1">_view</span><span class="s3">()</span>
+
+        <span class="s5"># - Cases checked above all return/raise before reaching here - #</span>
+
+        <span class="s1">tdarr </span><span class="s3">= </span><span class="s1">TimedeltaArray</span><span class="s3">.</span><span class="s1">_from_sequence_not_strict</span><span class="s3">(</span>
+            <span class="s1">data</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s1">freq</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s1">copy</span>
+        <span class="s3">)</span>
+        <span class="s1">refs </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">if not </span><span class="s1">copy </span><span class="s2">and </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, (</span><span class="s1">ABCSeries</span><span class="s3">, </span><span class="s1">Index</span><span class="s3">)):</span>
+            <span class="s1">refs </span><span class="s3">= </span><span class="s1">data</span><span class="s3">.</span><span class="s1">_references</span>
+
+        <span class="s2">return </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">_simple_new</span><span class="s3">(</span><span class="s1">tdarr</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s1">name</span><span class="s3">, </span><span class="s1">refs</span><span class="s3">=</span><span class="s1">refs</span><span class="s3">)</span>
+
+    <span class="s5"># -------------------------------------------------------------------</span>
+
+    <span class="s2">def </span><span class="s1">_is_comparable_dtype</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">: </span><span class="s1">DtypeObj</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Can we compare values of the given dtype to our own? 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">ArrowDtype</span><span class="s3">):</span>
+            <span class="s2">return </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">== </span><span class="s4">&quot;m&quot;</span>
+        <span class="s2">return </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">is_np_dtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s4">&quot;m&quot;</span><span class="s3">)  </span><span class="s5"># aka self._data._is_recognized_dtype</span>
+
+    <span class="s5"># -------------------------------------------------------------------</span>
+    <span class="s5"># Indexing Methods</span>
+
+    <span class="s2">def </span><span class="s1">get_loc</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">key</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Get integer location for requested label 
+ 
+        Returns 
+        ------- 
+        loc : int, slice, or ndarray[int] 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_check_indexing_error</span><span class="s3">(</span><span class="s1">key</span><span class="s3">)</span>
+
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">key </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_validate_scalar</span><span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s1">unbox</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s1">TypeError </span><span class="s2">as </span><span class="s1">err</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">KeyError</span><span class="s3">(</span><span class="s1">key</span><span class="s3">) </span><span class="s2">from </span><span class="s1">err</span>
+
+        <span class="s2">return </span><span class="s1">Index</span><span class="s3">.</span><span class="s1">get_loc</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">key</span><span class="s3">)</span>
+
+    <span class="s5"># error: Return type &quot;tuple[Timedelta | NaTType, Resolution]&quot; of</span>
+    <span class="s5"># &quot;_parse_with_reso&quot; incompatible with return type</span>
+    <span class="s5"># &quot;tuple[datetime, Resolution]&quot; in supertype</span>
+    <span class="s5"># &quot;pandas.core.indexes.datetimelike.DatetimeIndexOpsMixin&quot;</span>
+    <span class="s2">def </span><span class="s1">_parse_with_reso</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">label</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">Timedelta </span><span class="s3">| </span><span class="s1">NaTType</span><span class="s3">, </span><span class="s1">Resolution</span><span class="s3">]:  </span><span class="s5"># type: ignore[override]</span>
+        <span class="s1">parsed </span><span class="s3">= </span><span class="s1">Timedelta</span><span class="s3">(</span><span class="s1">label</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">parsed</span><span class="s3">, </span><span class="s1">Timedelta</span><span class="s3">):</span>
+            <span class="s1">reso </span><span class="s3">= </span><span class="s1">Resolution</span><span class="s3">.</span><span class="s1">get_reso_from_freqstr</span><span class="s3">(</span><span class="s1">parsed</span><span class="s3">.</span><span class="s1">unit</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s5"># i.e. pd.NaT</span>
+            <span class="s1">reso </span><span class="s3">= </span><span class="s1">Resolution</span><span class="s3">.</span><span class="s1">get_reso_from_freqstr</span><span class="s3">(</span><span class="s4">&quot;s&quot;</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">parsed</span><span class="s3">, </span><span class="s1">reso</span>
+
+    <span class="s2">def </span><span class="s1">_parsed_string_to_bounds</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">reso</span><span class="s3">: </span><span class="s1">Resolution</span><span class="s3">, </span><span class="s1">parsed</span><span class="s3">: </span><span class="s1">Timedelta</span><span class="s3">):</span>
+        <span class="s5"># reso is unused, included to match signature of DTI/PI</span>
+        <span class="s1">lbound </span><span class="s3">= </span><span class="s1">parsed</span><span class="s3">.</span><span class="s1">round</span><span class="s3">(</span><span class="s1">parsed</span><span class="s3">.</span><span class="s1">resolution_string</span><span class="s3">)</span>
+        <span class="s1">rbound </span><span class="s3">= (</span>
+            <span class="s1">lbound</span>
+            <span class="s3">+ </span><span class="s1">to_offset</span><span class="s3">(</span><span class="s1">parsed</span><span class="s3">.</span><span class="s1">resolution_string</span><span class="s3">)</span>
+            <span class="s3">- </span><span class="s1">Timedelta</span><span class="s3">(</span><span class="s6">1</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">unit</span><span class="s3">).</span><span class="s1">as_unit</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">unit</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">lbound</span><span class="s3">, </span><span class="s1">rbound</span>
+
+    <span class="s5"># -------------------------------------------------------------------</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">inferred_type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s4">&quot;timedelta64&quot;</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;pandas&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">timedelta_range</span><span class="s3">(</span>
+    <span class="s1">start</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">end</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">periods</span><span class="s3">: </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">freq</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">name</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">closed</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">*,</span>
+    <span class="s1">unit</span><span class="s3">: </span><span class="s1">TimeUnit </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; TimedeltaIndex</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Return a fixed frequency TimedeltaIndex with day as the default. 
+ 
+    Parameters 
+    ---------- 
+    start : str or timedelta-like, default None 
+        Left bound for generating timedeltas. 
+    end : str or timedelta-like, default None 
+        Right bound for generating timedeltas. 
+    periods : int, default None 
+        Number of periods to generate. 
+    freq : str, Timedelta, datetime.timedelta, or DateOffset, default 'D' 
+        Frequency strings can have multiples, e.g. '5h'. 
+    name : Hashable, default None 
+        Name of the resulting TimedeltaIndex. 
+    closed : str, default None 
+        Make the interval closed with respect to the given frequency to 
+        the 'left', 'right', or both sides (None). 
+    unit : {'s', 'ms', 'us', 'ns', None}, default None 
+        Specify the desired resolution of the result. 
+        If not specified, this is inferred from the 'start', 'end', and 'freq' 
+        using the same inference as :class:`Timedelta` taking the highest 
+        resolution of the three that are provided. 
+ 
+        .. versionadded:: 2.0.0 
+ 
+    Returns 
+    ------- 
+    TimedeltaIndex 
+        Fixed frequency, with day as the default. 
+ 
+    See Also 
+    -------- 
+    date_range : Return a fixed frequency DatetimeIndex. 
+    period_range : Return a fixed frequency PeriodIndex. 
+ 
+    Notes 
+    ----- 
+    Of the four parameters ``start``, ``end``, ``periods``, and ``freq``, 
+    a maximum of three can be specified at once. Of the three parameters 
+    ``start``, ``end``, and ``periods``, at least two must be specified. 
+    If ``freq`` is omitted, the resulting ``DatetimeIndex`` will have 
+    ``periods`` linearly spaced elements between ``start`` and ``end`` 
+    (closed on both sides). 
+ 
+    To learn more about the frequency strings, please see 
+    :ref:`this link&lt;timeseries.offset_aliases&gt;`. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; pd.timedelta_range(start=&quot;1 day&quot;, periods=4) 
+    TimedeltaIndex(['1 days', '2 days', '3 days', '4 days'], 
+                   dtype='timedelta64[us]', freq='D') 
+ 
+    The ``closed`` parameter specifies which endpoint is included.  The default 
+    behavior is to include both endpoints. 
+ 
+    &gt;&gt;&gt; pd.timedelta_range(start=&quot;1 day&quot;, periods=4, closed=&quot;right&quot;) 
+    TimedeltaIndex(['2 days', '3 days', '4 days'], 
+                   dtype='timedelta64[us]', freq='D') 
+ 
+    The ``freq`` parameter specifies the frequency of the TimedeltaIndex. 
+    Only fixed frequencies can be passed, non-fixed frequencies such as 
+    'M' (month end) will raise. 
+ 
+    &gt;&gt;&gt; pd.timedelta_range(start=&quot;1 day&quot;, end=&quot;2 days&quot;, freq=&quot;6h&quot;) 
+    TimedeltaIndex(['1 days 00:00:00', '1 days 06:00:00', '1 days 12:00:00', 
+                    '1 days 18:00:00', '2 days 00:00:00'], 
+                   dtype='timedelta64[us]', freq='6h') 
+ 
+    Specify ``start``, ``end``, and ``periods``; the frequency is generated 
+    automatically (linearly spaced). 
+ 
+    &gt;&gt;&gt; pd.timedelta_range(start=&quot;1 day&quot;, end=&quot;5 days&quot;, periods=4) 
+    TimedeltaIndex(['1 days 00:00:00', '2 days 08:00:00', '3 days 16:00:00', 
+                    '5 days 00:00:00'], 
+                   dtype='timedelta64[us]', freq=None) 
+ 
+    **Specify a unit** 
+ 
+    &gt;&gt;&gt; pd.timedelta_range(&quot;1 Day&quot;, periods=3, freq=&quot;100000D&quot;, unit=&quot;s&quot;) 
+    TimedeltaIndex(['1 days', '100001 days', '200001 days'], 
+                   dtype='timedelta64[s]', freq='100000D') 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">freq </span><span class="s2">is None and </span><span class="s1">com</span><span class="s3">.</span><span class="s1">any_none</span><span class="s3">(</span><span class="s1">periods</span><span class="s3">, </span><span class="s1">start</span><span class="s3">, </span><span class="s1">end</span><span class="s3">):</span>
+        <span class="s1">freq </span><span class="s3">= </span><span class="s4">&quot;D&quot;</span>
+    <span class="s1">freq </span><span class="s3">= </span><span class="s1">to_offset</span><span class="s3">(</span><span class="s1">freq</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">com</span><span class="s3">.</span><span class="s1">count_not_none</span><span class="s3">(</span><span class="s1">start</span><span class="s3">, </span><span class="s1">end</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">) != </span><span class="s6">3</span><span class="s3">:</span>
+        <span class="s5"># This check needs to come before the `unit = start.unit` line below</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+            <span class="s4">&quot;Of the four parameters: start, end, periods, &quot;</span>
+            <span class="s4">&quot;and freq, exactly three must be specified&quot;</span>
+        <span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">unit </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s5"># Infer the unit based on the inputs</span>
+
+        <span class="s2">if </span><span class="s1">start </span><span class="s2">is not None and </span><span class="s1">end </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">start </span><span class="s3">= </span><span class="s1">Timedelta</span><span class="s3">(</span><span class="s1">start</span><span class="s3">)</span>
+            <span class="s1">end </span><span class="s3">= </span><span class="s1">Timedelta</span><span class="s3">(</span><span class="s1">end</span><span class="s3">)</span>
+            <span class="s1">start </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s1">Timedelta</span><span class="s3">, </span><span class="s1">start</span><span class="s3">)</span>
+            <span class="s1">end </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s1">Timedelta</span><span class="s3">, </span><span class="s1">end</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">abbrev_to_npy_unit</span><span class="s3">(</span><span class="s1">start</span><span class="s3">.</span><span class="s1">unit</span><span class="s3">) &gt; </span><span class="s1">abbrev_to_npy_unit</span><span class="s3">(</span><span class="s1">end</span><span class="s3">.</span><span class="s1">unit</span><span class="s3">):</span>
+                <span class="s1">unit </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s4">&quot;TimeUnit&quot;</span><span class="s3">, </span><span class="s1">start</span><span class="s3">.</span><span class="s1">unit</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">unit </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s4">&quot;TimeUnit&quot;</span><span class="s3">, </span><span class="s1">end</span><span class="s3">.</span><span class="s1">unit</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">start </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">start </span><span class="s3">= </span><span class="s1">Timedelta</span><span class="s3">(</span><span class="s1">start</span><span class="s3">)</span>
+            <span class="s1">start </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s1">Timedelta</span><span class="s3">, </span><span class="s1">start</span><span class="s3">)</span>
+            <span class="s1">unit </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s4">&quot;TimeUnit&quot;</span><span class="s3">, </span><span class="s1">start</span><span class="s3">.</span><span class="s1">unit</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">end </span><span class="s3">= </span><span class="s1">Timedelta</span><span class="s3">(</span><span class="s1">end</span><span class="s3">)</span>
+            <span class="s1">end </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s1">Timedelta</span><span class="s3">, </span><span class="s1">end</span><span class="s3">)</span>
+            <span class="s1">unit </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s4">&quot;TimeUnit&quot;</span><span class="s3">, </span><span class="s1">end</span><span class="s3">.</span><span class="s1">unit</span><span class="s3">)</span>
+
+        <span class="s5"># Last we need to watch out for cases where the 'freq' implies a higher</span>
+        <span class="s5">#  unit than either start or end</span>
+        <span class="s2">if </span><span class="s1">freq </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">freq </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s4">&quot;Tick | Day&quot;</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">)</span>
+            <span class="s1">creso </span><span class="s3">= </span><span class="s1">abbrev_to_npy_unit</span><span class="s3">(</span><span class="s1">unit</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">freq</span><span class="s3">.</span><span class="s1">_creso </span><span class="s3">&gt; </span><span class="s1">creso</span><span class="s3">:  </span><span class="s5"># pyright: ignore[reportAttributeAccessIssue]</span>
+                <span class="s1">unit </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s4">&quot;TimeUnit&quot;</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">.</span><span class="s1">base</span><span class="s3">.</span><span class="s1">freqstr</span><span class="s3">)</span>
+
+    <span class="s1">tdarr </span><span class="s3">= </span><span class="s1">TimedeltaArray</span><span class="s3">.</span><span class="s1">_generate_range</span><span class="s3">(</span>
+        <span class="s1">start</span><span class="s3">, </span><span class="s1">end</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">, </span><span class="s1">closed</span><span class="s3">=</span><span class="s1">closed</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">=</span><span class="s1">unit</span>
+    <span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">TimedeltaIndex</span><span class="s3">.</span><span class="s1">_simple_new</span><span class="s3">(</span><span class="s1">tdarr</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s1">name</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

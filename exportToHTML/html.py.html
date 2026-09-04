@@ -1,0 +1,680 @@
+<html>
+<head>
+<title>html.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #2aacb8;}
+.s5 { color: #6aab73;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+html.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Module for formatting output data in HTML. 
+&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">from </span><span class="s1">textwrap </span><span class="s2">import </span><span class="s1">dedent</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s3">,</span>
+    <span class="s1">Any</span><span class="s3">,</span>
+    <span class="s1">Final</span><span class="s3">,</span>
+    <span class="s1">cast</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_config </span><span class="s2">import </span><span class="s1">get_option</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs </span><span class="s2">import </span><span class="s1">lib</span>
+
+<span class="s2">from </span><span class="s1">pandas </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">MultiIndex</span><span class="s3">,</span>
+    <span class="s1">option_context</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">common </span><span class="s2">import </span><span class="s1">is_url</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">formats</span><span class="s3">.</span><span class="s1">format </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">DataFrameFormatter</span><span class="s3">,</span>
+    <span class="s1">get_level_lengths</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">formats</span><span class="s3">.</span><span class="s1">printing </span><span class="s2">import </span><span class="s1">pprint_thing</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">collections</span><span class="s3">.</span><span class="s1">abc </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">Hashable</span><span class="s3">,</span>
+        <span class="s1">Iterable</span><span class="s3">,</span>
+        <span class="s1">Mapping</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">HTMLFormatter</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Internal class for formatting output data in html. 
+    This class is intended for shared functionality between 
+    DataFrame.to_html() and DataFrame._repr_html_(). 
+    Any logic in common with other output formatting methods 
+    should ideally be inherited from classes in format.py 
+    and this class responsible for only producing html markup. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">indent_delta</span><span class="s3">: </span><span class="s1">Final </span><span class="s3">= </span><span class="s4">2</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">formatter</span><span class="s3">: </span><span class="s1">DataFrameFormatter</span><span class="s3">,</span>
+        <span class="s1">classes</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">] | </span><span class="s1">tuple</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, ...] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">border</span><span class="s3">: </span><span class="s1">int </span><span class="s3">| </span><span class="s1">bool </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">table_id</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">render_links</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">fmt </span><span class="s3">= </span><span class="s1">formatter</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">classes </span><span class="s3">= </span><span class="s1">classes</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">frame </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">frame</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">columns </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">tr_frame</span><span class="s3">.</span><span class="s1">columns</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">elements</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">] = []</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">bold_rows </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">bold_rows</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">escape </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">escape</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">show_dimensions </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">show_dimensions</span>
+        <span class="s2">if </span><span class="s1">border </span><span class="s2">is None or </span><span class="s1">border </span><span class="s2">is True</span><span class="s3">:</span>
+            <span class="s1">border </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s1">int</span><span class="s3">, </span><span class="s1">get_option</span><span class="s3">(</span><span class="s5">&quot;display.html.border&quot;</span><span class="s3">))</span>
+        <span class="s2">elif not </span><span class="s1">border</span><span class="s3">:</span>
+            <span class="s1">border </span><span class="s3">= </span><span class="s2">None</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">border </span><span class="s3">= </span><span class="s1">border</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">table_id </span><span class="s3">= </span><span class="s1">table_id</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">render_links </span><span class="s3">= </span><span class="s1">render_links</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">col_space </span><span class="s3">= {}</span>
+        <span class="s1">is_multi_index </span><span class="s3">= </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">columns</span><span class="s3">, </span><span class="s1">MultiIndex</span><span class="s3">)</span>
+        <span class="s2">for </span><span class="s1">column</span><span class="s3">, </span><span class="s1">value </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">col_space</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+            <span class="s1">col_space_value </span><span class="s3">= </span><span class="s5">f&quot;</span><span class="s2">{</span><span class="s1">value</span><span class="s2">}</span><span class="s5">px&quot; </span><span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">value</span><span class="s3">, </span><span class="s1">int</span><span class="s3">) </span><span class="s2">else </span><span class="s1">value</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">col_space</span><span class="s3">[</span><span class="s1">column</span><span class="s3">] = </span><span class="s1">col_space_value</span>
+            <span class="s6"># GH 53885: Handling case where column is index</span>
+            <span class="s6"># Flatten the data in the multi index and add in the map</span>
+            <span class="s2">if </span><span class="s1">is_multi_index </span><span class="s2">and </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">column</span><span class="s3">, </span><span class="s1">tuple</span><span class="s3">):</span>
+                <span class="s2">for </span><span class="s1">column_index </span><span class="s2">in </span><span class="s1">column</span><span class="s3">:</span>
+                    <span class="s1">self</span><span class="s3">.</span><span class="s1">col_space</span><span class="s3">[</span><span class="s1">str</span><span class="s3">(</span><span class="s1">column_index</span><span class="s3">)] = </span><span class="s1">col_space_value</span>
+
+    <span class="s2">def </span><span class="s1">to_string</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s1">lines </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">render</span><span class="s3">()</span>
+        <span class="s2">if </span><span class="s1">any</span><span class="s3">(</span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">x</span><span class="s3">, </span><span class="s1">str</span><span class="s3">) </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">lines</span><span class="s3">):</span>
+            <span class="s1">lines </span><span class="s3">= [</span><span class="s1">str</span><span class="s3">(</span><span class="s1">x</span><span class="s3">) </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">lines</span><span class="s3">]</span>
+        <span class="s2">return </span><span class="s5">&quot;</span><span class="s2">\n</span><span class="s5">&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">lines</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">render</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">]:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_write_table</span><span class="s3">()</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">should_show_dimensions</span><span class="s3">:</span>
+            <span class="s1">by </span><span class="s3">= </span><span class="s1">chr</span><span class="s3">(</span><span class="s4">215</span><span class="s3">)  </span><span class="s6"># ×  # noqa: RUF003</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span>
+                <span class="s5">f&quot;&lt;p&gt;</span><span class="s2">{</span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">frame</span><span class="s3">)</span><span class="s2">} </span><span class="s5">rows </span><span class="s2">{</span><span class="s1">by</span><span class="s2">} {</span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">frame</span><span class="s3">.</span><span class="s1">columns</span><span class="s3">)</span><span class="s2">} </span><span class="s5">columns&lt;/p&gt;&quot;</span>
+            <span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">elements</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">should_show_dimensions</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">should_show_dimensions</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">show_row_idx_names</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">show_row_idx_names</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">show_col_idx_names</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">show_col_idx_names</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">row_levels</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; int</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">index</span><span class="s3">:</span>
+            <span class="s6"># showing (row) index</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">frame</span><span class="s3">.</span><span class="s1">index</span><span class="s3">.</span><span class="s1">nlevels</span>
+        <span class="s2">elif </span><span class="s1">self</span><span class="s3">.</span><span class="s1">show_col_idx_names</span><span class="s3">:</span>
+            <span class="s6"># see gh-22579</span>
+            <span class="s6"># Column misalignment also occurs for</span>
+            <span class="s6"># a standard index when the columns index is named.</span>
+            <span class="s6"># If the row index is not displayed a column of</span>
+            <span class="s6"># blank cells need to be included before the DataFrame values.</span>
+            <span class="s2">return </span><span class="s4">1</span>
+        <span class="s6"># not showing (row) index</span>
+        <span class="s2">return </span><span class="s4">0</span>
+
+    <span class="s2">def </span><span class="s1">_get_columns_formatted_values</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; Iterable</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">columns</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">is_truncated</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">is_truncated</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">ncols</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; int</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">tr_frame</span><span class="s3">.</span><span class="s1">columns</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">write</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">s</span><span class="s3">: </span><span class="s1">Any</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s4">0</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">rs </span><span class="s3">= </span><span class="s1">pprint_thing</span><span class="s3">(</span><span class="s1">s</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">elements</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s5">&quot; &quot; </span><span class="s3">* </span><span class="s1">indent </span><span class="s3">+ </span><span class="s1">rs</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">write_th</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">s</span><span class="s3">: </span><span class="s1">Any</span><span class="s3">, </span><span class="s1">header</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s4">0</span><span class="s3">, </span><span class="s1">tags</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span>
+    <span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Method for writing a formatted &lt;th&gt; cell. 
+ 
+        If col_space is set on the formatter then that is used for 
+        the value of min-width. 
+ 
+        Parameters 
+        ---------- 
+        s : object 
+            The data to be written inside the cell. 
+        header : bool, default False 
+            Set to True if the &lt;th&gt; is for use inside &lt;thead&gt;.  This will 
+            cause min-width to be set if there is one. 
+        indent : int, default 0 
+            The indentation level of the cell. 
+        tags : str, default None 
+            Tags to include in the cell. 
+ 
+        Returns 
+        ------- 
+        A written &lt;th&gt; cell. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">col_space </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">col_space</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">s</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">header </span><span class="s2">and </span><span class="s1">col_space </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">tags </span><span class="s3">= </span><span class="s1">tags </span><span class="s2">or </span><span class="s5">&quot;&quot;</span>
+            <span class="s1">tags </span><span class="s3">+= </span><span class="s5">f'style=&quot;min-width: </span><span class="s2">{</span><span class="s1">col_space</span><span class="s2">}</span><span class="s5">;&quot;'</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_write_cell</span><span class="s3">(</span><span class="s1">s</span><span class="s3">, </span><span class="s1">kind</span><span class="s3">=</span><span class="s5">&quot;th&quot;</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">=</span><span class="s1">indent</span><span class="s3">, </span><span class="s1">tags</span><span class="s3">=</span><span class="s1">tags</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">write_td</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">s</span><span class="s3">: </span><span class="s1">Any</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s4">0</span><span class="s3">, </span><span class="s1">tags</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_write_cell</span><span class="s3">(</span><span class="s1">s</span><span class="s3">, </span><span class="s1">kind</span><span class="s3">=</span><span class="s5">&quot;td&quot;</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">=</span><span class="s1">indent</span><span class="s3">, </span><span class="s1">tags</span><span class="s3">=</span><span class="s1">tags</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_write_cell</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">s</span><span class="s3">: </span><span class="s1">Any</span><span class="s3">, </span><span class="s1">kind</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s5">&quot;td&quot;</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s4">0</span><span class="s3">, </span><span class="s1">tags</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span>
+    <span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">tags </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">start_tag </span><span class="s3">= </span><span class="s5">f&quot;&lt;</span><span class="s2">{</span><span class="s1">kind</span><span class="s2">} {</span><span class="s1">tags</span><span class="s2">}</span><span class="s5">&gt;&quot;</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">start_tag </span><span class="s3">= </span><span class="s5">f&quot;&lt;</span><span class="s2">{</span><span class="s1">kind</span><span class="s2">}</span><span class="s5">&gt;&quot;</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">escape</span><span class="s3">:</span>
+            <span class="s6"># escape &amp; first to prevent double escaping of &amp;</span>
+            <span class="s1">esc </span><span class="s3">= {</span><span class="s5">&quot;&amp;&quot;</span><span class="s3">: </span><span class="s5">r&quot;&amp;amp;&quot;</span><span class="s3">, </span><span class="s5">&quot;&lt;&quot;</span><span class="s3">: </span><span class="s5">r&quot;&amp;lt;&quot;</span><span class="s3">, </span><span class="s5">&quot;&gt;&quot;</span><span class="s3">: </span><span class="s5">r&quot;&amp;gt;&quot;</span><span class="s3">}</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">esc </span><span class="s3">= {}</span>
+
+        <span class="s1">rs </span><span class="s3">= </span><span class="s1">pprint_thing</span><span class="s3">(</span><span class="s1">s</span><span class="s3">, </span><span class="s1">escape_chars</span><span class="s3">=</span><span class="s1">esc</span><span class="s3">).</span><span class="s1">strip</span><span class="s3">()</span>
+        <span class="s6"># replace spaces betweens strings with non-breaking spaces</span>
+        <span class="s1">rs </span><span class="s3">= </span><span class="s1">rs</span><span class="s3">.</span><span class="s1">replace</span><span class="s3">(</span><span class="s5">&quot;  &quot;</span><span class="s3">, </span><span class="s5">&quot;&amp;nbsp;&amp;nbsp;&quot;</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">render_links </span><span class="s2">and </span><span class="s1">is_url</span><span class="s3">(</span><span class="s1">rs</span><span class="s3">):</span>
+            <span class="s1">rs_unescaped </span><span class="s3">= </span><span class="s1">pprint_thing</span><span class="s3">(</span><span class="s1">s</span><span class="s3">, </span><span class="s1">escape_chars</span><span class="s3">={}).</span><span class="s1">strip</span><span class="s3">()</span>
+            <span class="s1">start_tag </span><span class="s3">+= </span><span class="s5">f'&lt;a href=&quot;</span><span class="s2">{</span><span class="s1">rs_unescaped</span><span class="s2">}</span><span class="s5">&quot; target=&quot;_blank&quot;&gt;'</span>
+            <span class="s1">end_a </span><span class="s3">= </span><span class="s5">&quot;&lt;/a&gt;&quot;</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">end_a </span><span class="s3">= </span><span class="s5">&quot;&quot;</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s5">f&quot;</span><span class="s2">{</span><span class="s1">start_tag</span><span class="s2">}{</span><span class="s1">rs</span><span class="s2">}{</span><span class="s1">end_a</span><span class="s2">}</span><span class="s5">&lt;/</span><span class="s2">{</span><span class="s1">kind</span><span class="s2">}</span><span class="s5">&gt;&quot;</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">write_tr</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">line</span><span class="s3">: </span><span class="s1">Iterable</span><span class="s3">,</span>
+        <span class="s1">indent</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s4">0</span><span class="s3">,</span>
+        <span class="s1">indent_delta</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s4">0</span><span class="s3">,</span>
+        <span class="s1">header</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s1">align</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">tags</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">int</span><span class="s3">, </span><span class="s1">str</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">nindex_levels</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s4">0</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">tags </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">tags </span><span class="s3">= {}</span>
+
+        <span class="s2">if </span><span class="s1">align </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s5">&quot;&lt;tr&gt;&quot;</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s5">f'&lt;tr style=&quot;text-align: </span><span class="s2">{</span><span class="s1">align</span><span class="s2">}</span><span class="s5">;&quot;&gt;'</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">)</span>
+        <span class="s1">indent </span><span class="s3">+= </span><span class="s1">indent_delta</span>
+
+        <span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">s </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">line</span><span class="s3">):</span>
+            <span class="s1">val_tag </span><span class="s3">= </span><span class="s1">tags</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">i</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">header </span><span class="s2">or </span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">bold_rows </span><span class="s2">and </span><span class="s1">i </span><span class="s3">&lt; </span><span class="s1">nindex_levels</span><span class="s3">):</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">write_th</span><span class="s3">(</span><span class="s1">s</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">=</span><span class="s1">indent</span><span class="s3">, </span><span class="s1">header</span><span class="s3">=</span><span class="s1">header</span><span class="s3">, </span><span class="s1">tags</span><span class="s3">=</span><span class="s1">val_tag</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">write_td</span><span class="s3">(</span><span class="s1">s</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">, </span><span class="s1">tags</span><span class="s3">=</span><span class="s1">val_tag</span><span class="s3">)</span>
+
+        <span class="s1">indent </span><span class="s3">-= </span><span class="s1">indent_delta</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s5">&quot;&lt;/tr&gt;&quot;</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_write_table</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s4">0</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">_classes </span><span class="s3">= [</span><span class="s5">&quot;dataframe&quot;</span><span class="s3">]  </span><span class="s6"># Default class.</span>
+        <span class="s1">use_mathjax </span><span class="s3">= </span><span class="s1">get_option</span><span class="s3">(</span><span class="s5">&quot;display.html.use_mathjax&quot;</span><span class="s3">)</span>
+        <span class="s2">if not </span><span class="s1">use_mathjax</span><span class="s3">:</span>
+            <span class="s1">_classes</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s5">&quot;tex2jax_ignore&quot;</span><span class="s3">)</span>
+            <span class="s1">_classes</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s5">&quot;mathjax_ignore&quot;</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">classes </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">classes</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">classes </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">classes</span><span class="s3">.</span><span class="s1">split</span><span class="s3">()</span>
+            <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">classes</span><span class="s3">, (</span><span class="s1">list</span><span class="s3">, </span><span class="s1">tuple</span><span class="s3">)):</span>
+                <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span>
+                    <span class="s5">&quot;classes must be a string, list, &quot;</span>
+                    <span class="s5">f&quot;or tuple, not </span><span class="s2">{</span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">classes</span><span class="s3">)</span><span class="s2">}</span><span class="s5">&quot;</span>
+                <span class="s3">)</span>
+            <span class="s1">_classes</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">classes</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">table_id </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">id_section </span><span class="s3">= </span><span class="s5">&quot;&quot;</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">id_section </span><span class="s3">= </span><span class="s5">f' id=&quot;</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">table_id</span><span class="s2">}</span><span class="s5">&quot;'</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">border </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">border_attr </span><span class="s3">= </span><span class="s5">&quot;&quot;</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">border_attr </span><span class="s3">= </span><span class="s5">f' border=&quot;</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">border</span><span class="s2">}</span><span class="s5">&quot;'</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span>
+            <span class="s5">f'&lt;table</span><span class="s2">{</span><span class="s1">border_attr</span><span class="s2">} </span><span class="s5">class=&quot;</span><span class="s2">{</span><span class="s5">&quot; &quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">_classes</span><span class="s3">)</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s2">{</span><span class="s1">id_section</span><span class="s2">}</span><span class="s5">&gt;'</span><span class="s3">,</span>
+            <span class="s1">indent</span><span class="s3">,</span>
+        <span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">header </span><span class="s2">or </span><span class="s1">self</span><span class="s3">.</span><span class="s1">show_row_idx_names</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_write_header</span><span class="s3">(</span><span class="s1">indent </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">indent_delta</span><span class="s3">)</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_write_body</span><span class="s3">(</span><span class="s1">indent </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">indent_delta</span><span class="s3">)</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s5">&quot;&lt;/table&gt;&quot;</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_write_col_header</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">: </span><span class="s1">int</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">row</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">Hashable</span><span class="s3">]</span>
+        <span class="s1">is_truncated_horizontally </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">is_truncated_horizontally</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">columns</span><span class="s3">, </span><span class="s1">MultiIndex</span><span class="s3">):</span>
+            <span class="s1">template </span><span class="s3">= </span><span class="s5">'colspan=&quot;{span:d}&quot; halign=&quot;left&quot;'</span>
+
+            <span class="s1">sentinel</span><span class="s3">: </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">NoDefault </span><span class="s3">| </span><span class="s1">bool</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">sparsify</span><span class="s3">:</span>
+                <span class="s6"># GH3547</span>
+                <span class="s1">sentinel </span><span class="s3">= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">no_default</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">sentinel </span><span class="s3">= </span><span class="s2">False</span>
+            <span class="s1">levels </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">columns</span><span class="s3">.</span><span class="s1">_format_multi</span><span class="s3">(</span><span class="s1">sparsify</span><span class="s3">=</span><span class="s1">sentinel</span><span class="s3">, </span><span class="s1">include_names</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+            <span class="s1">level_lengths </span><span class="s3">= </span><span class="s1">get_level_lengths</span><span class="s3">(</span><span class="s1">levels</span><span class="s3">, </span><span class="s1">sentinel</span><span class="s3">)</span>
+            <span class="s1">inner_lvl </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">level_lengths</span><span class="s3">) - </span><span class="s4">1</span>
+            <span class="s2">for </span><span class="s1">lnum</span><span class="s3">, (</span><span class="s1">records</span><span class="s3">, </span><span class="s1">values</span><span class="s3">) </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span>
+                <span class="s1">zip</span><span class="s3">(</span><span class="s1">level_lengths</span><span class="s3">, </span><span class="s1">levels</span><span class="s3">, </span><span class="s1">strict</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+            <span class="s3">):</span>
+                <span class="s2">if </span><span class="s1">is_truncated_horizontally</span><span class="s3">:</span>
+                    <span class="s6"># modify the header lines</span>
+                    <span class="s1">ins_col </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">tr_col_num</span>
+                    <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">sparsify</span><span class="s3">:</span>
+                        <span class="s1">recs_new </span><span class="s3">= {}</span>
+                        <span class="s6"># Increment tags after ... col.</span>
+                        <span class="s2">for </span><span class="s1">tag</span><span class="s3">, </span><span class="s1">span </span><span class="s2">in </span><span class="s1">list</span><span class="s3">(</span><span class="s1">records</span><span class="s3">.</span><span class="s1">items</span><span class="s3">()):</span>
+                            <span class="s2">if </span><span class="s1">tag </span><span class="s3">&gt;= </span><span class="s1">ins_col</span><span class="s3">:</span>
+                                <span class="s1">recs_new</span><span class="s3">[</span><span class="s1">tag </span><span class="s3">+ </span><span class="s4">1</span><span class="s3">] = </span><span class="s1">span</span>
+                            <span class="s2">elif </span><span class="s1">tag </span><span class="s3">+ </span><span class="s1">span </span><span class="s3">&gt; </span><span class="s1">ins_col</span><span class="s3">:</span>
+                                <span class="s1">recs_new</span><span class="s3">[</span><span class="s1">tag</span><span class="s3">] = </span><span class="s1">span </span><span class="s3">+ </span><span class="s4">1</span>
+                                <span class="s2">if </span><span class="s1">lnum </span><span class="s3">== </span><span class="s1">inner_lvl</span><span class="s3">:</span>
+                                    <span class="s1">values </span><span class="s3">= (</span>
+                                        <span class="s3">*</span><span class="s1">values</span><span class="s3">[:</span><span class="s1">ins_col</span><span class="s3">],</span>
+                                        <span class="s5">&quot;...&quot;</span><span class="s3">,</span>
+                                        <span class="s3">*</span><span class="s1">values</span><span class="s3">[</span><span class="s1">ins_col</span><span class="s3">:],</span>
+                                    <span class="s3">)</span>
+                                <span class="s2">else</span><span class="s3">:</span>
+                                    <span class="s6"># sparse col headers do not receive a ...</span>
+                                    <span class="s1">values </span><span class="s3">= (</span>
+                                        <span class="s3">*</span><span class="s1">values</span><span class="s3">[:</span><span class="s1">ins_col</span><span class="s3">],</span>
+                                        <span class="s1">values</span><span class="s3">[</span><span class="s1">ins_col </span><span class="s3">- </span><span class="s4">1</span><span class="s3">],</span>
+                                        <span class="s3">*</span><span class="s1">values</span><span class="s3">[</span><span class="s1">ins_col</span><span class="s3">:],</span>
+                                    <span class="s3">)</span>
+                            <span class="s2">else</span><span class="s3">:</span>
+                                <span class="s1">recs_new</span><span class="s3">[</span><span class="s1">tag</span><span class="s3">] = </span><span class="s1">span</span>
+                            <span class="s6"># if ins_col lies between tags, all col headers</span>
+                            <span class="s6"># get ...</span>
+                            <span class="s2">if </span><span class="s1">tag </span><span class="s3">+ </span><span class="s1">span </span><span class="s3">== </span><span class="s1">ins_col</span><span class="s3">:</span>
+                                <span class="s1">recs_new</span><span class="s3">[</span><span class="s1">ins_col</span><span class="s3">] = </span><span class="s4">1</span>
+                                <span class="s1">values </span><span class="s3">= (*</span><span class="s1">values</span><span class="s3">[:</span><span class="s1">ins_col</span><span class="s3">], </span><span class="s5">&quot;...&quot;</span><span class="s3">, *</span><span class="s1">values</span><span class="s3">[</span><span class="s1">ins_col</span><span class="s3">:])</span>
+                        <span class="s1">records </span><span class="s3">= </span><span class="s1">recs_new</span>
+                        <span class="s1">inner_lvl </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">level_lengths</span><span class="s3">) - </span><span class="s4">1</span>
+                        <span class="s2">if </span><span class="s1">lnum </span><span class="s3">== </span><span class="s1">inner_lvl</span><span class="s3">:</span>
+                            <span class="s1">records</span><span class="s3">[</span><span class="s1">ins_col</span><span class="s3">] = </span><span class="s4">1</span>
+                    <span class="s2">else</span><span class="s3">:</span>
+                        <span class="s1">recs_new </span><span class="s3">= {}</span>
+                        <span class="s2">for </span><span class="s1">tag</span><span class="s3">, </span><span class="s1">span </span><span class="s2">in </span><span class="s1">list</span><span class="s3">(</span><span class="s1">records</span><span class="s3">.</span><span class="s1">items</span><span class="s3">()):</span>
+                            <span class="s2">if </span><span class="s1">tag </span><span class="s3">&gt;= </span><span class="s1">ins_col</span><span class="s3">:</span>
+                                <span class="s1">recs_new</span><span class="s3">[</span><span class="s1">tag </span><span class="s3">+ </span><span class="s4">1</span><span class="s3">] = </span><span class="s1">span</span>
+                            <span class="s2">else</span><span class="s3">:</span>
+                                <span class="s1">recs_new</span><span class="s3">[</span><span class="s1">tag</span><span class="s3">] = </span><span class="s1">span</span>
+                        <span class="s1">recs_new</span><span class="s3">[</span><span class="s1">ins_col</span><span class="s3">] = </span><span class="s4">1</span>
+                        <span class="s1">records </span><span class="s3">= </span><span class="s1">recs_new</span>
+                        <span class="s1">values </span><span class="s3">= [*</span><span class="s1">values</span><span class="s3">[:</span><span class="s1">ins_col</span><span class="s3">], </span><span class="s5">&quot;...&quot;</span><span class="s3">, *</span><span class="s1">values</span><span class="s3">[</span><span class="s1">ins_col</span><span class="s3">:]]</span>
+
+                <span class="s6"># see gh-22579</span>
+                <span class="s6"># Column Offset Bug with to_html(index=False) with</span>
+                <span class="s6"># MultiIndex Columns and Index.</span>
+                <span class="s6"># Initially fill row with blank cells before column names.</span>
+                <span class="s6"># TODO: Refactor to remove code duplication with code</span>
+                <span class="s6"># block below for standard columns index.</span>
+                <span class="s1">row </span><span class="s3">= [</span><span class="s5">&quot;&quot;</span><span class="s3">] * (</span><span class="s1">self</span><span class="s3">.</span><span class="s1">row_levels </span><span class="s3">- </span><span class="s4">1</span><span class="s3">)</span>
+                <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">index </span><span class="s2">or </span><span class="s1">self</span><span class="s3">.</span><span class="s1">show_col_idx_names</span><span class="s3">:</span>
+                    <span class="s6"># see gh-22747</span>
+                    <span class="s6"># If to_html(index_names=False) do not show columns</span>
+                    <span class="s6"># index names.</span>
+                    <span class="s6"># TODO: Refactor to use _get_column_name_list from</span>
+                    <span class="s6"># DataFrameFormatter class and create a</span>
+                    <span class="s6"># _get_formatted_column_labels function for code</span>
+                    <span class="s6"># parity with DataFrameFormatter class.</span>
+                    <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">show_index_names</span><span class="s3">:</span>
+                        <span class="s1">name </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">columns</span><span class="s3">.</span><span class="s1">names</span><span class="s3">[</span><span class="s1">lnum</span><span class="s3">]</span>
+                        <span class="s1">row</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">pprint_thing</span><span class="s3">(</span><span class="s1">name </span><span class="s2">or </span><span class="s5">&quot;&quot;</span><span class="s3">))</span>
+                    <span class="s2">else</span><span class="s3">:</span>
+                        <span class="s1">row</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s5">&quot;&quot;</span><span class="s3">)</span>
+
+                <span class="s1">tags </span><span class="s3">= {}</span>
+                <span class="s1">j </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">row</span><span class="s3">)</span>
+                <span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">values</span><span class="s3">):</span>
+                    <span class="s2">if </span><span class="s1">i </span><span class="s2">in </span><span class="s1">records</span><span class="s3">:</span>
+                        <span class="s2">if </span><span class="s1">records</span><span class="s3">[</span><span class="s1">i</span><span class="s3">] &gt; </span><span class="s4">1</span><span class="s3">:</span>
+                            <span class="s1">tags</span><span class="s3">[</span><span class="s1">j</span><span class="s3">] = </span><span class="s1">template</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">span</span><span class="s3">=</span><span class="s1">records</span><span class="s3">[</span><span class="s1">i</span><span class="s3">])</span>
+                    <span class="s2">else</span><span class="s3">:</span>
+                        <span class="s2">continue</span>
+                    <span class="s1">j </span><span class="s3">+= </span><span class="s4">1</span>
+                    <span class="s1">row</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">v</span><span class="s3">)</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">write_tr</span><span class="s3">(</span><span class="s1">row</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">indent_delta</span><span class="s3">, </span><span class="s1">tags</span><span class="s3">=</span><span class="s1">tags</span><span class="s3">, </span><span class="s1">header</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s6"># see gh-22579</span>
+            <span class="s6"># Column misalignment also occurs for</span>
+            <span class="s6"># a standard index when the columns index is named.</span>
+            <span class="s6"># Initially fill row with blank cells before column names.</span>
+            <span class="s6"># TODO: Refactor to remove code duplication with code block</span>
+            <span class="s6"># above for columns MultiIndex.</span>
+            <span class="s1">row </span><span class="s3">= [</span><span class="s5">&quot;&quot;</span><span class="s3">] * (</span><span class="s1">self</span><span class="s3">.</span><span class="s1">row_levels </span><span class="s3">- </span><span class="s4">1</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">index </span><span class="s2">or </span><span class="s1">self</span><span class="s3">.</span><span class="s1">show_col_idx_names</span><span class="s3">:</span>
+                <span class="s6"># see gh-22747</span>
+                <span class="s6"># If to_html(index_names=False) do not show columns</span>
+                <span class="s6"># index names.</span>
+                <span class="s6"># TODO: Refactor to use _get_column_name_list from</span>
+                <span class="s6"># DataFrameFormatter class.</span>
+                <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">show_index_names</span><span class="s3">:</span>
+                    <span class="s1">row</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">columns</span><span class="s3">.</span><span class="s1">name </span><span class="s2">or </span><span class="s5">&quot;&quot;</span><span class="s3">)</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s1">row</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s5">&quot;&quot;</span><span class="s3">)</span>
+            <span class="s1">row</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_columns_formatted_values</span><span class="s3">())</span>
+            <span class="s1">align </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">justify</span>
+
+            <span class="s2">if </span><span class="s1">is_truncated_horizontally</span><span class="s3">:</span>
+                <span class="s1">ins_col </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">row_levels </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">tr_col_num</span>
+                <span class="s1">row</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(</span><span class="s1">ins_col</span><span class="s3">, </span><span class="s5">&quot;...&quot;</span><span class="s3">)</span>
+
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">write_tr</span><span class="s3">(</span><span class="s1">row</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">indent_delta</span><span class="s3">, </span><span class="s1">header</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">align</span><span class="s3">=</span><span class="s1">align</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_write_row_header</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">: </span><span class="s1">int</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">is_truncated_horizontally </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">is_truncated_horizontally</span>
+        <span class="s1">row </span><span class="s3">= [</span><span class="s1">x </span><span class="s2">if </span><span class="s1">x </span><span class="s2">is not None else </span><span class="s5">&quot;&quot; </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">frame</span><span class="s3">.</span><span class="s1">index</span><span class="s3">.</span><span class="s1">names</span><span class="s3">] + [</span><span class="s5">&quot;&quot;</span><span class="s3">] * (</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">ncols </span><span class="s3">+ (</span><span class="s4">1 </span><span class="s2">if </span><span class="s1">is_truncated_horizontally </span><span class="s2">else </span><span class="s4">0</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">write_tr</span><span class="s3">(</span><span class="s1">row</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">indent_delta</span><span class="s3">, </span><span class="s1">header</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_write_header</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">: </span><span class="s1">int</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s5">&quot;&lt;thead&gt;&quot;</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">header</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_write_col_header</span><span class="s3">(</span><span class="s1">indent </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">indent_delta</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">show_row_idx_names</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_write_row_header</span><span class="s3">(</span><span class="s1">indent </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">indent_delta</span><span class="s3">)</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s5">&quot;&lt;/thead&gt;&quot;</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_get_formatted_values</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; dict</span><span class="s3">[</span><span class="s1">int</span><span class="s3">, </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">]]:</span>
+        <span class="s2">with </span><span class="s1">option_context</span><span class="s3">(</span><span class="s5">&quot;display.max_colwidth&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">):</span>
+            <span class="s1">fmt_values </span><span class="s3">= {</span><span class="s1">i</span><span class="s3">: </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">format_col</span><span class="s3">(</span><span class="s1">i</span><span class="s3">) </span><span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">ncols</span><span class="s3">)}</span>
+        <span class="s2">return </span><span class="s1">fmt_values</span>
+
+    <span class="s2">def </span><span class="s1">_write_body</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">: </span><span class="s1">int</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s5">&quot;&lt;tbody&gt;&quot;</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">)</span>
+        <span class="s1">fmt_values </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_formatted_values</span><span class="s3">()</span>
+
+        <span class="s6"># write values</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">index </span><span class="s2">and </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">frame</span><span class="s3">.</span><span class="s1">index</span><span class="s3">, </span><span class="s1">MultiIndex</span><span class="s3">):</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_write_hierarchical_rows</span><span class="s3">(</span><span class="s1">fmt_values</span><span class="s3">, </span><span class="s1">indent </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">indent_delta</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_write_regular_rows</span><span class="s3">(</span><span class="s1">fmt_values</span><span class="s3">, </span><span class="s1">indent </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">indent_delta</span><span class="s3">)</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s5">&quot;&lt;/tbody&gt;&quot;</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_write_regular_rows</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">fmt_values</span><span class="s3">: </span><span class="s1">Mapping</span><span class="s3">[</span><span class="s1">int</span><span class="s3">, </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">]], </span><span class="s1">indent</span><span class="s3">: </span><span class="s1">int</span>
+    <span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">is_truncated_horizontally </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">is_truncated_horizontally</span>
+        <span class="s1">is_truncated_vertically </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">is_truncated_vertically</span>
+
+        <span class="s1">nrows </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">tr_frame</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">index</span><span class="s3">:</span>
+            <span class="s1">fmt </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">_get_formatter</span><span class="s3">(</span><span class="s5">&quot;__index__&quot;</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">fmt </span><span class="s2">is not None</span><span class="s3">:</span>
+                <span class="s1">index_values </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">tr_frame</span><span class="s3">.</span><span class="s1">index</span><span class="s3">.</span><span class="s1">map</span><span class="s3">(</span><span class="s1">fmt</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s6"># only reached with non-Multi index</span>
+                <span class="s1">index_values </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">tr_frame</span><span class="s3">.</span><span class="s1">index</span><span class="s3">.</span><span class="s1">_format_flat</span><span class="s3">(</span><span class="s1">include_name</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+
+        <span class="s1">row</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">] = []</span>
+        <span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">nrows</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">is_truncated_vertically </span><span class="s2">and </span><span class="s1">i </span><span class="s3">== (</span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">tr_row_num</span><span class="s3">):</span>
+                <span class="s1">str_sep_row </span><span class="s3">= [</span><span class="s5">&quot;...&quot;</span><span class="s3">] * </span><span class="s1">len</span><span class="s3">(</span><span class="s1">row</span><span class="s3">)</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">write_tr</span><span class="s3">(</span>
+                    <span class="s1">str_sep_row</span><span class="s3">,</span>
+                    <span class="s1">indent</span><span class="s3">,</span>
+                    <span class="s1">self</span><span class="s3">.</span><span class="s1">indent_delta</span><span class="s3">,</span>
+                    <span class="s1">tags</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                    <span class="s1">nindex_levels</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">row_levels</span><span class="s3">,</span>
+                <span class="s3">)</span>
+
+            <span class="s1">row </span><span class="s3">= []</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">index</span><span class="s3">:</span>
+                <span class="s1">row</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">index_values</span><span class="s3">[</span><span class="s1">i</span><span class="s3">])</span>
+            <span class="s6"># see gh-22579</span>
+            <span class="s6"># Column misalignment also occurs for</span>
+            <span class="s6"># a standard index when the columns index is named.</span>
+            <span class="s6"># Add blank cell before data cells.</span>
+            <span class="s2">elif </span><span class="s1">self</span><span class="s3">.</span><span class="s1">show_col_idx_names</span><span class="s3">:</span>
+                <span class="s1">row</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s5">&quot;&quot;</span><span class="s3">)</span>
+            <span class="s1">row</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">(</span><span class="s1">fmt_values</span><span class="s3">[</span><span class="s1">j</span><span class="s3">][</span><span class="s1">i</span><span class="s3">] </span><span class="s2">for </span><span class="s1">j </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">ncols</span><span class="s3">))</span>
+
+            <span class="s2">if </span><span class="s1">is_truncated_horizontally</span><span class="s3">:</span>
+                <span class="s1">dot_col_ix </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">tr_col_num </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">row_levels</span>
+                <span class="s1">row</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(</span><span class="s1">dot_col_ix</span><span class="s3">, </span><span class="s5">&quot;...&quot;</span><span class="s3">)</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">write_tr</span><span class="s3">(</span>
+                <span class="s1">row</span><span class="s3">, </span><span class="s1">indent</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">indent_delta</span><span class="s3">, </span><span class="s1">tags</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">nindex_levels</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">row_levels</span>
+            <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_write_hierarchical_rows</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">fmt_values</span><span class="s3">: </span><span class="s1">Mapping</span><span class="s3">[</span><span class="s1">int</span><span class="s3">, </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">]], </span><span class="s1">indent</span><span class="s3">: </span><span class="s1">int</span>
+    <span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">template </span><span class="s3">= </span><span class="s5">'rowspan=&quot;{span}&quot; valign=&quot;top&quot;'</span>
+
+        <span class="s1">is_truncated_horizontally </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">is_truncated_horizontally</span>
+        <span class="s1">is_truncated_vertically </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">is_truncated_vertically</span>
+        <span class="s1">frame </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">tr_frame</span>
+        <span class="s1">nrows </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">frame</span><span class="s3">)</span>
+
+        <span class="s2">assert </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">frame</span><span class="s3">.</span><span class="s1">index</span><span class="s3">, </span><span class="s1">MultiIndex</span><span class="s3">)</span>
+        <span class="s1">idx_values </span><span class="s3">= </span><span class="s1">frame</span><span class="s3">.</span><span class="s1">index</span><span class="s3">.</span><span class="s1">_format_multi</span><span class="s3">(</span><span class="s1">sparsify</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, </span><span class="s1">include_names</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+        <span class="s1">idx_values </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">zip</span><span class="s3">(*</span><span class="s1">idx_values</span><span class="s3">, </span><span class="s1">strict</span><span class="s3">=</span><span class="s2">True</span><span class="s3">))</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">sparsify</span><span class="s3">:</span>
+            <span class="s6"># GH3547</span>
+            <span class="s1">sentinel </span><span class="s3">= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">no_default</span>
+            <span class="s1">levels </span><span class="s3">= </span><span class="s1">frame</span><span class="s3">.</span><span class="s1">index</span><span class="s3">.</span><span class="s1">_format_multi</span><span class="s3">(</span><span class="s1">sparsify</span><span class="s3">=</span><span class="s1">sentinel</span><span class="s3">, </span><span class="s1">include_names</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+
+            <span class="s1">level_lengths </span><span class="s3">= </span><span class="s1">get_level_lengths</span><span class="s3">(</span><span class="s1">levels</span><span class="s3">, </span><span class="s1">sentinel</span><span class="s3">)</span>
+            <span class="s1">inner_lvl </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">level_lengths</span><span class="s3">) - </span><span class="s4">1</span>
+            <span class="s2">if </span><span class="s1">is_truncated_vertically</span><span class="s3">:</span>
+                <span class="s6"># Insert ... row and adjust idx_values and</span>
+                <span class="s6"># level_lengths to take this into account.</span>
+                <span class="s1">ins_row </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">tr_row_num</span>
+                <span class="s1">inserted </span><span class="s3">= </span><span class="s2">False</span>
+                <span class="s2">for </span><span class="s1">lnum</span><span class="s3">, </span><span class="s1">records </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">level_lengths</span><span class="s3">):</span>
+                    <span class="s1">rec_new </span><span class="s3">= {}</span>
+                    <span class="s2">for </span><span class="s1">tag</span><span class="s3">, </span><span class="s1">span </span><span class="s2">in </span><span class="s1">list</span><span class="s3">(</span><span class="s1">records</span><span class="s3">.</span><span class="s1">items</span><span class="s3">()):</span>
+                        <span class="s2">if </span><span class="s1">tag </span><span class="s3">&gt;= </span><span class="s1">ins_row</span><span class="s3">:</span>
+                            <span class="s1">rec_new</span><span class="s3">[</span><span class="s1">tag </span><span class="s3">+ </span><span class="s4">1</span><span class="s3">] = </span><span class="s1">span</span>
+                        <span class="s2">elif </span><span class="s1">tag </span><span class="s3">+ </span><span class="s1">span </span><span class="s3">&gt; </span><span class="s1">ins_row</span><span class="s3">:</span>
+                            <span class="s1">rec_new</span><span class="s3">[</span><span class="s1">tag</span><span class="s3">] = </span><span class="s1">span </span><span class="s3">+ </span><span class="s4">1</span>
+
+                            <span class="s6"># GH 14882 - Make sure insertion done once</span>
+                            <span class="s2">if not </span><span class="s1">inserted</span><span class="s3">:</span>
+                                <span class="s1">dot_row </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">idx_values</span><span class="s3">[</span><span class="s1">ins_row </span><span class="s3">- </span><span class="s4">1</span><span class="s3">])</span>
+                                <span class="s1">dot_row</span><span class="s3">[-</span><span class="s4">1</span><span class="s3">] = </span><span class="s5">&quot;...&quot;</span>
+                                <span class="s1">idx_values</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(</span><span class="s1">ins_row</span><span class="s3">, </span><span class="s1">tuple</span><span class="s3">(</span><span class="s1">dot_row</span><span class="s3">))</span>
+                                <span class="s1">inserted </span><span class="s3">= </span><span class="s2">True</span>
+                            <span class="s2">else</span><span class="s3">:</span>
+                                <span class="s1">dot_row </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">idx_values</span><span class="s3">[</span><span class="s1">ins_row</span><span class="s3">])</span>
+                                <span class="s1">dot_row</span><span class="s3">[</span><span class="s1">inner_lvl </span><span class="s3">- </span><span class="s1">lnum</span><span class="s3">] = </span><span class="s5">&quot;...&quot;</span>
+                                <span class="s1">idx_values</span><span class="s3">[</span><span class="s1">ins_row</span><span class="s3">] = </span><span class="s1">tuple</span><span class="s3">(</span><span class="s1">dot_row</span><span class="s3">)</span>
+                        <span class="s2">else</span><span class="s3">:</span>
+                            <span class="s1">rec_new</span><span class="s3">[</span><span class="s1">tag</span><span class="s3">] = </span><span class="s1">span</span>
+                        <span class="s6"># If ins_row lies between tags, all cols idx cols</span>
+                        <span class="s6"># receive ...</span>
+                        <span class="s2">if </span><span class="s1">tag </span><span class="s3">+ </span><span class="s1">span </span><span class="s3">== </span><span class="s1">ins_row</span><span class="s3">:</span>
+                            <span class="s1">rec_new</span><span class="s3">[</span><span class="s1">ins_row</span><span class="s3">] = </span><span class="s4">1</span>
+                            <span class="s2">if </span><span class="s1">lnum </span><span class="s3">== </span><span class="s4">0</span><span class="s3">:</span>
+                                <span class="s1">idx_values</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(</span>
+                                    <span class="s1">ins_row</span><span class="s3">, </span><span class="s1">tuple</span><span class="s3">([</span><span class="s5">&quot;...&quot;</span><span class="s3">] * </span><span class="s1">len</span><span class="s3">(</span><span class="s1">level_lengths</span><span class="s3">))</span>
+                                <span class="s3">)</span>
+
+                            <span class="s6"># GH 14882 - Place ... in correct level</span>
+                            <span class="s2">elif </span><span class="s1">inserted</span><span class="s3">:</span>
+                                <span class="s1">dot_row </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">idx_values</span><span class="s3">[</span><span class="s1">ins_row</span><span class="s3">])</span>
+                                <span class="s1">dot_row</span><span class="s3">[</span><span class="s1">inner_lvl </span><span class="s3">- </span><span class="s1">lnum</span><span class="s3">] = </span><span class="s5">&quot;...&quot;</span>
+                                <span class="s1">idx_values</span><span class="s3">[</span><span class="s1">ins_row</span><span class="s3">] = </span><span class="s1">tuple</span><span class="s3">(</span><span class="s1">dot_row</span><span class="s3">)</span>
+                    <span class="s1">level_lengths</span><span class="s3">[</span><span class="s1">lnum</span><span class="s3">] = </span><span class="s1">rec_new</span>
+
+                <span class="s1">level_lengths</span><span class="s3">[</span><span class="s1">inner_lvl</span><span class="s3">][</span><span class="s1">ins_row</span><span class="s3">] = </span><span class="s4">1</span>
+                <span class="s2">for </span><span class="s1">ix_col </span><span class="s2">in </span><span class="s1">fmt_values</span><span class="s3">:</span>
+                    <span class="s1">fmt_values</span><span class="s3">[</span><span class="s1">ix_col</span><span class="s3">].</span><span class="s1">insert</span><span class="s3">(</span><span class="s1">ins_row</span><span class="s3">, </span><span class="s5">&quot;...&quot;</span><span class="s3">)</span>
+                <span class="s1">nrows </span><span class="s3">+= </span><span class="s4">1</span>
+
+            <span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">nrows</span><span class="s3">):</span>
+                <span class="s1">row </span><span class="s3">= []</span>
+                <span class="s1">tags </span><span class="s3">= {}</span>
+
+                <span class="s1">sparse_offset </span><span class="s3">= </span><span class="s4">0</span>
+                <span class="s1">j </span><span class="s3">= </span><span class="s4">0</span>
+                <span class="s2">for </span><span class="s1">records</span><span class="s3">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">zip</span><span class="s3">(</span><span class="s1">level_lengths</span><span class="s3">, </span><span class="s1">idx_values</span><span class="s3">[</span><span class="s1">i</span><span class="s3">], </span><span class="s1">strict</span><span class="s3">=</span><span class="s2">True</span><span class="s3">):</span>
+                    <span class="s2">if </span><span class="s1">i </span><span class="s2">in </span><span class="s1">records</span><span class="s3">:</span>
+                        <span class="s2">if </span><span class="s1">records</span><span class="s3">[</span><span class="s1">i</span><span class="s3">] &gt; </span><span class="s4">1</span><span class="s3">:</span>
+                            <span class="s1">tags</span><span class="s3">[</span><span class="s1">j</span><span class="s3">] = </span><span class="s1">template</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">span</span><span class="s3">=</span><span class="s1">records</span><span class="s3">[</span><span class="s1">i</span><span class="s3">])</span>
+                    <span class="s2">else</span><span class="s3">:</span>
+                        <span class="s1">sparse_offset </span><span class="s3">+= </span><span class="s4">1</span>
+                        <span class="s2">continue</span>
+
+                    <span class="s1">j </span><span class="s3">+= </span><span class="s4">1</span>
+                    <span class="s1">row</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">v</span><span class="s3">)</span>
+
+                <span class="s1">row</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">(</span><span class="s1">fmt_values</span><span class="s3">[</span><span class="s1">j</span><span class="s3">][</span><span class="s1">i</span><span class="s3">] </span><span class="s2">for </span><span class="s1">j </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">ncols</span><span class="s3">))</span>
+                <span class="s2">if </span><span class="s1">is_truncated_horizontally</span><span class="s3">:</span>
+                    <span class="s1">row</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(</span>
+                        <span class="s1">self</span><span class="s3">.</span><span class="s1">row_levels </span><span class="s3">- </span><span class="s1">sparse_offset </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">tr_col_num</span><span class="s3">, </span><span class="s5">&quot;...&quot;</span>
+                    <span class="s3">)</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">write_tr</span><span class="s3">(</span>
+                    <span class="s1">row</span><span class="s3">,</span>
+                    <span class="s1">indent</span><span class="s3">,</span>
+                    <span class="s1">self</span><span class="s3">.</span><span class="s1">indent_delta</span><span class="s3">,</span>
+                    <span class="s1">tags</span><span class="s3">=</span><span class="s1">tags</span><span class="s3">,</span>
+                    <span class="s1">nindex_levels</span><span class="s3">=</span><span class="s1">len</span><span class="s3">(</span><span class="s1">levels</span><span class="s3">) - </span><span class="s1">sparse_offset</span><span class="s3">,</span>
+                <span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">row </span><span class="s3">= []</span>
+            <span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">frame</span><span class="s3">)):</span>
+                <span class="s2">if </span><span class="s1">is_truncated_vertically </span><span class="s2">and </span><span class="s1">i </span><span class="s3">== (</span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">tr_row_num</span><span class="s3">):</span>
+                    <span class="s1">str_sep_row </span><span class="s3">= [</span><span class="s5">&quot;...&quot;</span><span class="s3">] * </span><span class="s1">len</span><span class="s3">(</span><span class="s1">row</span><span class="s3">)</span>
+                    <span class="s1">self</span><span class="s3">.</span><span class="s1">write_tr</span><span class="s3">(</span>
+                        <span class="s1">str_sep_row</span><span class="s3">,</span>
+                        <span class="s1">indent</span><span class="s3">,</span>
+                        <span class="s1">self</span><span class="s3">.</span><span class="s1">indent_delta</span><span class="s3">,</span>
+                        <span class="s1">tags</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                        <span class="s1">nindex_levels</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">row_levels</span><span class="s3">,</span>
+                    <span class="s3">)</span>
+
+                <span class="s1">idx_values </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span>
+                    <span class="s1">zip</span><span class="s3">(</span>
+                        <span class="s3">*</span><span class="s1">frame</span><span class="s3">.</span><span class="s1">index</span><span class="s3">.</span><span class="s1">_format_multi</span><span class="s3">(</span><span class="s1">sparsify</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, </span><span class="s1">include_names</span><span class="s3">=</span><span class="s2">False</span><span class="s3">),</span>
+                        <span class="s1">strict</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+                    <span class="s3">)</span>
+                <span class="s3">)</span>
+                <span class="s1">row </span><span class="s3">= []</span>
+                <span class="s1">row</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">(</span><span class="s1">idx_values</span><span class="s3">[</span><span class="s1">i</span><span class="s3">])</span>
+                <span class="s1">row</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">(</span><span class="s1">fmt_values</span><span class="s3">[</span><span class="s1">j</span><span class="s3">][</span><span class="s1">i</span><span class="s3">] </span><span class="s2">for </span><span class="s1">j </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">ncols</span><span class="s3">))</span>
+                <span class="s2">if </span><span class="s1">is_truncated_horizontally</span><span class="s3">:</span>
+                    <span class="s1">row</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">row_levels </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">tr_col_num</span><span class="s3">, </span><span class="s5">&quot;...&quot;</span><span class="s3">)</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">write_tr</span><span class="s3">(</span>
+                    <span class="s1">row</span><span class="s3">,</span>
+                    <span class="s1">indent</span><span class="s3">,</span>
+                    <span class="s1">self</span><span class="s3">.</span><span class="s1">indent_delta</span><span class="s3">,</span>
+                    <span class="s1">tags</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                    <span class="s1">nindex_levels</span><span class="s3">=</span><span class="s1">frame</span><span class="s3">.</span><span class="s1">index</span><span class="s3">.</span><span class="s1">nlevels</span><span class="s3">,</span>
+                <span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">NotebookFormatter</span><span class="s3">(</span><span class="s1">HTMLFormatter</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Internal class for formatting output data in html for display in Jupyter 
+    Notebooks. This class is intended for functionality specific to 
+    DataFrame._repr_html_() and DataFrame.to_html(notebook=True) 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">_get_formatted_values</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; dict</span><span class="s3">[</span><span class="s1">int</span><span class="s3">, </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">]]:</span>
+        <span class="s2">return </span><span class="s3">{</span><span class="s1">i</span><span class="s3">: </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">format_col</span><span class="s3">(</span><span class="s1">i</span><span class="s3">) </span><span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">ncols</span><span class="s3">)}</span>
+
+    <span class="s2">def </span><span class="s1">_get_columns_formatted_values</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">]:</span>
+        <span class="s6"># only reached with non-Multi Index</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">columns</span><span class="s3">.</span><span class="s1">_format_flat</span><span class="s3">(</span><span class="s1">include_name</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">write_style</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s6"># We use the &quot;scoped&quot; attribute here so that the desired</span>
+        <span class="s6"># style properties for the data frame are not then applied</span>
+        <span class="s6"># throughout the entire notebook.</span>
+        <span class="s1">template_first </span><span class="s3">= </span><span class="s5">&quot;&quot;&quot;</span><span class="s2">\ 
+            </span><span class="s5">&lt;style scoped&gt;&quot;&quot;&quot;</span>
+        <span class="s1">template_last </span><span class="s3">= </span><span class="s5">&quot;&quot;&quot;</span><span class="s2">\ 
+            </span><span class="s5">&lt;/style&gt;&quot;&quot;&quot;</span>
+        <span class="s1">template_select </span><span class="s3">= </span><span class="s5">&quot;&quot;&quot;</span><span class="s2">\ 
+                </span><span class="s5">.dataframe %s { 
+                    %s: %s; 
+                }&quot;&quot;&quot;</span>
+        <span class="s1">element_props </span><span class="s3">= [</span>
+            <span class="s3">(</span><span class="s5">&quot;tbody tr th:only-of-type&quot;</span><span class="s3">, </span><span class="s5">&quot;vertical-align&quot;</span><span class="s3">, </span><span class="s5">&quot;middle&quot;</span><span class="s3">),</span>
+            <span class="s3">(</span><span class="s5">&quot;tbody tr th&quot;</span><span class="s3">, </span><span class="s5">&quot;vertical-align&quot;</span><span class="s3">, </span><span class="s5">&quot;top&quot;</span><span class="s3">),</span>
+        <span class="s3">]</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">columns</span><span class="s3">, </span><span class="s1">MultiIndex</span><span class="s3">):</span>
+            <span class="s1">element_props</span><span class="s3">.</span><span class="s1">append</span><span class="s3">((</span><span class="s5">&quot;thead tr th&quot;</span><span class="s3">, </span><span class="s5">&quot;text-align&quot;</span><span class="s3">, </span><span class="s5">&quot;left&quot;</span><span class="s3">))</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">show_row_idx_names</span><span class="s3">:</span>
+                <span class="s1">element_props</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span>
+                    <span class="s3">(</span><span class="s5">&quot;thead tr:last-of-type th&quot;</span><span class="s3">, </span><span class="s5">&quot;text-align&quot;</span><span class="s3">, </span><span class="s5">&quot;right&quot;</span><span class="s3">)</span>
+                <span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">element_props</span><span class="s3">.</span><span class="s1">append</span><span class="s3">((</span><span class="s5">&quot;thead th&quot;</span><span class="s3">, </span><span class="s5">&quot;text-align&quot;</span><span class="s3">, </span><span class="s5">&quot;right&quot;</span><span class="s3">))</span>
+        <span class="s1">template_mid </span><span class="s3">= </span><span class="s5">&quot;</span><span class="s2">\n\n</span><span class="s5">&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">template_select </span><span class="s3">% </span><span class="s1">t </span><span class="s2">for </span><span class="s1">t </span><span class="s2">in </span><span class="s1">element_props</span><span class="s3">)</span>
+        <span class="s1">template </span><span class="s3">= </span><span class="s1">dedent</span><span class="s3">(</span><span class="s5">f&quot;</span><span class="s2">{</span><span class="s1">template_first</span><span class="s2">}\n{</span><span class="s1">template_mid</span><span class="s2">}\n{</span><span class="s1">template_last</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">template</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">render</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">]:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s5">&quot;&lt;div&gt;&quot;</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">write_style</span><span class="s3">()</span>
+        <span class="s1">super</span><span class="s3">().</span><span class="s1">render</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s5">&quot;&lt;/div&gt;&quot;</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">elements</span>
+</pre>
+</body>
+</html>

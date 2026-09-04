@@ -1,0 +1,163 @@
+<html>
+<head>
+<title>datetime.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #2aacb8;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+datetime.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright (c) 2010-2024 openpyxl</span>
+
+<span class="s2">&quot;&quot;&quot;Manage Excel date weirdness.&quot;&quot;&quot;</span>
+
+<span class="s0"># Python stdlib imports</span>
+<span class="s3">import </span><span class="s1">datetime</span>
+<span class="s3">from </span><span class="s1">math </span><span class="s3">import </span><span class="s1">isnan</span>
+<span class="s3">import </span><span class="s1">re</span>
+
+
+<span class="s0"># constants</span>
+<span class="s1">MAC_EPOCH </span><span class="s4">= </span><span class="s1">datetime</span><span class="s4">.</span><span class="s1">datetime</span><span class="s4">(</span><span class="s5">1904</span><span class="s4">, </span><span class="s5">1</span><span class="s4">, </span><span class="s5">1</span><span class="s4">)</span>
+<span class="s1">WINDOWS_EPOCH </span><span class="s4">= </span><span class="s1">datetime</span><span class="s4">.</span><span class="s1">datetime</span><span class="s4">(</span><span class="s5">1899</span><span class="s4">, </span><span class="s5">12</span><span class="s4">, </span><span class="s5">30</span><span class="s4">)</span>
+<span class="s1">CALENDAR_WINDOWS_1900 </span><span class="s4">= </span><span class="s5">2415018.5   </span><span class="s0"># Julian date of WINDOWS_EPOCH</span>
+<span class="s1">CALENDAR_MAC_1904 </span><span class="s4">= </span><span class="s5">2416480.5       </span><span class="s0"># Julian date of MAC_EPOCH</span>
+<span class="s1">CALENDAR_WINDOWS_1900 </span><span class="s4">= </span><span class="s1">WINDOWS_EPOCH</span>
+<span class="s1">CALENDAR_MAC_1904 </span><span class="s4">= </span><span class="s1">MAC_EPOCH</span>
+<span class="s1">SECS_PER_DAY </span><span class="s4">= </span><span class="s5">86400</span>
+
+<span class="s1">ISO_FORMAT </span><span class="s4">= </span><span class="s6">'%Y-%m-%dT%H:%M:%SZ'</span>
+<span class="s1">ISO_REGEX </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s6">r''' 
+(?P&lt;date&gt;(?P&lt;year&gt;\d{4})-(?P&lt;month&gt;\d{2})-(?P&lt;day&gt;\d{2}))?T? 
+(?P&lt;time&gt;(?P&lt;hour&gt;\d{2}):(?P&lt;minute&gt;\d{2})(:(?P&lt;second&gt;\d{2})(?P&lt;microsecond&gt;\.\d{1,3})?)?)?Z?'''</span><span class="s4">,</span>
+                                       <span class="s1">re</span><span class="s4">.</span><span class="s1">VERBOSE</span><span class="s4">)</span>
+<span class="s1">ISO_DURATION </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s6">r'PT((?P&lt;hours&gt;\d+)H)?((?P&lt;minutes&gt;\d+)M)?((?P&lt;seconds&gt;\d+(\.\d{1,3})?)S)?'</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">to_ISO8601</span><span class="s4">(</span><span class="s1">dt</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Convert from a datetime to a timestamp string.&quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">dt</span><span class="s4">, </span><span class="s6">&quot;microsecond&quot;</span><span class="s4">) </span><span class="s3">and </span><span class="s1">dt</span><span class="s4">.</span><span class="s1">microsecond</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">dt</span><span class="s4">.</span><span class="s1">isoformat</span><span class="s4">(</span><span class="s1">timespec</span><span class="s4">=</span><span class="s6">&quot;milliseconds&quot;</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">dt</span><span class="s4">.</span><span class="s1">isoformat</span><span class="s4">()</span>
+
+
+<span class="s3">def </span><span class="s1">from_ISO8601</span><span class="s4">(</span><span class="s1">formatted_string</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Convert from a timestamp string to a datetime object. According to 
+    18.17.4 in the specification the following ISO 8601 formats are 
+    supported. 
+ 
+    Dates B.1.1 and B.2.1 
+    Times B.1.2 and B.2.2 
+    Datetimes B.1.3 and B.2.3 
+ 
+    There is no concept of timedeltas in the specification, but Excel 
+    writes them (in strict OOXML mode), so these are also understood. 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if not </span><span class="s1">formatted_string</span><span class="s4">:</span>
+        <span class="s3">return None</span>
+
+    <span class="s1">match </span><span class="s4">= </span><span class="s1">ISO_REGEX</span><span class="s4">.</span><span class="s1">match</span><span class="s4">(</span><span class="s1">formatted_string</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">match </span><span class="s3">and </span><span class="s1">any</span><span class="s4">(</span><span class="s1">match</span><span class="s4">.</span><span class="s1">groups</span><span class="s4">()):</span>
+        <span class="s1">parts </span><span class="s4">= </span><span class="s1">match</span><span class="s4">.</span><span class="s1">groupdict</span><span class="s4">(</span><span class="s5">0</span><span class="s4">)</span>
+        <span class="s3">for </span><span class="s1">key </span><span class="s3">in </span><span class="s4">[</span><span class="s6">&quot;year&quot;</span><span class="s4">, </span><span class="s6">&quot;month&quot;</span><span class="s4">, </span><span class="s6">&quot;day&quot;</span><span class="s4">, </span><span class="s6">&quot;hour&quot;</span><span class="s4">, </span><span class="s6">&quot;minute&quot;</span><span class="s4">, </span><span class="s6">&quot;second&quot;</span><span class="s4">]:</span>
+            <span class="s3">if </span><span class="s1">parts</span><span class="s4">[</span><span class="s1">key</span><span class="s4">]:</span>
+                <span class="s1">parts</span><span class="s4">[</span><span class="s1">key</span><span class="s4">] = </span><span class="s1">int</span><span class="s4">(</span><span class="s1">parts</span><span class="s4">[</span><span class="s1">key</span><span class="s4">])</span>
+
+        <span class="s3">if </span><span class="s1">parts</span><span class="s4">[</span><span class="s6">&quot;microsecond&quot;</span><span class="s4">]:</span>
+            <span class="s1">parts</span><span class="s4">[</span><span class="s6">&quot;microsecond&quot;</span><span class="s4">] = </span><span class="s1">int</span><span class="s4">(</span><span class="s1">float</span><span class="s4">(</span><span class="s1">parts</span><span class="s4">[</span><span class="s6">'microsecond'</span><span class="s4">]) * </span><span class="s5">1_000_000</span><span class="s4">)</span>
+
+        <span class="s3">if not </span><span class="s1">parts</span><span class="s4">[</span><span class="s6">&quot;date&quot;</span><span class="s4">]:</span>
+            <span class="s1">dt </span><span class="s4">= </span><span class="s1">datetime</span><span class="s4">.</span><span class="s1">time</span><span class="s4">(</span><span class="s1">parts</span><span class="s4">[</span><span class="s6">'hour'</span><span class="s4">], </span><span class="s1">parts</span><span class="s4">[</span><span class="s6">'minute'</span><span class="s4">], </span><span class="s1">parts</span><span class="s4">[</span><span class="s6">'second'</span><span class="s4">], </span><span class="s1">parts</span><span class="s4">[</span><span class="s6">&quot;microsecond&quot;</span><span class="s4">])</span>
+        <span class="s3">elif not </span><span class="s1">parts</span><span class="s4">[</span><span class="s6">&quot;time&quot;</span><span class="s4">]:</span>
+            <span class="s1">dt </span><span class="s4">= </span><span class="s1">datetime</span><span class="s4">.</span><span class="s1">date</span><span class="s4">(</span><span class="s1">parts</span><span class="s4">[</span><span class="s6">'year'</span><span class="s4">], </span><span class="s1">parts</span><span class="s4">[</span><span class="s6">'month'</span><span class="s4">], </span><span class="s1">parts</span><span class="s4">[</span><span class="s6">'day'</span><span class="s4">])</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">del </span><span class="s1">parts</span><span class="s4">[</span><span class="s6">&quot;time&quot;</span><span class="s4">]</span>
+            <span class="s3">del </span><span class="s1">parts</span><span class="s4">[</span><span class="s6">&quot;date&quot;</span><span class="s4">]</span>
+            <span class="s1">dt </span><span class="s4">= </span><span class="s1">datetime</span><span class="s4">.</span><span class="s1">datetime</span><span class="s4">(**</span><span class="s1">parts</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">dt</span>
+
+    <span class="s1">match </span><span class="s4">= </span><span class="s1">ISO_DURATION</span><span class="s4">.</span><span class="s1">match</span><span class="s4">(</span><span class="s1">formatted_string</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">match </span><span class="s3">and </span><span class="s1">any</span><span class="s4">(</span><span class="s1">match</span><span class="s4">.</span><span class="s1">groups</span><span class="s4">()):</span>
+        <span class="s1">parts </span><span class="s4">= </span><span class="s1">match</span><span class="s4">.</span><span class="s1">groupdict</span><span class="s4">(</span><span class="s5">0</span><span class="s4">)</span>
+        <span class="s3">for </span><span class="s1">key</span><span class="s4">, </span><span class="s1">val </span><span class="s3">in </span><span class="s1">parts</span><span class="s4">.</span><span class="s1">items</span><span class="s4">():</span>
+            <span class="s3">if </span><span class="s1">val</span><span class="s4">:</span>
+                <span class="s1">parts</span><span class="s4">[</span><span class="s1">key</span><span class="s4">] = </span><span class="s1">float</span><span class="s4">(</span><span class="s1">val</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">datetime</span><span class="s4">.</span><span class="s1">timedelta</span><span class="s4">(**</span><span class="s1">parts</span><span class="s4">)</span>
+
+    <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s6">&quot;Invalid datetime value {}&quot;</span><span class="s4">.</span><span class="s1">format</span><span class="s4">(</span><span class="s1">formatted_string</span><span class="s4">))</span>
+
+
+<span class="s3">def </span><span class="s1">to_excel</span><span class="s4">(</span><span class="s1">dt</span><span class="s4">, </span><span class="s1">epoch</span><span class="s4">=</span><span class="s1">WINDOWS_EPOCH</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Convert Python datetime to Excel serial&quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">dt</span><span class="s4">, </span><span class="s1">datetime</span><span class="s4">.</span><span class="s1">time</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">time_to_days</span><span class="s4">(</span><span class="s1">dt</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">dt</span><span class="s4">, </span><span class="s1">datetime</span><span class="s4">.</span><span class="s1">timedelta</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">timedelta_to_days</span><span class="s4">(</span><span class="s1">dt</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">isnan</span><span class="s4">(</span><span class="s1">dt</span><span class="s4">.</span><span class="s1">year</span><span class="s4">):  </span><span class="s0"># Pandas supports Not a Date</span>
+        <span class="s3">return</span>
+
+    <span class="s3">if not </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">dt</span><span class="s4">, </span><span class="s6">&quot;date&quot;</span><span class="s4">):</span>
+        <span class="s1">dt </span><span class="s4">= </span><span class="s1">datetime</span><span class="s4">.</span><span class="s1">datetime</span><span class="s4">.</span><span class="s1">combine</span><span class="s4">(</span><span class="s1">dt</span><span class="s4">, </span><span class="s1">datetime</span><span class="s4">.</span><span class="s1">time</span><span class="s4">())</span>
+
+    <span class="s0"># rebase on epoch and adjust for &lt; 1900-03-01</span>
+    <span class="s1">days </span><span class="s4">= (</span><span class="s1">dt </span><span class="s4">- </span><span class="s1">epoch</span><span class="s4">).</span><span class="s1">days</span>
+    <span class="s3">if </span><span class="s5">0 </span><span class="s4">&lt; </span><span class="s1">days </span><span class="s4">&lt;= </span><span class="s5">60 </span><span class="s3">and </span><span class="s1">epoch </span><span class="s4">== </span><span class="s1">WINDOWS_EPOCH</span><span class="s4">:</span>
+        <span class="s1">days </span><span class="s4">-= </span><span class="s5">1</span>
+    <span class="s3">return </span><span class="s1">days </span><span class="s4">+ </span><span class="s1">time_to_days</span><span class="s4">(</span><span class="s1">dt</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">from_excel</span><span class="s4">(</span><span class="s1">value</span><span class="s4">, </span><span class="s1">epoch</span><span class="s4">=</span><span class="s1">WINDOWS_EPOCH</span><span class="s4">, </span><span class="s1">timedelta</span><span class="s4">=</span><span class="s3">False</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Convert Excel serial to Python datetime&quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">value </span><span class="s3">is None</span><span class="s4">:</span>
+        <span class="s3">return</span>
+
+    <span class="s3">if </span><span class="s1">timedelta</span><span class="s4">:</span>
+        <span class="s1">td </span><span class="s4">= </span><span class="s1">datetime</span><span class="s4">.</span><span class="s1">timedelta</span><span class="s4">(</span><span class="s1">days</span><span class="s4">=</span><span class="s1">value</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">td</span><span class="s4">.</span><span class="s1">microseconds</span><span class="s4">:</span>
+            <span class="s0"># round to millisecond precision</span>
+            <span class="s1">td </span><span class="s4">= </span><span class="s1">datetime</span><span class="s4">.</span><span class="s1">timedelta</span><span class="s4">(</span><span class="s1">seconds</span><span class="s4">=</span><span class="s1">td</span><span class="s4">.</span><span class="s1">total_seconds</span><span class="s4">() // </span><span class="s5">1</span><span class="s4">,</span>
+                                    <span class="s1">microseconds</span><span class="s4">=</span><span class="s1">round</span><span class="s4">(</span><span class="s1">td</span><span class="s4">.</span><span class="s1">microseconds</span><span class="s4">, -</span><span class="s5">3</span><span class="s4">))</span>
+        <span class="s3">return </span><span class="s1">td</span>
+
+    <span class="s1">day</span><span class="s4">, </span><span class="s1">fraction </span><span class="s4">= </span><span class="s1">divmod</span><span class="s4">(</span><span class="s1">value</span><span class="s4">, </span><span class="s5">1</span><span class="s4">)</span>
+    <span class="s1">diff </span><span class="s4">= </span><span class="s1">datetime</span><span class="s4">.</span><span class="s1">timedelta</span><span class="s4">(</span><span class="s1">milliseconds</span><span class="s4">=</span><span class="s1">round</span><span class="s4">(</span><span class="s1">fraction </span><span class="s4">* </span><span class="s1">SECS_PER_DAY </span><span class="s4">* </span><span class="s5">1000</span><span class="s4">))</span>
+    <span class="s3">if </span><span class="s5">0 </span><span class="s4">&lt;= </span><span class="s1">value </span><span class="s4">&lt; </span><span class="s5">1 </span><span class="s3">and </span><span class="s1">diff</span><span class="s4">.</span><span class="s1">days </span><span class="s4">== </span><span class="s5">0</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">days_to_time</span><span class="s4">(</span><span class="s1">diff</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s5">0 </span><span class="s4">&lt; </span><span class="s1">value </span><span class="s4">&lt; </span><span class="s5">60 </span><span class="s3">and </span><span class="s1">epoch </span><span class="s4">== </span><span class="s1">WINDOWS_EPOCH</span><span class="s4">:</span>
+        <span class="s1">day </span><span class="s4">+= </span><span class="s5">1</span>
+    <span class="s3">return </span><span class="s1">epoch </span><span class="s4">+ </span><span class="s1">datetime</span><span class="s4">.</span><span class="s1">timedelta</span><span class="s4">(</span><span class="s1">days</span><span class="s4">=</span><span class="s1">day</span><span class="s4">) + </span><span class="s1">diff</span>
+
+
+<span class="s3">def </span><span class="s1">time_to_days</span><span class="s4">(</span><span class="s1">value</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Convert a time value to fractions of day&quot;&quot;&quot;</span>
+    <span class="s3">return </span><span class="s4">(</span>
+        <span class="s4">(</span><span class="s1">value</span><span class="s4">.</span><span class="s1">hour </span><span class="s4">* </span><span class="s5">3600</span><span class="s4">)</span>
+        <span class="s4">+ (</span><span class="s1">value</span><span class="s4">.</span><span class="s1">minute </span><span class="s4">* </span><span class="s5">60</span><span class="s4">)</span>
+        <span class="s4">+ </span><span class="s1">value</span><span class="s4">.</span><span class="s1">second</span>
+        <span class="s4">+ </span><span class="s1">value</span><span class="s4">.</span><span class="s1">microsecond </span><span class="s4">/ </span><span class="s5">10</span><span class="s4">**</span><span class="s5">6</span>
+        <span class="s4">) / </span><span class="s1">SECS_PER_DAY</span>
+
+
+<span class="s3">def </span><span class="s1">timedelta_to_days</span><span class="s4">(</span><span class="s1">value</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Convert a timedelta value to fractions of a day&quot;&quot;&quot;</span>
+    <span class="s3">return </span><span class="s1">value</span><span class="s4">.</span><span class="s1">total_seconds</span><span class="s4">() / </span><span class="s1">SECS_PER_DAY</span>
+
+
+<span class="s3">def </span><span class="s1">days_to_time</span><span class="s4">(</span><span class="s1">value</span><span class="s4">):</span>
+    <span class="s1">mins</span><span class="s4">, </span><span class="s1">seconds </span><span class="s4">= </span><span class="s1">divmod</span><span class="s4">(</span><span class="s1">value</span><span class="s4">.</span><span class="s1">seconds</span><span class="s4">, </span><span class="s5">60</span><span class="s4">)</span>
+    <span class="s1">hours</span><span class="s4">, </span><span class="s1">mins </span><span class="s4">= </span><span class="s1">divmod</span><span class="s4">(</span><span class="s1">mins</span><span class="s4">, </span><span class="s5">60</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">datetime</span><span class="s4">.</span><span class="s1">time</span><span class="s4">(</span><span class="s1">hours</span><span class="s4">, </span><span class="s1">mins</span><span class="s4">, </span><span class="s1">seconds</span><span class="s4">, </span><span class="s1">value</span><span class="s4">.</span><span class="s1">microseconds</span><span class="s4">)</span>
+</pre>
+</body>
+</html>

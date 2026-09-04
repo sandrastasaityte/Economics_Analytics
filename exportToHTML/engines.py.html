@@ -1,0 +1,173 @@
+<html>
+<head>
+<title>engines.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+engines.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Engine classes for :func:`~pandas.eval` 
+&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">import </span><span class="s1">abc</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">TYPE_CHECKING</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">errors </span><span class="s2">import </span><span class="s1">NumExprClobberingError</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">computation</span><span class="s3">.</span><span class="s1">align </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">align_terms</span><span class="s3">,</span>
+    <span class="s1">reconstruct_object</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">computation</span><span class="s3">.</span><span class="s1">ops </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">MATHOPS</span><span class="s3">,</span>
+    <span class="s1">REDUCTIONS</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">formats </span><span class="s2">import </span><span class="s1">printing</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">computation</span><span class="s3">.</span><span class="s1">expr </span><span class="s2">import </span><span class="s1">Expr</span>
+
+<span class="s1">_ne_builtins </span><span class="s3">= </span><span class="s1">frozenset</span><span class="s3">(</span><span class="s1">MATHOPS </span><span class="s3">+ </span><span class="s1">REDUCTIONS</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_check_ne_builtin_clash</span><span class="s3">(</span><span class="s1">expr</span><span class="s3">: </span><span class="s1">Expr</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Attempt to prevent foot-shooting in a helpful way. 
+ 
+    Parameters 
+    ---------- 
+    expr : Expr 
+        Terms can contain 
+    &quot;&quot;&quot;</span>
+    <span class="s1">names </span><span class="s3">= </span><span class="s1">expr</span><span class="s3">.</span><span class="s1">names</span>
+    <span class="s1">overlap </span><span class="s3">= </span><span class="s1">names </span><span class="s3">&amp; </span><span class="s1">_ne_builtins</span>
+
+    <span class="s2">if </span><span class="s1">overlap</span><span class="s3">:</span>
+        <span class="s1">s </span><span class="s3">= </span><span class="s4">&quot;, &quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">([</span><span class="s1">repr</span><span class="s3">(</span><span class="s1">x</span><span class="s3">) </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">overlap</span><span class="s3">])</span>
+        <span class="s2">raise </span><span class="s1">NumExprClobberingError</span><span class="s3">(</span>
+            <span class="s4">f'Variables in expression &quot;</span><span class="s2">{</span><span class="s1">expr</span><span class="s2">}</span><span class="s4">&quot; overlap with builtins: (</span><span class="s2">{</span><span class="s1">s</span><span class="s2">}</span><span class="s4">)'</span>
+        <span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">AbstractEngine</span><span class="s3">(</span><span class="s1">metaclass</span><span class="s3">=</span><span class="s1">abc</span><span class="s3">.</span><span class="s1">ABCMeta</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Object serving as a base class for all engines.&quot;&quot;&quot;</span>
+
+    <span class="s1">has_neg_frac </span><span class="s3">= </span><span class="s2">False</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">expr</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">expr </span><span class="s3">= </span><span class="s1">expr</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">aligned_axes </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">result_type </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">result_name </span><span class="s3">= </span><span class="s2">None</span>
+
+    <span class="s2">def </span><span class="s1">convert</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Convert an expression for evaluation. 
+ 
+        Defaults to return the expression as a string. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">printing</span><span class="s3">.</span><span class="s1">pprint_thing</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">expr</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">evaluate</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; object</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Run the engine on the expression. 
+ 
+        This method performs alignment which is necessary no matter what engine 
+        is being used, thus its implementation is in the base class. 
+ 
+        Returns 
+        ------- 
+        object 
+            The result of the passed expression. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_is_aligned</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">result_type</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">aligned_axes</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">result_name </span><span class="s3">= </span><span class="s1">align_terms</span><span class="s3">(</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">expr</span><span class="s3">.</span><span class="s1">terms</span>
+            <span class="s3">)</span>
+
+        <span class="s5"># make sure no names in resolvers and locals/globals clash</span>
+        <span class="s1">res </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_evaluate</span><span class="s3">()</span>
+        <span class="s2">return </span><span class="s1">reconstruct_object</span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">result_type</span><span class="s3">,</span>
+            <span class="s1">res</span><span class="s3">,</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">aligned_axes</span><span class="s3">,</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">expr</span><span class="s3">.</span><span class="s1">terms</span><span class="s3">.</span><span class="s1">return_type</span><span class="s3">,</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">result_name</span><span class="s3">,</span>
+        <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">_is_aligned</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">aligned_axes </span><span class="s2">is not None and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">result_type </span><span class="s2">is not None</span>
+
+    <span class="s3">@</span><span class="s1">abc</span><span class="s3">.</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">_evaluate</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return an evaluated expression. 
+ 
+        Parameters 
+        ---------- 
+        env : Scope 
+            The local and global environment in which to evaluate an 
+            expression. 
+ 
+        Notes 
+        ----- 
+        Must be implemented by subclasses. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">NumExprEngine</span><span class="s3">(</span><span class="s1">AbstractEngine</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;NumExpr engine class&quot;&quot;&quot;</span>
+
+    <span class="s1">has_neg_frac </span><span class="s3">= </span><span class="s2">True</span>
+
+    <span class="s2">def </span><span class="s1">_evaluate</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">import </span><span class="s1">numexpr </span><span class="s2">as </span><span class="s1">ne</span>
+
+        <span class="s5"># convert the expression to a valid numexpr expression</span>
+        <span class="s1">s </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">convert</span><span class="s3">()</span>
+
+        <span class="s1">env </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">expr</span><span class="s3">.</span><span class="s1">env</span>
+        <span class="s1">scope </span><span class="s3">= </span><span class="s1">env</span><span class="s3">.</span><span class="s1">full_scope</span>
+        <span class="s1">_check_ne_builtin_clash</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">expr</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">ne</span><span class="s3">.</span><span class="s1">evaluate</span><span class="s3">(</span><span class="s1">s</span><span class="s3">, </span><span class="s1">local_dict</span><span class="s3">=</span><span class="s1">scope</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">PythonEngine</span><span class="s3">(</span><span class="s1">AbstractEngine</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Evaluate an expression in Python space. 
+ 
+    Mostly for testing purposes. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">has_neg_frac </span><span class="s3">= </span><span class="s2">False</span>
+
+    <span class="s2">def </span><span class="s1">evaluate</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">expr</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">_evaluate</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s2">pass</span>
+
+
+<span class="s1">ENGINES</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">type</span><span class="s3">[</span><span class="s1">AbstractEngine</span><span class="s3">]] = {</span>
+    <span class="s4">&quot;numexpr&quot;</span><span class="s3">: </span><span class="s1">NumExprEngine</span><span class="s3">,</span>
+    <span class="s4">&quot;python&quot;</span><span class="s3">: </span><span class="s1">PythonEngine</span><span class="s3">,</span>
+<span class="s3">}</span>
+</pre>
+</body>
+</html>

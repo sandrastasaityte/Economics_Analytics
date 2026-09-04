@@ -1,0 +1,262 @@
+<html>
+<head>
+<title>pickle.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+pickle.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;pickle compat&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">import </span><span class="s1">pickle</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s3">,</span>
+    <span class="s1">Any</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">import </span><span class="s1">warnings</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">compat </span><span class="s2">import </span><span class="s1">pickle_compat</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">_decorators </span><span class="s2">import </span><span class="s1">set_module</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">common </span><span class="s2">import </span><span class="s1">get_handle</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_typing </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">CompressionOptions</span><span class="s3">,</span>
+        <span class="s1">FilePath</span><span class="s3">,</span>
+        <span class="s1">ReadPickleBuffer</span><span class="s3">,</span>
+        <span class="s1">StorageOptions</span><span class="s3">,</span>
+        <span class="s1">WriteBuffer</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+    <span class="s2">from </span><span class="s1">pandas </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">DataFrame</span><span class="s3">,</span>
+        <span class="s1">Series</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;pandas&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">to_pickle</span><span class="s3">(</span>
+    <span class="s1">obj</span><span class="s3">: </span><span class="s1">Any</span><span class="s3">,</span>
+    <span class="s1">filepath_or_buffer</span><span class="s3">: </span><span class="s1">FilePath </span><span class="s3">| </span><span class="s1">WriteBuffer</span><span class="s3">[</span><span class="s1">bytes</span><span class="s3">],</span>
+    <span class="s1">compression</span><span class="s3">: </span><span class="s1">CompressionOptions </span><span class="s3">= </span><span class="s4">&quot;infer&quot;</span><span class="s3">,</span>
+    <span class="s1">protocol</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s1">pickle</span><span class="s3">.</span><span class="s1">HIGHEST_PROTOCOL</span><span class="s3">,</span>
+    <span class="s1">storage_options</span><span class="s3">: </span><span class="s1">StorageOptions </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Pickle (serialize) object to file. 
+ 
+    Parameters 
+    ---------- 
+    obj : any object 
+        Any python object. 
+    filepath_or_buffer : str, path object, or file-like object 
+        String, path object (implementing ``os.PathLike[str]``), or file-like 
+        object implementing a binary ``write()`` function. 
+        Also accepts URL. URL has to be of S3 or GCS. 
+    compression : str or dict, default 'infer' 
+        For on-the-fly compression of the output data. If 'infer' and 
+        'filepath_or_buffer' is path-like, then detect compression from the 
+        following extensions: '.gz', '.bz2', '.zip', '.xz', '.zst', '.tar', 
+        '.tar.gz', '.tar.xz' or '.tar.bz2' (otherwise no compression). 
+        Set to ``None`` for no compression. 
+        Can also be a dict with key ``'method'`` set 
+        to one of {``'zip'``, ``'gzip'``, ``'bz2'``, ``'zstd'``, ``'xz'``, 
+        ``'tar'``} and other key-value pairs are forwarded to 
+        ``zipfile.ZipFile``, ``gzip.GzipFile``, 
+        ``bz2.BZ2File``, ``zstandard.ZstdCompressor``, ``lzma.LZMAFile`` or 
+        ``tarfile.TarFile``, respectively. 
+        As an example, the following could be passed for faster compression 
+        and to create a reproducible gzip archive: 
+        ``compression={'method': 'gzip', 'compresslevel': 1, 'mtime': 1}``. 
+    protocol : int 
+        Int which indicates which protocol should be used by the pickler, 
+        default HIGHEST_PROTOCOL (see [1], paragraph 12.1.2). The possible 
+        values for this parameter depend on the version of Python. For Python 
+        2.x, possible values are 0, 1, 2. For Python&gt;=3.0, 3 is a valid value. 
+        For Python &gt;= 3.4, 4 is a valid value. A negative value for the 
+        protocol parameter is equivalent to setting its value to 
+        HIGHEST_PROTOCOL. 
+    storage_options : dict, optional 
+        Extra options that make sense for a particular storage connection, e.g. 
+        host, port, username, password, etc. For HTTP(S) URLs the key-value pairs 
+        are forwarded to ``urllib.request.Request`` as header options. For other 
+        URLs (e.g. starting with &quot;s3://&quot;, and &quot;gcs://&quot;) the key-value pairs are 
+        forwarded to ``fsspec.open``. Please see ``fsspec`` and ``urllib`` for more 
+        details, and for more examples on storage options refer `here 
+        &lt;https://pandas.pydata.org/docs/user_guide/io.html? 
+        highlight=storage_options#reading-writing-remote-files&gt;`_. 
+ 
+        .. [1] https://docs.python.org/3/library/pickle.html 
+ 
+    See Also 
+    -------- 
+    read_pickle : Load pickled pandas object (or any object) from file. 
+    DataFrame.to_hdf : Write DataFrame to an HDF5 file. 
+    DataFrame.to_sql : Write DataFrame to a SQL database. 
+    DataFrame.to_parquet : Write a DataFrame to the binary parquet format. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; original_df = pd.DataFrame( 
+    ...     {&quot;foo&quot;: range(5), &quot;bar&quot;: range(5, 10)} 
+    ... )  # doctest: +SKIP 
+    &gt;&gt;&gt; original_df  # doctest: +SKIP 
+       foo  bar 
+    0    0    5 
+    1    1    6 
+    2    2    7 
+    3    3    8 
+    4    4    9 
+    &gt;&gt;&gt; pd.to_pickle(original_df, &quot;./dummy.pkl&quot;)  # doctest: +SKIP 
+ 
+    &gt;&gt;&gt; unpickled_df = pd.read_pickle(&quot;./dummy.pkl&quot;)  # doctest: +SKIP 
+    &gt;&gt;&gt; unpickled_df  # doctest: +SKIP 
+       foo  bar 
+    0    0    5 
+    1    1    6 
+    2    2    7 
+    3    3    8 
+    4    4    9 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">protocol </span><span class="s3">&lt; </span><span class="s5">0</span><span class="s3">:</span>
+        <span class="s1">protocol </span><span class="s3">= </span><span class="s1">pickle</span><span class="s3">.</span><span class="s1">HIGHEST_PROTOCOL</span>
+
+    <span class="s2">with </span><span class="s1">get_handle</span><span class="s3">(</span>
+        <span class="s1">filepath_or_buffer</span><span class="s3">,</span>
+        <span class="s4">&quot;wb&quot;</span><span class="s3">,</span>
+        <span class="s1">compression</span><span class="s3">=</span><span class="s1">compression</span><span class="s3">,</span>
+        <span class="s1">is_text</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s1">storage_options</span><span class="s3">=</span><span class="s1">storage_options</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s2">as </span><span class="s1">handles</span><span class="s3">:</span>
+        <span class="s6"># letting pickle write directly to the buffer is more memory-efficient</span>
+        <span class="s1">pickle</span><span class="s3">.</span><span class="s1">dump</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">, </span><span class="s1">handles</span><span class="s3">.</span><span class="s1">handle</span><span class="s3">, </span><span class="s1">protocol</span><span class="s3">=</span><span class="s1">protocol</span><span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;pandas&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">read_pickle</span><span class="s3">(</span>
+    <span class="s1">filepath_or_buffer</span><span class="s3">: </span><span class="s1">FilePath </span><span class="s3">| </span><span class="s1">ReadPickleBuffer</span><span class="s3">,</span>
+    <span class="s1">compression</span><span class="s3">: </span><span class="s1">CompressionOptions </span><span class="s3">= </span><span class="s4">&quot;infer&quot;</span><span class="s3">,</span>
+    <span class="s1">storage_options</span><span class="s3">: </span><span class="s1">StorageOptions </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; DataFrame </span><span class="s3">| </span><span class="s1">Series</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Load pickled pandas object (or any object) from file and return unpickled object. 
+ 
+    .. warning:: 
+ 
+       Loading pickled data received from untrusted sources can be 
+       unsafe. See `here &lt;https://docs.python.org/3/library/pickle.html&gt;`__. 
+ 
+    Parameters 
+    ---------- 
+    filepath_or_buffer : str, path object, or file-like object 
+        String, path object (implementing ``os.PathLike[str]``), or file-like 
+        object implementing a binary ``readlines()`` function. 
+        Also accepts URL. URL is not limited to S3 and GCS. 
+    compression : str or dict, default 'infer' 
+        For on-the-fly decompression of on-disk data. If 'infer' and 
+        'filepath_or_buffer' is path-like, then detect compression from the 
+        following extensions: '.gz', '.bz2', '.zip', '.xz', '.zst', '.tar', 
+        '.tar.gz', '.tar.xz' or '.tar.bz2' (otherwise no compression). 
+        If using 'zip' or 'tar', the ZIP file must contain only one data file 
+        to be read in. 
+        Set to ``None`` for no decompression. 
+        Can also be a dict with key ``'method'`` set 
+        to one of {``'zip'``, ``'gzip'``, ``'bz2'``, ``'zstd'``, ``'xz'``, 
+        ``'tar'``} and other key-value pairs are forwarded to 
+        ``zipfile.ZipFile``, ``gzip.GzipFile``, 
+        ``bz2.BZ2File``, ``zstandard.ZstdDecompressor``, ``lzma.LZMAFile`` or 
+        ``tarfile.TarFile``, respectively. 
+        As an example, the following could be passed for Zstandard decompression 
+        using a custom compression dictionary: 
+        ``compression={'method': 'zstd', 'dict_data': my_compression_dict}``. 
+    storage_options : dict, optional 
+        Extra options that make sense for a particular storage connection, e.g. 
+        host, port, username, password, etc. For HTTP(S) URLs the key-value pairs 
+        are forwarded to ``urllib.request.Request`` as header options. For other 
+        URLs (e.g. starting with &quot;s3://&quot;, and &quot;gcs://&quot;) the key-value pairs are 
+        forwarded to ``fsspec.open``. Please see ``fsspec`` and ``urllib`` for more 
+        details, and for more examples on storage options refer `here 
+        &lt;https://pandas.pydata.org/docs/user_guide/io.html? 
+        highlight=storage_options#reading-writing-remote-files&gt;`_. 
+ 
+    Returns 
+    ------- 
+    object 
+        The unpickled pandas object (or any object) that was stored in file. 
+ 
+    See Also 
+    -------- 
+    DataFrame.to_pickle : Pickle (serialize) DataFrame object to file. 
+    Series.to_pickle : Pickle (serialize) Series object to file. 
+    read_hdf : Read HDF5 file into a DataFrame. 
+    read_sql : Read SQL query or database table into a DataFrame. 
+    read_parquet : Load a parquet object, returning a DataFrame. 
+ 
+    Notes 
+    ----- 
+    read_pickle is only guaranteed to be backwards compatible to pandas 1.0 
+    provided the object was serialized with to_pickle. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; original_df = pd.DataFrame( 
+    ...     {&quot;foo&quot;: range(5), &quot;bar&quot;: range(5, 10)} 
+    ... )  # doctest: +SKIP 
+    &gt;&gt;&gt; original_df  # doctest: +SKIP 
+       foo  bar 
+    0    0    5 
+    1    1    6 
+    2    2    7 
+    3    3    8 
+    4    4    9 
+    &gt;&gt;&gt; pd.to_pickle(original_df, &quot;./dummy.pkl&quot;)  # doctest: +SKIP 
+ 
+    &gt;&gt;&gt; unpickled_df = pd.read_pickle(&quot;./dummy.pkl&quot;)  # doctest: +SKIP 
+    &gt;&gt;&gt; unpickled_df  # doctest: +SKIP 
+       foo  bar 
+    0    0    5 
+    1    1    6 
+    2    2    7 
+    3    3    8 
+    4    4    9 
+    &quot;&quot;&quot;</span>
+    <span class="s6"># TypeError for Cython complaints about object.__new__ vs Tick.__new__</span>
+    <span class="s1">excs_to_catch </span><span class="s3">= (</span><span class="s1">AttributeError</span><span class="s3">, </span><span class="s1">ImportError</span><span class="s3">, </span><span class="s1">ModuleNotFoundError</span><span class="s3">, </span><span class="s1">TypeError</span><span class="s3">)</span>
+    <span class="s2">with </span><span class="s1">get_handle</span><span class="s3">(</span>
+        <span class="s1">filepath_or_buffer</span><span class="s3">,</span>
+        <span class="s4">&quot;rb&quot;</span><span class="s3">,</span>
+        <span class="s1">compression</span><span class="s3">=</span><span class="s1">compression</span><span class="s3">,</span>
+        <span class="s1">is_text</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s1">storage_options</span><span class="s3">=</span><span class="s1">storage_options</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s2">as </span><span class="s1">handles</span><span class="s3">:</span>
+        <span class="s6"># 1) try standard library Pickle</span>
+        <span class="s6"># 2) try pickle_compat (older pandas version) to handle subclass changes</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">with </span><span class="s1">warnings</span><span class="s3">.</span><span class="s1">catch_warnings</span><span class="s3">(</span><span class="s1">record</span><span class="s3">=</span><span class="s2">True</span><span class="s3">):</span>
+                <span class="s6"># We want to silence any warnings about, e.g. moved modules.</span>
+                <span class="s1">warnings</span><span class="s3">.</span><span class="s1">simplefilter</span><span class="s3">(</span><span class="s4">&quot;ignore&quot;</span><span class="s3">, </span><span class="s1">Warning</span><span class="s3">)</span>
+                <span class="s2">return </span><span class="s1">pickle</span><span class="s3">.</span><span class="s1">load</span><span class="s3">(</span><span class="s1">handles</span><span class="s3">.</span><span class="s1">handle</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s1">excs_to_catch</span><span class="s3">:</span>
+            <span class="s6"># e.g.</span>
+            <span class="s6">#  &quot;No module named 'pandas.core.sparse.series'&quot;</span>
+            <span class="s6">#  &quot;Can't get attribute '_nat_unpickle' on &lt;module 'pandas._libs.tslib&quot;</span>
+            <span class="s1">handles</span><span class="s3">.</span><span class="s1">handle</span><span class="s3">.</span><span class="s1">seek</span><span class="s3">(</span><span class="s5">0</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">pickle_compat</span><span class="s3">.</span><span class="s1">Unpickler</span><span class="s3">(</span><span class="s1">handles</span><span class="s3">.</span><span class="s1">handle</span><span class="s3">).</span><span class="s1">load</span><span class="s3">()</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,913 @@
+<html>
+<head>
+<title>test_stride_tricks.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #2aacb8;}
+.s5 { color: #6aab73;}
+.s6 { color: #5f826b; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_stride_tricks.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">_core</span><span class="s2">.</span><span class="s1">_rational_tests </span><span class="s0">import </span><span class="s1">rational</span><span class="s2">, </span><span class="s1">rational2</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">lib</span><span class="s2">.</span><span class="s1">_stride_tricks_impl </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">_broadcast_shape</span><span class="s2">,</span>
+    <span class="s1">as_strided</span><span class="s2">,</span>
+    <span class="s1">broadcast_arrays</span><span class="s2">,</span>
+    <span class="s1">broadcast_shapes</span><span class="s2">,</span>
+    <span class="s1">broadcast_to</span><span class="s2">,</span>
+    <span class="s1">sliding_window_view</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">testing </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">assert_</span><span class="s2">,</span>
+    <span class="s1">assert_array_equal</span><span class="s2">,</span>
+    <span class="s1">assert_equal</span><span class="s2">,</span>
+    <span class="s1">assert_raises</span><span class="s2">,</span>
+    <span class="s1">assert_raises_regex</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">assert_shapes_correct</span><span class="s2">(</span><span class="s1">input_shapes</span><span class="s2">, </span><span class="s1">expected_shape</span><span class="s2">):</span>
+    <span class="s3"># Broadcast a list of arrays with the given input shapes and check the</span>
+    <span class="s3"># common output shape.</span>
+
+    <span class="s1">inarrays </span><span class="s2">= [</span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">(</span><span class="s1">s</span><span class="s2">) </span><span class="s0">for </span><span class="s1">s </span><span class="s0">in </span><span class="s1">input_shapes</span><span class="s2">]</span>
+    <span class="s1">outarrays </span><span class="s2">= </span><span class="s1">broadcast_arrays</span><span class="s2">(*</span><span class="s1">inarrays</span><span class="s2">)</span>
+    <span class="s1">outshapes </span><span class="s2">= [</span><span class="s1">a</span><span class="s2">.</span><span class="s1">shape </span><span class="s0">for </span><span class="s1">a </span><span class="s0">in </span><span class="s1">outarrays</span><span class="s2">]</span>
+    <span class="s1">expected </span><span class="s2">= [</span><span class="s1">expected_shape</span><span class="s2">] * </span><span class="s1">len</span><span class="s2">(</span><span class="s1">inarrays</span><span class="s2">)</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">outshapes</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">assert_incompatible_shapes_raise</span><span class="s2">(</span><span class="s1">input_shapes</span><span class="s2">):</span>
+    <span class="s3"># Broadcast a list of arrays with the given (incompatible) input shapes</span>
+    <span class="s3"># and check that they raise a ValueError.</span>
+
+    <span class="s1">inarrays </span><span class="s2">= [</span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">(</span><span class="s1">s</span><span class="s2">) </span><span class="s0">for </span><span class="s1">s </span><span class="s0">in </span><span class="s1">input_shapes</span><span class="s2">]</span>
+    <span class="s1">assert_raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">broadcast_arrays</span><span class="s2">, *</span><span class="s1">inarrays</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">assert_same_as_ufunc</span><span class="s2">(</span><span class="s1">shape0</span><span class="s2">, </span><span class="s1">shape1</span><span class="s2">, </span><span class="s1">transposed</span><span class="s2">=</span><span class="s0">False</span><span class="s2">, </span><span class="s1">flipped</span><span class="s2">=</span><span class="s0">False</span><span class="s2">):</span>
+    <span class="s3"># Broadcast two shapes against each other and check that the data layout</span>
+    <span class="s3"># is the same as if a ufunc did the broadcasting.</span>
+
+    <span class="s1">x0 </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">(</span><span class="s1">shape0</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">int</span><span class="s2">)</span>
+    <span class="s3"># Note that multiply.reduce's identity element is 1.0, so when shape1==(),</span>
+    <span class="s3"># this gives the desired n==1.</span>
+    <span class="s1">n </span><span class="s2">= </span><span class="s1">int</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">multiply</span><span class="s2">.</span><span class="s1">reduce</span><span class="s2">(</span><span class="s1">shape1</span><span class="s2">))</span>
+    <span class="s1">x1 </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">n</span><span class="s2">).</span><span class="s1">reshape</span><span class="s2">(</span><span class="s1">shape1</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">transposed</span><span class="s2">:</span>
+        <span class="s1">x0 </span><span class="s2">= </span><span class="s1">x0</span><span class="s2">.</span><span class="s1">T</span>
+        <span class="s1">x1 </span><span class="s2">= </span><span class="s1">x1</span><span class="s2">.</span><span class="s1">T</span>
+    <span class="s0">if </span><span class="s1">flipped</span><span class="s2">:</span>
+        <span class="s1">x0 </span><span class="s2">= </span><span class="s1">x0</span><span class="s2">[::-</span><span class="s4">1</span><span class="s2">]</span>
+        <span class="s1">x1 </span><span class="s2">= </span><span class="s1">x1</span><span class="s2">[::-</span><span class="s4">1</span><span class="s2">]</span>
+    <span class="s3"># Use the add ufunc to do the broadcasting. Since we're adding 0s to x1, the</span>
+    <span class="s3"># result should be exactly the same as the broadcasted view of x1.</span>
+    <span class="s1">y </span><span class="s2">= </span><span class="s1">x0 </span><span class="s2">+ </span><span class="s1">x1</span>
+    <span class="s1">b0</span><span class="s2">, </span><span class="s1">b1 </span><span class="s2">= </span><span class="s1">broadcast_arrays</span><span class="s2">(</span><span class="s1">x0</span><span class="s2">, </span><span class="s1">x1</span><span class="s2">)</span>
+    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">y</span><span class="s2">, </span><span class="s1">b1</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_same</span><span class="s2">():</span>
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+    <span class="s1">y </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+    <span class="s1">bx</span><span class="s2">, </span><span class="s1">by </span><span class="s2">= </span><span class="s1">broadcast_arrays</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">y</span><span class="s2">)</span>
+    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">bx</span><span class="s2">)</span>
+    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">y</span><span class="s2">, </span><span class="s1">by</span><span class="s2">)</span>
+
+<span class="s0">def </span><span class="s1">test_broadcast_kwargs</span><span class="s2">():</span>
+    <span class="s3"># ensure that a TypeError is appropriately raised when</span>
+    <span class="s3"># np.broadcast_arrays() is called with any keyword</span>
+    <span class="s3"># argument other than 'subok'</span>
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+    <span class="s1">y </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+
+    <span class="s0">with </span><span class="s1">assert_raises_regex</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">, </span><span class="s5">'got an unexpected keyword'</span><span class="s2">):</span>
+        <span class="s1">broadcast_arrays</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">y</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s5">'float64'</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_one_off</span><span class="s2">():</span>
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([[</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">]])</span>
+    <span class="s1">y </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([[</span><span class="s4">1</span><span class="s2">], [</span><span class="s4">2</span><span class="s2">], [</span><span class="s4">3</span><span class="s2">]])</span>
+    <span class="s1">bx</span><span class="s2">, </span><span class="s1">by </span><span class="s2">= </span><span class="s1">broadcast_arrays</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">y</span><span class="s2">)</span>
+    <span class="s1">bx0 </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([[</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">], [</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">], [</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">]])</span>
+    <span class="s1">by0 </span><span class="s2">= </span><span class="s1">bx0</span><span class="s2">.</span><span class="s1">T</span>
+    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">bx0</span><span class="s2">, </span><span class="s1">bx</span><span class="s2">)</span>
+    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">by0</span><span class="s2">, </span><span class="s1">by</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_same_input_shapes</span><span class="s2">():</span>
+    <span class="s3"># Check that the final shape is just the input shape.</span>
+
+    <span class="s1">data </span><span class="s2">= [</span>
+        <span class="s2">(),</span>
+        <span class="s2">(</span><span class="s4">1</span><span class="s2">,),</span>
+        <span class="s2">(</span><span class="s4">3</span><span class="s2">,),</span>
+        <span class="s2">(</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">0</span><span class="s2">, </span><span class="s4">3</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">3</span><span class="s2">, </span><span class="s4">0</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">),</span>
+    <span class="s2">]</span>
+    <span class="s0">for </span><span class="s1">shape </span><span class="s0">in </span><span class="s1">data</span><span class="s2">:</span>
+        <span class="s1">input_shapes </span><span class="s2">= [</span><span class="s1">shape</span><span class="s2">]</span>
+        <span class="s3"># Single input.</span>
+        <span class="s1">assert_shapes_correct</span><span class="s2">(</span><span class="s1">input_shapes</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s3"># Double input.</span>
+        <span class="s1">input_shapes2 </span><span class="s2">= [</span><span class="s1">shape</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">]</span>
+        <span class="s1">assert_shapes_correct</span><span class="s2">(</span><span class="s1">input_shapes2</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s3"># Triple input.</span>
+        <span class="s1">input_shapes3 </span><span class="s2">= [</span><span class="s1">shape</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">]</span>
+        <span class="s1">assert_shapes_correct</span><span class="s2">(</span><span class="s1">input_shapes3</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_two_compatible_by_ones_input_shapes</span><span class="s2">():</span>
+    <span class="s3"># Check that two different input shapes of the same length, but some have</span>
+    <span class="s3"># ones, broadcast to the correct shape.</span>
+
+    <span class="s1">data </span><span class="s2">= [</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">,), (</span><span class="s4">3</span><span class="s2">,)], (</span><span class="s4">3</span><span class="s2">,)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)],</span>
+    <span class="s2">]</span>
+    <span class="s0">for </span><span class="s1">input_shapes</span><span class="s2">, </span><span class="s1">expected_shape </span><span class="s0">in </span><span class="s1">data</span><span class="s2">:</span>
+        <span class="s1">assert_shapes_correct</span><span class="s2">(</span><span class="s1">input_shapes</span><span class="s2">, </span><span class="s1">expected_shape</span><span class="s2">)</span>
+        <span class="s3"># Reverse the input shapes since broadcasting should be symmetric.</span>
+        <span class="s1">assert_shapes_correct</span><span class="s2">(</span><span class="s1">input_shapes</span><span class="s2">[::-</span><span class="s4">1</span><span class="s2">], </span><span class="s1">expected_shape</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_two_compatible_by_prepending_ones_input_shapes</span><span class="s2">():</span>
+    <span class="s3"># Check that two different input shapes (of different lengths) broadcast</span>
+    <span class="s3"># to the correct shape.</span>
+
+    <span class="s1">data </span><span class="s2">= [</span>
+        <span class="s2">[[(), (</span><span class="s4">3</span><span class="s2">,)], (</span><span class="s4">3</span><span class="s2">,)],</span>
+        <span class="s2">[[(</span><span class="s4">3</span><span class="s2">,), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">3</span><span class="s2">,), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">,), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">3</span><span class="s2">,)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">,), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">,), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)],</span>
+        <span class="s2">[[(), (</span><span class="s4">0</span><span class="s2">,)], (</span><span class="s4">0</span><span class="s2">,)],</span>
+        <span class="s2">[[(</span><span class="s4">0</span><span class="s2">,), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">0</span><span class="s2">,), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">,), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">,)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">,), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">,), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)],</span>
+    <span class="s2">]</span>
+    <span class="s0">for </span><span class="s1">input_shapes</span><span class="s2">, </span><span class="s1">expected_shape </span><span class="s0">in </span><span class="s1">data</span><span class="s2">:</span>
+        <span class="s1">assert_shapes_correct</span><span class="s2">(</span><span class="s1">input_shapes</span><span class="s2">, </span><span class="s1">expected_shape</span><span class="s2">)</span>
+        <span class="s3"># Reverse the input shapes since broadcasting should be symmetric.</span>
+        <span class="s1">assert_shapes_correct</span><span class="s2">(</span><span class="s1">input_shapes</span><span class="s2">[::-</span><span class="s4">1</span><span class="s2">], </span><span class="s1">expected_shape</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_incompatible_shapes_raise_valueerror</span><span class="s2">():</span>
+    <span class="s3"># Check that a ValueError is raised for incompatible shapes.</span>
+
+    <span class="s1">data </span><span class="s2">= [</span>
+        <span class="s2">[(</span><span class="s4">3</span><span class="s2">,), (</span><span class="s4">4</span><span class="s2">,)],</span>
+        <span class="s2">[(</span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">), (</span><span class="s4">2</span><span class="s2">,)],</span>
+        <span class="s2">[(</span><span class="s4">3</span><span class="s2">,), (</span><span class="s4">3</span><span class="s2">,), (</span><span class="s4">4</span><span class="s2">,)],</span>
+        <span class="s2">[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">), (</span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+    <span class="s2">]</span>
+    <span class="s0">for </span><span class="s1">input_shapes </span><span class="s0">in </span><span class="s1">data</span><span class="s2">:</span>
+        <span class="s1">assert_incompatible_shapes_raise</span><span class="s2">(</span><span class="s1">input_shapes</span><span class="s2">)</span>
+        <span class="s3"># Reverse the input shapes since broadcasting should be symmetric.</span>
+        <span class="s1">assert_incompatible_shapes_raise</span><span class="s2">(</span><span class="s1">input_shapes</span><span class="s2">[::-</span><span class="s4">1</span><span class="s2">])</span>
+
+
+<span class="s0">def </span><span class="s1">test_same_as_ufunc</span><span class="s2">():</span>
+    <span class="s3"># Check that the data layout is the same as if a ufunc did the operation.</span>
+
+    <span class="s1">data </span><span class="s2">= [</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">,), (</span><span class="s4">3</span><span class="s2">,)], (</span><span class="s4">3</span><span class="s2">,)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)],</span>
+        <span class="s2">[[(), (</span><span class="s4">3</span><span class="s2">,)], (</span><span class="s4">3</span><span class="s2">,)],</span>
+        <span class="s2">[[(</span><span class="s4">3</span><span class="s2">,), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">3</span><span class="s2">,), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">,), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">3</span><span class="s2">,)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">,), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">,), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)],</span>
+        <span class="s2">[[(), (</span><span class="s4">0</span><span class="s2">,)], (</span><span class="s4">0</span><span class="s2">,)],</span>
+        <span class="s2">[[(</span><span class="s4">0</span><span class="s2">,), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">0</span><span class="s2">,), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">,), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">,)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">,), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">,), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)],</span>
+    <span class="s2">]</span>
+    <span class="s0">for </span><span class="s1">input_shapes</span><span class="s2">, </span><span class="s1">expected_shape </span><span class="s0">in </span><span class="s1">data</span><span class="s2">:</span>
+        <span class="s1">assert_same_as_ufunc</span><span class="s2">(</span><span class="s1">input_shapes</span><span class="s2">[</span><span class="s4">0</span><span class="s2">], </span><span class="s1">input_shapes</span><span class="s2">[</span><span class="s4">1</span><span class="s2">],</span>
+                             <span class="s5">f&quot;Shapes: </span><span class="s0">{</span><span class="s1">input_shapes</span><span class="s2">[</span><span class="s4">0</span><span class="s2">]</span><span class="s0">} {</span><span class="s1">input_shapes</span><span class="s2">[</span><span class="s4">1</span><span class="s2">]</span><span class="s0">}</span><span class="s5">&quot;</span><span class="s2">)</span>
+        <span class="s3"># Reverse the input shapes since broadcasting should be symmetric.</span>
+        <span class="s1">assert_same_as_ufunc</span><span class="s2">(</span><span class="s1">input_shapes</span><span class="s2">[</span><span class="s4">1</span><span class="s2">], </span><span class="s1">input_shapes</span><span class="s2">[</span><span class="s4">0</span><span class="s2">])</span>
+        <span class="s3"># Try them transposed, too.</span>
+        <span class="s1">assert_same_as_ufunc</span><span class="s2">(</span><span class="s1">input_shapes</span><span class="s2">[</span><span class="s4">0</span><span class="s2">], </span><span class="s1">input_shapes</span><span class="s2">[</span><span class="s4">1</span><span class="s2">], </span><span class="s0">True</span><span class="s2">)</span>
+        <span class="s3"># ... and flipped for non-rank-0 inputs in order to test negative</span>
+        <span class="s3"># strides.</span>
+        <span class="s0">if </span><span class="s2">() </span><span class="s0">not in </span><span class="s1">input_shapes</span><span class="s2">:</span>
+            <span class="s1">assert_same_as_ufunc</span><span class="s2">(</span><span class="s1">input_shapes</span><span class="s2">[</span><span class="s4">0</span><span class="s2">], </span><span class="s1">input_shapes</span><span class="s2">[</span><span class="s4">1</span><span class="s2">], </span><span class="s0">False</span><span class="s2">, </span><span class="s0">True</span><span class="s2">)</span>
+            <span class="s1">assert_same_as_ufunc</span><span class="s2">(</span><span class="s1">input_shapes</span><span class="s2">[</span><span class="s4">0</span><span class="s2">], </span><span class="s1">input_shapes</span><span class="s2">[</span><span class="s4">1</span><span class="s2">], </span><span class="s0">True</span><span class="s2">, </span><span class="s0">True</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_broadcast_to_succeeds</span><span class="s2">():</span>
+    <span class="s1">data </span><span class="s2">= [</span>
+        <span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s4">0</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">,), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s4">0</span><span class="s2">), (</span><span class="s4">1</span><span class="s2">,), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">(</span><span class="s4">1</span><span class="s2">)],</span>
+        <span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s4">0</span><span class="s2">), (</span><span class="s4">3</span><span class="s2">,), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">(</span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s4">1</span><span class="s2">), (</span><span class="s4">1</span><span class="s2">,), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s4">1</span><span class="s2">)],</span>
+        <span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s4">1</span><span class="s2">), (</span><span class="s4">2</span><span class="s2">,), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s4">2</span><span class="s2">)],</span>
+        <span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s4">1</span><span class="s2">), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">((</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">))],</span>
+        <span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">3</span><span class="s2">), (</span><span class="s4">3</span><span class="s2">,), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">3</span><span class="s2">), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">3</span><span class="s2">).</span><span class="s1">reshape</span><span class="s2">(</span><span class="s4">1</span><span class="s2">, -</span><span class="s4">1</span><span class="s2">)],</span>
+        <span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">3</span><span class="s2">), (</span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([[</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">], [</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">]])],</span>
+        <span class="s3"># test if shape is not a tuple</span>
+        <span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s4">0</span><span class="s2">), </span><span class="s4">0</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s4">1</span><span class="s2">), </span><span class="s4">1</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s4">1</span><span class="s2">)],</span>
+        <span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s4">1</span><span class="s2">), </span><span class="s4">2</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s4">2</span><span class="s2">)],</span>
+        <span class="s3"># these cases with size 0 are strange, but they reproduce the behavior</span>
+        <span class="s3"># of broadcasting with ufuncs (see test_same_as_ufunc above)</span>
+        <span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s4">1</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">,), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">((</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">)), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">2</span><span class="s2">), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">((</span><span class="s4">0</span><span class="s2">, </span><span class="s4">2</span><span class="s2">))],</span>
+        <span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">((</span><span class="s4">2</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)), (</span><span class="s4">2</span><span class="s2">, </span><span class="s4">0</span><span class="s2">), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">((</span><span class="s4">2</span><span class="s2">, </span><span class="s4">0</span><span class="s2">))],</span>
+    <span class="s2">]</span>
+    <span class="s0">for </span><span class="s1">input_array</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">, </span><span class="s1">expected </span><span class="s0">in </span><span class="s1">data</span><span class="s2">:</span>
+        <span class="s1">actual </span><span class="s2">= </span><span class="s1">broadcast_to</span><span class="s2">(</span><span class="s1">input_array</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">expected</span><span class="s2">, </span><span class="s1">actual</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_broadcast_to_raises</span><span class="s2">():</span>
+    <span class="s1">data </span><span class="s2">= [</span>
+        <span class="s2">[(</span><span class="s4">0</span><span class="s2">,), ()],</span>
+        <span class="s2">[(</span><span class="s4">1</span><span class="s2">,), ()],</span>
+        <span class="s2">[(</span><span class="s4">3</span><span class="s2">,), ()],</span>
+        <span class="s2">[(</span><span class="s4">3</span><span class="s2">,), (</span><span class="s4">1</span><span class="s2">,)],</span>
+        <span class="s2">[(</span><span class="s4">3</span><span class="s2">,), (</span><span class="s4">2</span><span class="s2">,)],</span>
+        <span class="s2">[(</span><span class="s4">3</span><span class="s2">,), (</span><span class="s4">4</span><span class="s2">,)],</span>
+        <span class="s2">[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">), (</span><span class="s4">2</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)],</span>
+        <span class="s2">[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">1</span><span class="s2">,)],</span>
+        <span class="s2">[(</span><span class="s4">1</span><span class="s2">,), -</span><span class="s4">1</span><span class="s2">],</span>
+        <span class="s2">[(</span><span class="s4">1</span><span class="s2">,), (-</span><span class="s4">1</span><span class="s2">,)],</span>
+        <span class="s2">[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">), (-</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">)],</span>
+    <span class="s2">]</span>
+    <span class="s0">for </span><span class="s1">orig_shape</span><span class="s2">, </span><span class="s1">target_shape </span><span class="s0">in </span><span class="s1">data</span><span class="s2">:</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">(</span><span class="s1">orig_shape</span><span class="s2">)</span>
+        <span class="s1">assert_raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s0">lambda</span><span class="s2">: </span><span class="s1">broadcast_to</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">target_shape</span><span class="s2">))</span>
+
+
+<span class="s0">def </span><span class="s1">test_broadcast_shape</span><span class="s2">():</span>
+    <span class="s3"># tests internal _broadcast_shape</span>
+    <span class="s3"># _broadcast_shape is already exercised indirectly by broadcast_arrays</span>
+    <span class="s3"># _broadcast_shape is also exercised by the public broadcast_shapes function</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">_broadcast_shape</span><span class="s2">(), ())</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">_broadcast_shape</span><span class="s2">([</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">]), (</span><span class="s4">2</span><span class="s2">,))</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">_broadcast_shape</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">((</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">))), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">))</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">_broadcast_shape</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">((</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">((</span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">))), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">))</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">_broadcast_shape</span><span class="s2">(*([</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">((</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">))] * </span><span class="s4">32</span><span class="s2">)), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">))</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">_broadcast_shape</span><span class="s2">(*([</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">((</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">))] * </span><span class="s4">100</span><span class="s2">)), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">))</span>
+
+    <span class="s3"># regression tests for gh-5862</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">_broadcast_shape</span><span class="s2">(*([</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s4">2</span><span class="s2">)] * </span><span class="s4">32 </span><span class="s2">+ [</span><span class="s4">1</span><span class="s2">])), (</span><span class="s4">2</span><span class="s2">,))</span>
+    <span class="s1">bad_args </span><span class="s2">= [</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s4">2</span><span class="s2">)] * </span><span class="s4">32 </span><span class="s2">+ [</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s4">3</span><span class="s2">)] * </span><span class="s4">32</span>
+    <span class="s1">assert_raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s0">lambda</span><span class="s2">: </span><span class="s1">_broadcast_shape</span><span class="s2">(*</span><span class="s1">bad_args</span><span class="s2">))</span>
+
+
+<span class="s0">def </span><span class="s1">test_broadcast_shapes_succeeds</span><span class="s2">():</span>
+    <span class="s3"># tests public broadcast_shapes</span>
+    <span class="s1">data </span><span class="s2">= [</span>
+        <span class="s2">[[], ()],</span>
+        <span class="s2">[[()], ()],</span>
+        <span class="s2">[[(</span><span class="s4">7</span><span class="s2">,)], (</span><span class="s4">7</span><span class="s2">,)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">), (</span><span class="s4">2</span><span class="s2">,)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">6</span><span class="s2">, </span><span class="s4">7</span><span class="s2">), (</span><span class="s4">5</span><span class="s2">, </span><span class="s4">6</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">7</span><span class="s2">,), (</span><span class="s4">5</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">7</span><span class="s2">)], (</span><span class="s4">5</span><span class="s2">, </span><span class="s4">6</span><span class="s2">, </span><span class="s4">7</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">5</span><span class="s2">, </span><span class="s4">6</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">5</span><span class="s2">, </span><span class="s4">6</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)],</span>
+        <span class="s2">[[(), (</span><span class="s4">0</span><span class="s2">,)], (</span><span class="s4">0</span><span class="s2">,)],</span>
+        <span class="s2">[[(</span><span class="s4">0</span><span class="s2">,), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">0</span><span class="s2">,), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">,), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">0</span><span class="s2">,)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">,), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">,), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)], (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)],</span>
+        <span class="s2">[[(), (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)], (</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)],</span>
+        <span class="s2">[[(</span><span class="s4">1</span><span class="s2">,), (</span><span class="s4">3</span><span class="s2">,)], (</span><span class="s4">3</span><span class="s2">,)],</span>
+        <span class="s2">[[</span><span class="s4">2</span><span class="s2">, (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">2</span><span class="s2">)], (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">2</span><span class="s2">)],</span>
+    <span class="s2">]</span>
+    <span class="s0">for </span><span class="s1">input_shapes</span><span class="s2">, </span><span class="s1">target_shape </span><span class="s0">in </span><span class="s1">data</span><span class="s2">:</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">broadcast_shapes</span><span class="s2">(*</span><span class="s1">input_shapes</span><span class="s2">), </span><span class="s1">target_shape</span><span class="s2">)</span>
+
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">broadcast_shapes</span><span class="s2">(*([(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">)] * </span><span class="s4">32</span><span class="s2">)), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">))</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">broadcast_shapes</span><span class="s2">(*([(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">)] * </span><span class="s4">100</span><span class="s2">)), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">))</span>
+
+    <span class="s3"># regression tests for gh-5862</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">broadcast_shapes</span><span class="s2">(*([(</span><span class="s4">2</span><span class="s2">,)] * </span><span class="s4">32</span><span class="s2">)), (</span><span class="s4">2</span><span class="s2">,))</span>
+
+
+<span class="s0">def </span><span class="s1">test_broadcast_shapes_raises</span><span class="s2">():</span>
+    <span class="s3"># tests public broadcast_shapes</span>
+    <span class="s1">data </span><span class="s2">= [</span>
+        <span class="s2">[(</span><span class="s4">3</span><span class="s2">,), (</span><span class="s4">4</span><span class="s2">,)],</span>
+        <span class="s2">[(</span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">), (</span><span class="s4">2</span><span class="s2">,)],</span>
+        <span class="s2">[(</span><span class="s4">3</span><span class="s2">,), (</span><span class="s4">3</span><span class="s2">,), (</span><span class="s4">4</span><span class="s2">,)],</span>
+        <span class="s2">[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">), (</span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+        <span class="s2">[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">), (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">2</span><span class="s2">), (</span><span class="s4">10</span><span class="s2">, </span><span class="s4">5</span><span class="s2">)],</span>
+        <span class="s2">[</span><span class="s4">2</span><span class="s2">, (</span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)],</span>
+    <span class="s2">]</span>
+    <span class="s0">for </span><span class="s1">input_shapes </span><span class="s0">in </span><span class="s1">data</span><span class="s2">:</span>
+        <span class="s1">assert_raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s0">lambda</span><span class="s2">: </span><span class="s1">broadcast_shapes</span><span class="s2">(*</span><span class="s1">input_shapes</span><span class="s2">))</span>
+
+    <span class="s1">bad_args </span><span class="s2">= [(</span><span class="s4">2</span><span class="s2">,)] * </span><span class="s4">32 </span><span class="s2">+ [(</span><span class="s4">3</span><span class="s2">,)] * </span><span class="s4">32</span>
+    <span class="s1">assert_raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s0">lambda</span><span class="s2">: </span><span class="s1">broadcast_shapes</span><span class="s2">(*</span><span class="s1">bad_args</span><span class="s2">))</span>
+
+
+<span class="s0">def </span><span class="s1">test_as_strided</span><span class="s2">():</span>
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s0">None</span><span class="s2">])</span>
+    <span class="s1">a_view </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">a</span><span class="s2">)</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s0">None</span><span class="s2">])</span>
+    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">a_view</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s0">None</span><span class="s2">]))</span>
+
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">])</span>
+    <span class="s1">a_view </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">2</span><span class="s2">,), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s4">2 </span><span class="s2">* </span><span class="s1">a</span><span class="s2">.</span><span class="s1">itemsize</span><span class="s2">,))</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">])</span>
+    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">a_view</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">])</span>
+    <span class="s1">a_view </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1 </span><span class="s2">* </span><span class="s1">a</span><span class="s2">.</span><span class="s1">itemsize</span><span class="s2">))</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([[</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">], [</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">], [</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">]])</span>
+    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">a_view</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s3"># Regression test for gh-5081</span>
+    <span class="s1">dt </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">([(</span><span class="s5">'num'</span><span class="s2">, </span><span class="s5">'i4'</span><span class="s2">), (</span><span class="s5">'obj'</span><span class="s2">, </span><span class="s5">'O'</span><span class="s2">)])</span>
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">empty</span><span class="s2">((</span><span class="s4">4</span><span class="s2">,), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dt</span><span class="s2">)</span>
+    <span class="s1">a</span><span class="s2">[</span><span class="s5">'num'</span><span class="s2">] = </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">5</span><span class="s2">)</span>
+    <span class="s1">a_view </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s4">0</span><span class="s2">, </span><span class="s1">a</span><span class="s2">.</span><span class="s1">itemsize</span><span class="s2">))</span>
+    <span class="s1">expected_num </span><span class="s2">= [[</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">]] * </span><span class="s4">3</span>
+    <span class="s1">expected_obj </span><span class="s2">= [[</span><span class="s0">None</span><span class="s2">] * </span><span class="s4">4</span><span class="s2">] * </span><span class="s4">3</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">a_view</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">dt</span><span class="s2">)</span>
+    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">expected_num</span><span class="s2">, </span><span class="s1">a_view</span><span class="s2">[</span><span class="s5">'num'</span><span class="s2">])</span>
+    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">expected_obj</span><span class="s2">, </span><span class="s1">a_view</span><span class="s2">[</span><span class="s5">'obj'</span><span class="s2">])</span>
+
+    <span class="s3"># Make sure that void types without fields are kept unchanged</span>
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">empty</span><span class="s2">((</span><span class="s4">4</span><span class="s2">,), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s5">'V4'</span><span class="s2">)</span>
+    <span class="s1">a_view </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s4">0</span><span class="s2">, </span><span class="s1">a</span><span class="s2">.</span><span class="s1">itemsize</span><span class="s2">))</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">a</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">a_view</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">)</span>
+
+    <span class="s3"># Make sure that the only type that could fail is properly handled</span>
+    <span class="s1">dt </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">({</span><span class="s5">'names'</span><span class="s2">: [</span><span class="s5">''</span><span class="s2">], </span><span class="s5">'formats'</span><span class="s2">: [</span><span class="s5">'V4'</span><span class="s2">]})</span>
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">empty</span><span class="s2">((</span><span class="s4">4</span><span class="s2">,), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dt</span><span class="s2">)</span>
+    <span class="s1">a_view </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s4">0</span><span class="s2">, </span><span class="s1">a</span><span class="s2">.</span><span class="s1">itemsize</span><span class="s2">))</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">a</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">a_view</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">)</span>
+
+    <span class="s3"># Custom dtypes should not be lost (gh-9161)</span>
+    <span class="s1">r </span><span class="s2">= [</span><span class="s1">rational</span><span class="s2">(</span><span class="s1">i</span><span class="s2">) </span><span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s4">4</span><span class="s2">)]</span>
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">r</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">rational</span><span class="s2">)</span>
+    <span class="s1">a_view </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s4">0</span><span class="s2">, </span><span class="s1">a</span><span class="s2">.</span><span class="s1">itemsize</span><span class="s2">))</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">a</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">a_view</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">)</span>
+    <span class="s1">assert_array_equal</span><span class="s2">([</span><span class="s1">r</span><span class="s2">] * </span><span class="s4">3</span><span class="s2">, </span><span class="s1">a_view</span><span class="s2">)</span>
+
+    <span class="s3"># Also exercise the new-DType-API rational variant.</span>
+    <span class="s1">r </span><span class="s2">= [</span><span class="s1">rational2</span><span class="s2">(</span><span class="s1">i</span><span class="s2">) </span><span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s4">4</span><span class="s2">)]</span>
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">r</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">rational2</span><span class="s2">)</span>
+    <span class="s1">a_view </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s4">0</span><span class="s2">, </span><span class="s1">a</span><span class="s2">.</span><span class="s1">itemsize</span><span class="s2">))</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">a</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">a_view</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">)</span>
+    <span class="s1">assert_array_equal</span><span class="s2">([</span><span class="s1">r</span><span class="s2">] * </span><span class="s4">3</span><span class="s2">, </span><span class="s1">a_view</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">TestSlidingWindowView</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">test_1d</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">5</span><span class="s2">)</span>
+        <span class="s1">arr_view </span><span class="s2">= </span><span class="s1">sliding_window_view</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s4">2</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([[</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">],</span>
+                             <span class="s2">[</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">],</span>
+                             <span class="s2">[</span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">],</span>
+                             <span class="s2">[</span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">]])</span>
+        <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">arr_view</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_2d</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">i</span><span class="s2">, </span><span class="s1">j </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ogrid</span><span class="s2">[:</span><span class="s4">3</span><span class="s2">, :</span><span class="s4">4</span><span class="s2">]</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s4">10 </span><span class="s2">* </span><span class="s1">i </span><span class="s2">+ </span><span class="s1">j</span>
+        <span class="s1">shape </span><span class="s2">= (</span><span class="s4">2</span><span class="s2">, </span><span class="s4">2</span><span class="s2">)</span>
+        <span class="s1">arr_view </span><span class="s2">= </span><span class="s1">sliding_window_view</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([[[[</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">], [</span><span class="s4">10</span><span class="s2">, </span><span class="s4">11</span><span class="s2">]],</span>
+                              <span class="s2">[[</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">], [</span><span class="s4">11</span><span class="s2">, </span><span class="s4">12</span><span class="s2">]],</span>
+                              <span class="s2">[[</span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">], [</span><span class="s4">12</span><span class="s2">, </span><span class="s4">13</span><span class="s2">]]],</span>
+                             <span class="s2">[[[</span><span class="s4">10</span><span class="s2">, </span><span class="s4">11</span><span class="s2">], [</span><span class="s4">20</span><span class="s2">, </span><span class="s4">21</span><span class="s2">]],</span>
+                              <span class="s2">[[</span><span class="s4">11</span><span class="s2">, </span><span class="s4">12</span><span class="s2">], [</span><span class="s4">21</span><span class="s2">, </span><span class="s4">22</span><span class="s2">]],</span>
+                              <span class="s2">[[</span><span class="s4">12</span><span class="s2">, </span><span class="s4">13</span><span class="s2">], [</span><span class="s4">22</span><span class="s2">, </span><span class="s4">23</span><span class="s2">]]]])</span>
+        <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">arr_view</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_2d_with_axis</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">i</span><span class="s2">, </span><span class="s1">j </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ogrid</span><span class="s2">[:</span><span class="s4">3</span><span class="s2">, :</span><span class="s4">4</span><span class="s2">]</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s4">10 </span><span class="s2">* </span><span class="s1">i </span><span class="s2">+ </span><span class="s1">j</span>
+        <span class="s1">arr_view </span><span class="s2">= </span><span class="s1">sliding_window_view</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">0</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([[[</span><span class="s4">0</span><span class="s2">, </span><span class="s4">10</span><span class="s2">, </span><span class="s4">20</span><span class="s2">],</span>
+                              <span class="s2">[</span><span class="s4">1</span><span class="s2">, </span><span class="s4">11</span><span class="s2">, </span><span class="s4">21</span><span class="s2">],</span>
+                              <span class="s2">[</span><span class="s4">2</span><span class="s2">, </span><span class="s4">12</span><span class="s2">, </span><span class="s4">22</span><span class="s2">],</span>
+                              <span class="s2">[</span><span class="s4">3</span><span class="s2">, </span><span class="s4">13</span><span class="s2">, </span><span class="s4">23</span><span class="s2">]]])</span>
+        <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">arr_view</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_2d_repeated_axis</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">i</span><span class="s2">, </span><span class="s1">j </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ogrid</span><span class="s2">[:</span><span class="s4">3</span><span class="s2">, :</span><span class="s4">4</span><span class="s2">]</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s4">10 </span><span class="s2">* </span><span class="s1">i </span><span class="s2">+ </span><span class="s1">j</span>
+        <span class="s1">arr_view </span><span class="s2">= </span><span class="s1">sliding_window_view</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, (</span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">), (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">))</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([[[[</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">],</span>
+                               <span class="s2">[</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">]]],</span>
+                             <span class="s2">[[[</span><span class="s4">10</span><span class="s2">, </span><span class="s4">11</span><span class="s2">, </span><span class="s4">12</span><span class="s2">],</span>
+                               <span class="s2">[</span><span class="s4">11</span><span class="s2">, </span><span class="s4">12</span><span class="s2">, </span><span class="s4">13</span><span class="s2">]]],</span>
+                             <span class="s2">[[[</span><span class="s4">20</span><span class="s2">, </span><span class="s4">21</span><span class="s2">, </span><span class="s4">22</span><span class="s2">],</span>
+                               <span class="s2">[</span><span class="s4">21</span><span class="s2">, </span><span class="s4">22</span><span class="s2">, </span><span class="s4">23</span><span class="s2">]]]])</span>
+        <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">arr_view</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_2d_without_axis</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">i</span><span class="s2">, </span><span class="s1">j </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ogrid</span><span class="s2">[:</span><span class="s4">4</span><span class="s2">, :</span><span class="s4">4</span><span class="s2">]</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s4">10 </span><span class="s2">* </span><span class="s1">i </span><span class="s2">+ </span><span class="s1">j</span>
+        <span class="s1">shape </span><span class="s2">= (</span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)</span>
+        <span class="s1">arr_view </span><span class="s2">= </span><span class="s1">sliding_window_view</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([[[[</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">], [</span><span class="s4">10</span><span class="s2">, </span><span class="s4">11</span><span class="s2">, </span><span class="s4">12</span><span class="s2">]],</span>
+                              <span class="s2">[[</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">], [</span><span class="s4">11</span><span class="s2">, </span><span class="s4">12</span><span class="s2">, </span><span class="s4">13</span><span class="s2">]]],</span>
+                             <span class="s2">[[[</span><span class="s4">10</span><span class="s2">, </span><span class="s4">11</span><span class="s2">, </span><span class="s4">12</span><span class="s2">], [</span><span class="s4">20</span><span class="s2">, </span><span class="s4">21</span><span class="s2">, </span><span class="s4">22</span><span class="s2">]],</span>
+                              <span class="s2">[[</span><span class="s4">11</span><span class="s2">, </span><span class="s4">12</span><span class="s2">, </span><span class="s4">13</span><span class="s2">], [</span><span class="s4">21</span><span class="s2">, </span><span class="s4">22</span><span class="s2">, </span><span class="s4">23</span><span class="s2">]]],</span>
+                             <span class="s2">[[[</span><span class="s4">20</span><span class="s2">, </span><span class="s4">21</span><span class="s2">, </span><span class="s4">22</span><span class="s2">], [</span><span class="s4">30</span><span class="s2">, </span><span class="s4">31</span><span class="s2">, </span><span class="s4">32</span><span class="s2">]],</span>
+                              <span class="s2">[[</span><span class="s4">21</span><span class="s2">, </span><span class="s4">22</span><span class="s2">, </span><span class="s4">23</span><span class="s2">], [</span><span class="s4">31</span><span class="s2">, </span><span class="s4">32</span><span class="s2">, </span><span class="s4">33</span><span class="s2">]]]])</span>
+        <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">arr_view</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_errors</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">i</span><span class="s2">, </span><span class="s1">j </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ogrid</span><span class="s2">[:</span><span class="s4">4</span><span class="s2">, :</span><span class="s4">4</span><span class="s2">]</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s4">10 </span><span class="s2">* </span><span class="s1">i </span><span class="s2">+ </span><span class="s1">j</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s5">'cannot contain negative values'</span><span class="s2">):</span>
+            <span class="s1">sliding_window_view</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, (-</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">))</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span>
+                <span class="s1">ValueError</span><span class="s2">,</span>
+                <span class="s1">match</span><span class="s2">=</span><span class="s5">'must provide window_shape for all dimensions of `x`'</span><span class="s2">):</span>
+            <span class="s1">sliding_window_view</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, (</span><span class="s4">1</span><span class="s2">,))</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span>
+                <span class="s1">ValueError</span><span class="s2">,</span>
+                <span class="s1">match</span><span class="s2">=</span><span class="s5">'Must provide matching length window_shape and axis'</span><span class="s2">):</span>
+            <span class="s1">sliding_window_view</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, (</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">), </span><span class="s1">axis</span><span class="s2">=(</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">))</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span>
+                <span class="s1">ValueError</span><span class="s2">,</span>
+                <span class="s1">match</span><span class="s2">=</span><span class="s5">'window shape cannot be larger than input array'</span><span class="s2">):</span>
+            <span class="s1">sliding_window_view</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, (</span><span class="s4">5</span><span class="s2">, </span><span class="s4">5</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">test_writeable</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">5</span><span class="s2">)</span>
+        <span class="s1">view </span><span class="s2">= </span><span class="s1">sliding_window_view</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s1">writeable</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s0">not </span><span class="s1">view</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable</span><span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span>
+                <span class="s1">ValueError</span><span class="s2">,</span>
+                <span class="s1">match</span><span class="s2">=</span><span class="s5">'assignment destination is read-only'</span><span class="s2">):</span>
+            <span class="s1">view</span><span class="s2">[</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">] = </span><span class="s4">3</span>
+        <span class="s1">view </span><span class="s2">= </span><span class="s1">sliding_window_view</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s1">writeable</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">view</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable</span><span class="s2">)</span>
+        <span class="s1">view</span><span class="s2">[</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">] = </span><span class="s4">3</span>
+        <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">0</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">]))</span>
+
+    <span class="s0">def </span><span class="s1">test_subok</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">class </span><span class="s1">MyArray</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">):</span>
+            <span class="s0">pass</span>
+
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">5</span><span class="s2">).</span><span class="s1">view</span><span class="s2">(</span><span class="s1">MyArray</span><span class="s2">)</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s0">not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">sliding_window_view</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s4">2</span><span class="s2">,</span>
+                                                   <span class="s1">subok</span><span class="s2">=</span><span class="s0">False</span><span class="s2">),</span>
+                               <span class="s1">MyArray</span><span class="s2">))</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">sliding_window_view</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s1">subok</span><span class="s2">=</span><span class="s0">True</span><span class="s2">), </span><span class="s1">MyArray</span><span class="s2">))</span>
+        <span class="s3"># Default behavior</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s0">not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">sliding_window_view</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s4">2</span><span class="s2">), </span><span class="s1">MyArray</span><span class="s2">))</span>
+
+
+<span class="s0">def </span><span class="s1">as_strided_writeable</span><span class="s2">():</span>
+    <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+    <span class="s1">view </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">writeable</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s0">not </span><span class="s1">view</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable</span><span class="s2">)</span>
+
+    <span class="s3"># Check that writeable also is fine:</span>
+    <span class="s1">view </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">writeable</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">view</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable</span><span class="s2">)</span>
+    <span class="s1">view</span><span class="s2">[...] = </span><span class="s4">3</span>
+    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">full_like</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s4">3</span><span class="s2">))</span>
+
+    <span class="s3"># Test that things do not break down for readonly:</span>
+    <span class="s1">arr</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable </span><span class="s2">= </span><span class="s0">False</span>
+    <span class="s1">view </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">writeable</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+    <span class="s1">view </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">writeable</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s0">not </span><span class="s1">view</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">VerySimpleSubClass</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">__new__</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, *</span><span class="s1">args</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(*</span><span class="s1">args</span><span class="s2">, </span><span class="s1">subok</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">).</span><span class="s1">view</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">SimpleSubClass</span><span class="s2">(</span><span class="s1">VerySimpleSubClass</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">__new__</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, *</span><span class="s1">args</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">):</span>
+        <span class="s1">self </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(*</span><span class="s1">args</span><span class="s2">, </span><span class="s1">subok</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">).</span><span class="s1">view</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">info </span><span class="s2">= </span><span class="s5">'simple'</span>
+        <span class="s0">return </span><span class="s1">self</span>
+
+    <span class="s0">def </span><span class="s1">__array_finalize__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">obj</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">info </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s5">'info'</span><span class="s2">, </span><span class="s5">''</span><span class="s2">) + </span><span class="s5">' finalized'</span>
+
+
+<span class="s0">def </span><span class="s1">test_subclasses</span><span class="s2">():</span>
+    <span class="s3"># test that subclass is preserved only if subok=True</span>
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">VerySimpleSubClass</span><span class="s2">([</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">])</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">type</span><span class="s2">(</span><span class="s1">a</span><span class="s2">) </span><span class="s0">is </span><span class="s1">VerySimpleSubClass</span><span class="s2">)</span>
+    <span class="s1">a_view </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">2</span><span class="s2">,), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s4">2 </span><span class="s2">* </span><span class="s1">a</span><span class="s2">.</span><span class="s1">itemsize</span><span class="s2">,))</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">type</span><span class="s2">(</span><span class="s1">a_view</span><span class="s2">) </span><span class="s0">is </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">)</span>
+    <span class="s1">a_view </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">2</span><span class="s2">,), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s4">2 </span><span class="s2">* </span><span class="s1">a</span><span class="s2">.</span><span class="s1">itemsize</span><span class="s2">,), </span><span class="s1">subok</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">type</span><span class="s2">(</span><span class="s1">a_view</span><span class="s2">) </span><span class="s0">is </span><span class="s1">VerySimpleSubClass</span><span class="s2">)</span>
+    <span class="s3"># test that if a subclass has __array_finalize__, it is used</span>
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">SimpleSubClass</span><span class="s2">([</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">])</span>
+    <span class="s1">a_view </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">2</span><span class="s2">,), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s4">2 </span><span class="s2">* </span><span class="s1">a</span><span class="s2">.</span><span class="s1">itemsize</span><span class="s2">,), </span><span class="s1">subok</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">type</span><span class="s2">(</span><span class="s1">a_view</span><span class="s2">) </span><span class="s0">is </span><span class="s1">SimpleSubClass</span><span class="s2">)</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">a_view</span><span class="s2">.</span><span class="s1">info </span><span class="s2">== </span><span class="s5">'simple finalized'</span><span class="s2">)</span>
+
+    <span class="s3"># similar tests for broadcast_arrays</span>
+    <span class="s1">b </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">a</span><span class="s2">)).</span><span class="s1">reshape</span><span class="s2">(-</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)</span>
+    <span class="s1">a_view</span><span class="s2">, </span><span class="s1">b_view </span><span class="s2">= </span><span class="s1">broadcast_arrays</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">)</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">type</span><span class="s2">(</span><span class="s1">a_view</span><span class="s2">) </span><span class="s0">is </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">)</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">type</span><span class="s2">(</span><span class="s1">b_view</span><span class="s2">) </span><span class="s0">is </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">)</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">a_view</span><span class="s2">.</span><span class="s1">shape </span><span class="s2">== </span><span class="s1">b_view</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+    <span class="s1">a_view</span><span class="s2">, </span><span class="s1">b_view </span><span class="s2">= </span><span class="s1">broadcast_arrays</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">subok</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">type</span><span class="s2">(</span><span class="s1">a_view</span><span class="s2">) </span><span class="s0">is </span><span class="s1">SimpleSubClass</span><span class="s2">)</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">a_view</span><span class="s2">.</span><span class="s1">info </span><span class="s2">== </span><span class="s5">'simple finalized'</span><span class="s2">)</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">type</span><span class="s2">(</span><span class="s1">b_view</span><span class="s2">) </span><span class="s0">is </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">)</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">a_view</span><span class="s2">.</span><span class="s1">shape </span><span class="s2">== </span><span class="s1">b_view</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+
+    <span class="s3"># and for broadcast_to</span>
+    <span class="s1">shape </span><span class="s2">= (</span><span class="s4">2</span><span class="s2">, </span><span class="s4">4</span><span class="s2">)</span>
+    <span class="s1">a_view </span><span class="s2">= </span><span class="s1">broadcast_to</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">)</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">type</span><span class="s2">(</span><span class="s1">a_view</span><span class="s2">) </span><span class="s0">is </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">)</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">a_view</span><span class="s2">.</span><span class="s1">shape </span><span class="s2">== </span><span class="s1">shape</span><span class="s2">)</span>
+    <span class="s1">a_view </span><span class="s2">= </span><span class="s1">broadcast_to</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">, </span><span class="s1">subok</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">type</span><span class="s2">(</span><span class="s1">a_view</span><span class="s2">) </span><span class="s0">is </span><span class="s1">SimpleSubClass</span><span class="s2">)</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">a_view</span><span class="s2">.</span><span class="s1">info </span><span class="s2">== </span><span class="s5">'simple finalized'</span><span class="s2">)</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">a_view</span><span class="s2">.</span><span class="s1">shape </span><span class="s2">== </span><span class="s1">shape</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_writeable</span><span class="s2">():</span>
+    <span class="s3"># broadcast_to should return a readonly array</span>
+    <span class="s1">original </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">])</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">broadcast_to</span><span class="s2">(</span><span class="s1">original</span><span class="s2">, (</span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">))</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)</span>
+    <span class="s1">assert_raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">result</span><span class="s2">.</span><span class="s1">__setitem__</span><span class="s2">, </span><span class="s1">slice</span><span class="s2">(</span><span class="s0">None</span><span class="s2">), </span><span class="s4">0</span><span class="s2">)</span>
+
+    <span class="s3"># but the result of broadcast_arrays needs to be writeable, to</span>
+    <span class="s3"># preserve backwards compatibility</span>
+    <span class="s1">test_cases </span><span class="s2">= [((</span><span class="s0">False</span><span class="s2">,), </span><span class="s1">broadcast_arrays</span><span class="s2">(</span><span class="s1">original</span><span class="s2">,)),</span>
+                  <span class="s2">((</span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">), </span><span class="s1">broadcast_arrays</span><span class="s2">(</span><span class="s4">0</span><span class="s2">, </span><span class="s1">original</span><span class="s2">))]</span>
+    <span class="s0">for </span><span class="s1">is_broadcast</span><span class="s2">, </span><span class="s1">results </span><span class="s0">in </span><span class="s1">test_cases</span><span class="s2">:</span>
+        <span class="s0">for </span><span class="s1">array_is_broadcast</span><span class="s2">, </span><span class="s1">result </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">is_broadcast</span><span class="s2">, </span><span class="s1">results</span><span class="s2">):</span>
+            <span class="s3"># This will change to False in a future version</span>
+            <span class="s0">if </span><span class="s1">array_is_broadcast</span><span class="s2">:</span>
+                <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">warns</span><span class="s2">(</span><span class="s1">FutureWarning</span><span class="s2">):</span>
+                    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable</span><span class="s2">, </span><span class="s0">True</span><span class="s2">)</span>
+                <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">warns</span><span class="s2">(</span><span class="s1">DeprecationWarning</span><span class="s2">):</span>
+                    <span class="s1">result</span><span class="s2">[:] = </span><span class="s4">0</span>
+                <span class="s3"># Warning not emitted, writing to the array resets it</span>
+                <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable</span><span class="s2">, </span><span class="s0">True</span><span class="s2">)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s3"># No warning:</span>
+                <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable</span><span class="s2">, </span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s0">for </span><span class="s1">results </span><span class="s0">in </span><span class="s2">[</span><span class="s1">broadcast_arrays</span><span class="s2">(</span><span class="s1">original</span><span class="s2">),</span>
+                    <span class="s1">broadcast_arrays</span><span class="s2">(</span><span class="s4">0</span><span class="s2">, </span><span class="s1">original</span><span class="s2">)]:</span>
+        <span class="s0">for </span><span class="s1">result </span><span class="s0">in </span><span class="s1">results</span><span class="s2">:</span>
+            <span class="s3"># resets the warn_on_write DeprecationWarning</span>
+            <span class="s1">result</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable </span><span class="s2">= </span><span class="s0">True</span>
+            <span class="s3"># check: no warning emitted</span>
+            <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable</span><span class="s2">, </span><span class="s0">True</span><span class="s2">)</span>
+            <span class="s1">result</span><span class="s2">[:] = </span><span class="s4">0</span>
+
+    <span class="s3"># keep readonly input readonly</span>
+    <span class="s1">original</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable </span><span class="s2">= </span><span class="s0">False</span>
+    <span class="s1">_</span><span class="s2">, </span><span class="s1">result </span><span class="s2">= </span><span class="s1">broadcast_arrays</span><span class="s2">(</span><span class="s4">0</span><span class="s2">, </span><span class="s1">original</span><span class="s2">)</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)</span>
+
+    <span class="s3"># regression test for GH6491</span>
+    <span class="s1">shape </span><span class="s2">= (</span><span class="s4">2</span><span class="s2">,)</span>
+    <span class="s1">strides </span><span class="s2">= [</span><span class="s4">0</span><span class="s2">]</span>
+    <span class="s1">tricky_array </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s4">0</span><span class="s2">), </span><span class="s1">shape</span><span class="s2">, </span><span class="s1">strides</span><span class="s2">)</span>
+    <span class="s1">other </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">((</span><span class="s4">1</span><span class="s2">,))</span>
+    <span class="s1">first</span><span class="s2">, </span><span class="s1">second </span><span class="s2">= </span><span class="s1">broadcast_arrays</span><span class="s2">(</span><span class="s1">tricky_array</span><span class="s2">, </span><span class="s1">other</span><span class="s2">)</span>
+    <span class="s1">assert_</span><span class="s2">(</span><span class="s1">first</span><span class="s2">.</span><span class="s1">shape </span><span class="s2">== </span><span class="s1">second</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_writeable_memoryview</span><span class="s2">():</span>
+    <span class="s3"># The result of broadcast_arrays exports as a non-writeable memoryview</span>
+    <span class="s3"># because otherwise there is no good way to opt in to the new behaviour</span>
+    <span class="s3"># (i.e. you would need to set writeable to False explicitly).</span>
+    <span class="s3"># See gh-13929.</span>
+    <span class="s1">original </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">])</span>
+
+    <span class="s1">test_cases </span><span class="s2">= [((</span><span class="s0">False</span><span class="s2">, ), </span><span class="s1">broadcast_arrays</span><span class="s2">(</span><span class="s1">original</span><span class="s2">,)),</span>
+                  <span class="s2">((</span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">), </span><span class="s1">broadcast_arrays</span><span class="s2">(</span><span class="s4">0</span><span class="s2">, </span><span class="s1">original</span><span class="s2">))]</span>
+    <span class="s0">for </span><span class="s1">is_broadcast</span><span class="s2">, </span><span class="s1">results </span><span class="s0">in </span><span class="s1">test_cases</span><span class="s2">:</span>
+        <span class="s0">for </span><span class="s1">array_is_broadcast</span><span class="s2">, </span><span class="s1">result </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">is_broadcast</span><span class="s2">, </span><span class="s1">results</span><span class="s2">):</span>
+            <span class="s3"># This will change to False in a future version</span>
+            <span class="s0">if </span><span class="s1">array_is_broadcast</span><span class="s2">:</span>
+                <span class="s3"># memoryview(result, writable=True) will give warning but cannot</span>
+                <span class="s3"># be tested using the python API.</span>
+                <span class="s0">assert </span><span class="s1">memoryview</span><span class="s2">(</span><span class="s1">result</span><span class="s2">).</span><span class="s1">readonly</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s0">assert not </span><span class="s1">memoryview</span><span class="s2">(</span><span class="s1">result</span><span class="s2">).</span><span class="s1">readonly</span>
+
+
+<span class="s0">def </span><span class="s1">test_reference_types</span><span class="s2">():</span>
+    <span class="s1">input_array </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s5">'a'</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">object</span><span class="s2">)</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s5">'a'</span><span class="s2">] * </span><span class="s4">3</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">object</span><span class="s2">)</span>
+    <span class="s1">actual </span><span class="s2">= </span><span class="s1">broadcast_to</span><span class="s2">(</span><span class="s1">input_array</span><span class="s2">, (</span><span class="s4">3</span><span class="s2">,))</span>
+    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">expected</span><span class="s2">, </span><span class="s1">actual</span><span class="s2">)</span>
+
+    <span class="s1">actual</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">broadcast_arrays</span><span class="s2">(</span><span class="s1">input_array</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">(</span><span class="s4">3</span><span class="s2">))</span>
+    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">expected</span><span class="s2">, </span><span class="s1">actual</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s5">&quot;dtype&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">int8</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">int32</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">uint8</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">uint16</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">uint32</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">uint64</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">float32</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">complex64</span><span class="s2">,</span>
+        <span class="s1">np</span><span class="s2">.</span><span class="s1">complex128</span><span class="s2">,</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_as_strided_checked_different_dtypes</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">):</span>
+    <span class="s6">&quot;&quot;&quot;Test as_strided with check_bounds=True with different dtypes.&quot;&quot;&quot;</span>
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">10</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+    <span class="s1">y </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">5</span><span class="s2">,), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s1">x</span><span class="s2">.</span><span class="s1">itemsize </span><span class="s2">* </span><span class="s4">2</span><span class="s2">,), </span><span class="s1">check_bounds</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">y</span><span class="s2">.</span><span class="s1">shape </span><span class="s2">== (</span><span class="s4">5</span><span class="s2">,)</span>
+    <span class="s0">assert </span><span class="s1">y</span><span class="s2">.</span><span class="s1">dtype </span><span class="s2">== </span><span class="s1">dtype</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s5">&quot;size,view_size,stride_mult&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s2">(</span><span class="s4">10</span><span class="s2">, </span><span class="s4">5</span><span class="s2">, </span><span class="s4">1</span><span class="s2">),  </span><span class="s3"># Contiguous view</span>
+        <span class="s2">(</span><span class="s4">10</span><span class="s2">, </span><span class="s4">5</span><span class="s2">, </span><span class="s4">2</span><span class="s2">),  </span><span class="s3"># Every other element</span>
+        <span class="s2">(</span><span class="s4">20</span><span class="s2">, </span><span class="s4">10</span><span class="s2">, </span><span class="s4">2</span><span class="s2">),  </span><span class="s3"># Every other element</span>
+        <span class="s2">(</span><span class="s4">100</span><span class="s2">, </span><span class="s4">10</span><span class="s2">, </span><span class="s4">10</span><span class="s2">),  </span><span class="s3"># Every 10th element</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_as_strided_checked_1d_positive_strides</span><span class="s2">(</span><span class="s1">size</span><span class="s2">, </span><span class="s1">view_size</span><span class="s2">, </span><span class="s1">stride_mult</span><span class="s2">):</span>
+    <span class="s6">&quot;&quot;&quot;Test 1D arrays with positive strides.&quot;&quot;&quot;</span>
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">size</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+    <span class="s1">itemsize </span><span class="s2">= </span><span class="s1">x</span><span class="s2">.</span><span class="s1">itemsize</span>
+    <span class="s1">y </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span>
+        <span class="s1">x</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s1">view_size</span><span class="s2">,), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s1">itemsize </span><span class="s2">* </span><span class="s1">stride_mult</span><span class="s2">,), </span><span class="s1">check_bounds</span><span class="s2">=</span><span class="s0">True</span>
+    <span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">y</span><span class="s2">.</span><span class="s1">shape </span><span class="s2">== (</span><span class="s1">view_size</span><span class="s2">,)</span>
+    <span class="s3"># Verify data correctness</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">x</span><span class="s2">[::</span><span class="s1">stride_mult</span><span class="s2">][:</span><span class="s1">view_size</span><span class="s2">]</span>
+    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">y</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s5">&quot;shape,window_shape&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s2">((</span><span class="s4">10</span><span class="s2">,), (</span><span class="s4">3</span><span class="s2">,)),</span>
+        <span class="s2">((</span><span class="s4">20</span><span class="s2">,), (</span><span class="s4">5</span><span class="s2">,)),</span>
+        <span class="s2">((</span><span class="s4">100</span><span class="s2">,), (</span><span class="s4">10</span><span class="s2">,)),</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_as_strided_checked_sliding_window_1d</span><span class="s2">(</span><span class="s1">shape</span><span class="s2">, </span><span class="s1">window_shape</span><span class="s2">):</span>
+    <span class="s6">&quot;&quot;&quot;Test sliding window views in 1D.&quot;&quot;&quot;</span>
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">shape</span><span class="s2">[</span><span class="s4">0</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+    <span class="s1">itemsize </span><span class="s2">= </span><span class="s1">x</span><span class="s2">.</span><span class="s1">itemsize</span>
+    <span class="s1">n_windows </span><span class="s2">= </span><span class="s1">shape</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] - </span><span class="s1">window_shape</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] + </span><span class="s4">1</span>
+    <span class="s1">view_shape </span><span class="s2">= (</span><span class="s1">n_windows</span><span class="s2">, </span><span class="s1">window_shape</span><span class="s2">[</span><span class="s4">0</span><span class="s2">])</span>
+    <span class="s1">view_strides </span><span class="s2">= (</span><span class="s1">itemsize</span><span class="s2">, </span><span class="s1">itemsize</span><span class="s2">)</span>
+
+    <span class="s1">y </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=</span><span class="s1">view_shape</span><span class="s2">, </span><span class="s1">strides</span><span class="s2">=</span><span class="s1">view_strides</span><span class="s2">, </span><span class="s1">check_bounds</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">y</span><span class="s2">.</span><span class="s1">shape </span><span class="s2">== </span><span class="s1">view_shape</span>
+    <span class="s3"># Check first and last windows</span>
+    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">y</span><span class="s2">[</span><span class="s4">0</span><span class="s2">], </span><span class="s1">x</span><span class="s2">[: </span><span class="s1">window_shape</span><span class="s2">[</span><span class="s4">0</span><span class="s2">]])</span>
+    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">y</span><span class="s2">[-</span><span class="s4">1</span><span class="s2">], </span><span class="s1">x</span><span class="s2">[-</span><span class="s1">window_shape</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] :])</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s5">&quot;shape&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s2">(</span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">5</span><span class="s2">, </span><span class="s4">6</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">10</span><span class="s2">, </span><span class="s4">10</span><span class="s2">),</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_as_strided_checked_2d_default_strides</span><span class="s2">(</span><span class="s1">shape</span><span class="s2">):</span>
+    <span class="s6">&quot;&quot;&quot;Test 2D arrays with default strides.&quot;&quot;&quot;</span>
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">prod</span><span class="s2">(</span><span class="s1">shape</span><span class="s2">), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">).</span><span class="s1">reshape</span><span class="s2">(</span><span class="s1">shape</span><span class="s2">)</span>
+    <span class="s1">y </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">check_bounds</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)  </span><span class="s3"># Should use default shape and strides</span>
+    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">y</span><span class="s2">, </span><span class="s1">x</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s5">&quot;size&quot;</span><span class="s2">, [</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">10</span><span class="s2">, </span><span class="s4">100</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_as_strided_checked_zero_stride_broadcasting</span><span class="s2">(</span><span class="s1">size</span><span class="s2">):</span>
+    <span class="s6">&quot;&quot;&quot;Test zero strides (broadcasting a single value).&quot;&quot;&quot;</span>
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">42</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+    <span class="s1">y </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s1">size</span><span class="s2">,), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s4">0</span><span class="s2">,), </span><span class="s1">check_bounds</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">y</span><span class="s2">.</span><span class="s1">shape </span><span class="s2">== (</span><span class="s1">size</span><span class="s2">,)</span>
+    <span class="s0">if </span><span class="s1">size </span><span class="s2">&gt; </span><span class="s4">0</span><span class="s2">:</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">all</span><span class="s2">(</span><span class="s1">y </span><span class="s2">== </span><span class="s4">42</span><span class="s2">))</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s5">&quot;size,shape,strides&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s3"># Strides too large</span>
+        <span class="s2">(</span><span class="s4">10</span><span class="s2">, (</span><span class="s4">5</span><span class="s2">,), (</span><span class="s4">32</span><span class="s2">,)),</span>
+        <span class="s2">(</span><span class="s4">10</span><span class="s2">, (</span><span class="s4">10</span><span class="s2">,), (</span><span class="s4">16</span><span class="s2">,)),</span>
+        <span class="s2">(</span><span class="s4">20</span><span class="s2">, (</span><span class="s4">15</span><span class="s2">,), (</span><span class="s4">16</span><span class="s2">,)),</span>
+        <span class="s3"># Shape too large for strides</span>
+        <span class="s2">(</span><span class="s4">10</span><span class="s2">, (</span><span class="s4">20</span><span class="s2">,), (</span><span class="s4">8</span><span class="s2">,)),</span>
+        <span class="s2">(</span><span class="s4">10</span><span class="s2">, (</span><span class="s4">100</span><span class="s2">,), (</span><span class="s4">8</span><span class="s2">,)),</span>
+        <span class="s3"># 2D out of bounds cases</span>
+        <span class="s2">(</span><span class="s4">20</span><span class="s2">, (</span><span class="s4">5</span><span class="s2">, </span><span class="s4">5</span><span class="s2">), (</span><span class="s4">80</span><span class="s2">, </span><span class="s4">8</span><span class="s2">)),</span>
+        <span class="s2">(</span><span class="s4">20</span><span class="s2">, (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">10</span><span class="s2">), (</span><span class="s4">64</span><span class="s2">, </span><span class="s4">8</span><span class="s2">)),</span>
+        <span class="s3"># Negative strides that go before array start</span>
+        <span class="s2">(</span><span class="s4">10</span><span class="s2">, (</span><span class="s4">5</span><span class="s2">,), (-</span><span class="s4">8</span><span class="s2">,)),</span>
+        <span class="s2">(</span><span class="s4">10</span><span class="s2">, (</span><span class="s4">10</span><span class="s2">,), (-</span><span class="s4">8</span><span class="s2">,)),</span>
+        <span class="s2">(</span><span class="s4">20</span><span class="s2">, (</span><span class="s4">5</span><span class="s2">,), (-</span><span class="s4">16</span><span class="s2">,)),</span>
+        <span class="s3"># ND negative strides</span>
+        <span class="s2">(</span><span class="s4">10</span><span class="s2">, (</span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">), (</span><span class="s4">96</span><span class="s2">, </span><span class="s4">32</span><span class="s2">, -</span><span class="s4">8</span><span class="s2">)),</span>
+        <span class="s2">(</span><span class="s4">20</span><span class="s2">, (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">), (</span><span class="s4">64</span><span class="s2">, -</span><span class="s4">8</span><span class="s2">)),</span>
+        <span class="s2">(</span><span class="s4">30</span><span class="s2">, (</span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">), (-</span><span class="s4">96</span><span class="s2">, </span><span class="s4">32</span><span class="s2">, </span><span class="s4">8</span><span class="s2">)),</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_as_strided_checked_out_of_bounds_positive_strides</span><span class="s2">(</span><span class="s1">size</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">, </span><span class="s1">strides</span><span class="s2">):</span>
+    <span class="s6">&quot;&quot;&quot;Test that out-of-bounds positive strides raise ValueError.&quot;&quot;&quot;</span>
+    <span class="s1">x </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">size</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s5">&quot;out of bounds&quot;</span><span class="s2">):</span>
+        <span class="s1">as_strided</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=</span><span class="s1">shape</span><span class="s2">, </span><span class="s1">strides</span><span class="s2">=</span><span class="s1">strides</span><span class="s2">, </span><span class="s1">check_bounds</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_as_strided_checked_view_of_larger_array</span><span class="s2">():</span>
+    <span class="s6">&quot;&quot;&quot;Test as_strided 
+ 
+    - with check_bounds=True 
+    - considers the base array bounds, not just the view. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">1000</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+
+    <span class="s1">b </span><span class="s2">= </span><span class="s1">a</span><span class="s2">[:</span><span class="s4">2</span><span class="s2">]</span>
+
+    <span class="s3"># This should succeed because the underlying array has enough memory</span>
+    <span class="s1">y </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">b</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">2</span><span class="s2">,), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s4">400</span><span class="s2">,), </span><span class="s1">check_bounds</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">y</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">, (</span><span class="s4">2</span><span class="s2">,))</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">y</span><span class="s2">[</span><span class="s4">0</span><span class="s2">], </span><span class="s4">0</span><span class="s2">)</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">y</span><span class="s2">[</span><span class="s4">1</span><span class="s2">], </span><span class="s4">50</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_as_strided_checked_view_with_offset</span><span class="s2">():</span>
+    <span class="s6">&quot;&quot;&quot;Test as_strided 
+ 
+    - with check_bounds=True 
+    - on a view that doesn't start at the beginning. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">1000</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+
+    <span class="s1">b </span><span class="s2">= </span><span class="s1">a</span><span class="s2">[</span><span class="s4">100</span><span class="s2">:</span><span class="s4">102</span><span class="s2">]</span>
+
+    <span class="s1">y </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">b</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">2</span><span class="s2">,), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s4">80</span><span class="s2">,), </span><span class="s1">check_bounds</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">y</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">, (</span><span class="s4">2</span><span class="s2">,))</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">y</span><span class="s2">[</span><span class="s4">0</span><span class="s2">], </span><span class="s4">100</span><span class="s2">)</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">y</span><span class="s2">[</span><span class="s4">1</span><span class="s2">], </span><span class="s4">110</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_as_strided_checked_view_out_of_bounds_negative</span><span class="s2">():</span>
+    <span class="s6">&quot;&quot;&quot;Test that negative strides on a view correctly detect out of bounds.&quot;&quot;&quot;</span>
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">1000</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+
+    <span class="s1">b </span><span class="s2">= </span><span class="s1">a</span><span class="s2">[</span><span class="s4">5</span><span class="s2">:</span><span class="s4">7</span><span class="s2">]</span>
+
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s5">&quot;out of bounds&quot;</span><span class="s2">):</span>
+        <span class="s1">as_strided</span><span class="s2">(</span><span class="s1">b</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">2</span><span class="s2">,), </span><span class="s1">strides</span><span class="s2">=(-</span><span class="s4">48</span><span class="s2">,), </span><span class="s1">check_bounds</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_as_strided_checked_view_out_of_bounds_positive</span><span class="s2">():</span>
+    <span class="s6">&quot;&quot;&quot;Test that positive strides on a view correctly detect out of bounds.&quot;&quot;&quot;</span>
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">100</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+
+    <span class="s1">b </span><span class="s2">= </span><span class="s1">a</span><span class="s2">[</span><span class="s4">95</span><span class="s2">:</span><span class="s4">97</span><span class="s2">]</span>
+
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s5">&quot;out of bounds&quot;</span><span class="s2">):</span>
+        <span class="s1">as_strided</span><span class="s2">(</span><span class="s1">b</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">2</span><span class="s2">,), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s4">200</span><span class="s2">,), </span><span class="s1">check_bounds</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_as_strided_checked_nested_views</span><span class="s2">():</span>
+    <span class="s6">&quot;&quot;&quot;Test as_strided with check_bounds=True on a view of a view.&quot;&quot;&quot;</span>
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">1000</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+    <span class="s1">b </span><span class="s2">= </span><span class="s1">a</span><span class="s2">[</span><span class="s4">10</span><span class="s2">:</span><span class="s4">100</span><span class="s2">]</span>
+    <span class="s1">c </span><span class="s2">= </span><span class="s1">b</span><span class="s2">[</span><span class="s4">5</span><span class="s2">:</span><span class="s4">10</span><span class="s2">]</span>
+
+    <span class="s1">y </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">c</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">2</span><span class="s2">,), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s4">160</span><span class="s2">,), </span><span class="s1">check_bounds</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">y</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">, (</span><span class="s4">2</span><span class="s2">,))</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">y</span><span class="s2">[</span><span class="s4">0</span><span class="s2">], </span><span class="s4">15</span><span class="s2">)</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">y</span><span class="s2">[</span><span class="s4">1</span><span class="s2">], </span><span class="s4">35</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_as_strided_checked_sliced_array</span><span class="s2">():</span>
+    <span class="s6">&quot;&quot;&quot;Test various slicing scenarios.&quot;&quot;&quot;</span>
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">200</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+
+    <span class="s1">b </span><span class="s2">= </span><span class="s1">a</span><span class="s2">[</span><span class="s4">10</span><span class="s2">:</span><span class="s4">20</span><span class="s2">]</span>
+    <span class="s1">y </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">b</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">5</span><span class="s2">,), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s4">16</span><span class="s2">,), </span><span class="s1">check_bounds</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">y</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">, (</span><span class="s4">5</span><span class="s2">,))</span>
+
+    <span class="s1">c </span><span class="s2">= </span><span class="s1">a</span><span class="s2">[::</span><span class="s4">2</span><span class="s2">]</span>
+    <span class="s1">y </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">c</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">10</span><span class="s2">,), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s4">16</span><span class="s2">,), </span><span class="s1">check_bounds</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">y</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">, (</span><span class="s4">10</span><span class="s2">,))</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s5">&quot;start,stop,stride_bytes,should_pass&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s2">(</span><span class="s4">0</span><span class="s2">, </span><span class="s4">10</span><span class="s2">, </span><span class="s4">552</span><span class="s2">, </span><span class="s0">True</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">0</span><span class="s2">, </span><span class="s4">10</span><span class="s2">, </span><span class="s4">552 </span><span class="s2">+ </span><span class="s4">1</span><span class="s2">, </span><span class="s0">True</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">90</span><span class="s2">, </span><span class="s4">95</span><span class="s2">, </span><span class="s4">72</span><span class="s2">, </span><span class="s0">True</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">90</span><span class="s2">, </span><span class="s4">95</span><span class="s2">, </span><span class="s4">72 </span><span class="s2">+ </span><span class="s4">1</span><span class="s2">, </span><span class="s0">False</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">5</span><span class="s2">, </span><span class="s4">7</span><span class="s2">, -</span><span class="s4">40</span><span class="s2">, </span><span class="s0">True</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">5</span><span class="s2">, </span><span class="s4">7</span><span class="s2">, -</span><span class="s4">40 </span><span class="s2">- </span><span class="s4">1</span><span class="s2">, </span><span class="s0">False</span><span class="s2">),</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_as_strided_checked_view_parametrized</span><span class="s2">(</span><span class="s1">start</span><span class="s2">, </span><span class="s1">stop</span><span class="s2">, </span><span class="s1">stride_bytes</span><span class="s2">, </span><span class="s1">should_pass</span><span class="s2">):</span>
+    <span class="s6">&quot;&quot;&quot;Parametrized test for various view and stride combinations.&quot;&quot;&quot;</span>
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">100</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+    <span class="s1">b </span><span class="s2">= </span><span class="s1">a</span><span class="s2">[</span><span class="s1">start</span><span class="s2">:</span><span class="s1">stop</span><span class="s2">]</span>
+
+    <span class="s0">if </span><span class="s1">should_pass</span><span class="s2">:</span>
+        <span class="s1">y </span><span class="s2">= </span><span class="s1">as_strided</span><span class="s2">(</span><span class="s1">b</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">2</span><span class="s2">,), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s1">stride_bytes</span><span class="s2">,), </span><span class="s1">check_bounds</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">y</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">, (</span><span class="s4">2</span><span class="s2">,))</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s5">&quot;out of bounds&quot;</span><span class="s2">):</span>
+            <span class="s1">as_strided</span><span class="s2">(</span><span class="s1">b</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">2</span><span class="s2">,), </span><span class="s1">strides</span><span class="s2">=(</span><span class="s1">stride_bytes</span><span class="s2">,), </span><span class="s1">check_bounds</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

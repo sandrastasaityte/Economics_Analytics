@@ -1,0 +1,723 @@
+<html>
+<head>
+<title>_datasource.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_datasource.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;A file interface for handling local and remote data files. 
+ 
+The goal of datasource is to abstract some of the file system operations 
+when dealing with data files so the researcher doesn't have to know all the 
+low-level details.  Through datasource, a researcher can obtain and use a 
+file with one function call, regardless of location of the file. 
+ 
+DataSource is meant to augment standard python libraries, not replace them. 
+It should work seamlessly with standard file IO operations and the os 
+module. 
+ 
+DataSource files can originate locally or remotely: 
+ 
+- local files : '/home/guido/src/local/data.txt' 
+- URLs (http, ftp, ...) : 'http://www.scipy.org/not/real/data.txt' 
+ 
+DataSource files can also be compressed or uncompressed.  Currently only 
+gzip, bz2 and xz are supported. 
+ 
+Example:: 
+ 
+    &gt;&gt;&gt; # Create a DataSource, use os.curdir (default) for local storage. 
+    &gt;&gt;&gt; from numpy import DataSource 
+    &gt;&gt;&gt; ds = DataSource() 
+    &gt;&gt;&gt; 
+    &gt;&gt;&gt; # Open a remote file. 
+    &gt;&gt;&gt; # DataSource downloads the file, stores it locally in: 
+    &gt;&gt;&gt; #     './www.google.com/index.html' 
+    &gt;&gt;&gt; # opens the file and returns a file object. 
+    &gt;&gt;&gt; fp = ds.open('http://www.google.com/') # doctest: +SKIP 
+    &gt;&gt;&gt; 
+    &gt;&gt;&gt; # Use the file as you normally would 
+    &gt;&gt;&gt; fp.read() # doctest: +SKIP 
+    &gt;&gt;&gt; fp.close() # doctest: +SKIP 
+ 
+&quot;&quot;&quot;</span>
+<span class="s2">import </span><span class="s1">os</span>
+
+<span class="s2">from </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">_utils </span><span class="s2">import </span><span class="s1">set_module</span>
+
+<span class="s1">_open </span><span class="s3">= </span><span class="s1">open</span>
+
+
+<span class="s2">def </span><span class="s1">_check_mode</span><span class="s3">(</span><span class="s1">mode</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">, </span><span class="s1">newline</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Check mode and that encoding and newline are compatible. 
+ 
+    Parameters 
+    ---------- 
+    mode : str 
+        File open mode. 
+    encoding : str 
+        File encoding. 
+    newline : str 
+        Newline for text files. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s4">&quot;t&quot; </span><span class="s2">in </span><span class="s1">mode</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s4">&quot;b&quot; </span><span class="s2">in </span><span class="s1">mode</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">f&quot;Invalid mode: </span><span class="s2">{</span><span class="s1">mode</span><span class="s2">!r}</span><span class="s4">&quot;</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">encoding </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;Argument 'encoding' not supported in binary mode&quot;</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">newline </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;Argument 'newline' not supported in binary mode&quot;</span><span class="s3">)</span>
+
+
+<span class="s5"># Using a class instead of a module-level dictionary</span>
+<span class="s5"># to reduce the initial 'import numpy' overhead by</span>
+<span class="s5"># deferring the import of lzma, bz2 and gzip until needed</span>
+
+<span class="s5"># TODO: .zip support, .tar support?</span>
+<span class="s2">class </span><span class="s1">_FileOpeners</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Container for different methods to open (un-)compressed files. 
+ 
+    `_FileOpeners` contains a dictionary that holds one method for each 
+    supported file format. Attribute lookup is implemented in such a way 
+    that an instance of `_FileOpeners` itself can be indexed with the keys 
+    of that dictionary. Currently uncompressed files as well as files 
+    compressed with ``gzip``, ``bz2`` or ``xz`` compression are supported. 
+ 
+    Notes 
+    ----- 
+    `_file_openers`, an instance of `_FileOpeners`, is made available for 
+    use in the `_datasource` module. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import gzip 
+    &gt;&gt;&gt; np.lib._datasource._file_openers.keys() 
+    [None, '.bz2', '.gz', '.xz', '.lzma'] 
+    &gt;&gt;&gt; np.lib._datasource._file_openers['.gz'] is gzip.open 
+    True 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_loaded </span><span class="s3">= </span><span class="s2">False</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_file_openers </span><span class="s3">= {</span><span class="s2">None</span><span class="s3">: </span><span class="s1">open</span><span class="s3">}</span>
+
+    <span class="s2">def </span><span class="s1">_load</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_loaded</span><span class="s3">:</span>
+            <span class="s2">return</span>
+
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">import </span><span class="s1">bz2</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_file_openers</span><span class="s3">[</span><span class="s4">&quot;.bz2&quot;</span><span class="s3">] = </span><span class="s1">bz2</span><span class="s3">.</span><span class="s1">open</span>
+        <span class="s2">except </span><span class="s1">ImportError</span><span class="s3">:</span>
+            <span class="s2">pass</span>
+
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">import </span><span class="s1">gzip</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_file_openers</span><span class="s3">[</span><span class="s4">&quot;.gz&quot;</span><span class="s3">] = </span><span class="s1">gzip</span><span class="s3">.</span><span class="s1">open</span>
+        <span class="s2">except </span><span class="s1">ImportError</span><span class="s3">:</span>
+            <span class="s2">pass</span>
+
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">import </span><span class="s1">lzma</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_file_openers</span><span class="s3">[</span><span class="s4">&quot;.xz&quot;</span><span class="s3">] = </span><span class="s1">lzma</span><span class="s3">.</span><span class="s1">open</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_file_openers</span><span class="s3">[</span><span class="s4">&quot;.lzma&quot;</span><span class="s3">] = </span><span class="s1">lzma</span><span class="s3">.</span><span class="s1">open</span>
+        <span class="s2">except </span><span class="s3">(</span><span class="s1">ImportError</span><span class="s3">, </span><span class="s1">AttributeError</span><span class="s3">):</span>
+            <span class="s5"># There are incompatible backports of lzma that do not have the</span>
+            <span class="s5"># lzma.open attribute, so catch that as well as ImportError.</span>
+            <span class="s2">pass</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_loaded </span><span class="s3">= </span><span class="s2">True</span>
+
+    <span class="s2">def </span><span class="s1">keys</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return the keys of currently supported file openers. 
+ 
+        Parameters 
+        ---------- 
+        None 
+ 
+        Returns 
+        ------- 
+        keys : list 
+            The keys are None for uncompressed files and the file extension 
+            strings (i.e. ``'.gz'``, ``'.xz'``) for supported compression 
+            methods. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_load</span><span class="s3">()</span>
+        <span class="s2">return </span><span class="s1">list</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_file_openers</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">())</span>
+
+    <span class="s2">def </span><span class="s1">__getitem__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">key</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_load</span><span class="s3">()</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_file_openers</span><span class="s3">[</span><span class="s1">key</span><span class="s3">]</span>
+
+
+<span class="s1">_file_openers </span><span class="s3">= </span><span class="s1">_FileOpeners</span><span class="s3">()</span>
+
+<span class="s2">def </span><span class="s1">open</span><span class="s3">(</span><span class="s1">path</span><span class="s3">, </span><span class="s1">mode</span><span class="s3">=</span><span class="s4">'r'</span><span class="s3">, </span><span class="s1">destpath</span><span class="s3">=</span><span class="s1">os</span><span class="s3">.</span><span class="s1">curdir</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">newline</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Open `path` with `mode` and return the file object. 
+ 
+    If ``path`` is a URL, it will be downloaded, stored in the 
+    `DataSource` `destpath` directory and opened from there. 
+ 
+    Parameters 
+    ---------- 
+    path : str or pathlib.Path 
+        Local file path or URL to open. 
+    mode : str, optional 
+        Mode to open `path`. Mode 'r' for reading, 'w' for writing, 'a' to 
+        append. Available modes depend on the type of object specified by 
+        path.  Default is 'r'. 
+    destpath : str, optional 
+        Path to the directory where the source file gets downloaded to for 
+        use.  If `destpath` is None, a temporary directory will be created. 
+        The default path is the current directory. 
+    encoding : {None, str}, optional 
+        Open text file with given encoding. The default encoding will be 
+        what `open` uses. 
+    newline : {None, str}, optional 
+        Newline to use when reading text file. 
+ 
+    Returns 
+    ------- 
+    out : file object 
+        The opened file. 
+ 
+    Notes 
+    ----- 
+    This is a convenience function that instantiates a `DataSource` and 
+    returns the file object from ``DataSource.open(path)``. 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">ds </span><span class="s3">= </span><span class="s1">DataSource</span><span class="s3">(</span><span class="s1">destpath</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">ds</span><span class="s3">.</span><span class="s1">open</span><span class="s3">(</span><span class="s1">path</span><span class="s3">, </span><span class="s1">mode</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">=</span><span class="s1">encoding</span><span class="s3">, </span><span class="s1">newline</span><span class="s3">=</span><span class="s1">newline</span><span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">'numpy.lib.npyio'</span><span class="s3">)</span>
+<span class="s2">class </span><span class="s1">DataSource</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    DataSource(destpath='.') 
+ 
+    A generic data source file (file, http, ftp, ...). 
+ 
+    DataSources can be local files or remote files/URLs.  The files may 
+    also be compressed or uncompressed. DataSource hides some of the 
+    low-level details of downloading the file, allowing you to simply pass 
+    in a valid file path (or URL) and obtain a file object. 
+ 
+    Parameters 
+    ---------- 
+    destpath : str or None, optional 
+        Path to the directory where the source file gets downloaded to for 
+        use.  If `destpath` is None, a temporary directory will be created. 
+        The default path is the current directory. 
+ 
+    Notes 
+    ----- 
+    URLs require a scheme string (``http://``) to be used, without it they 
+    will fail:: 
+ 
+        &gt;&gt;&gt; repos = np.lib.npyio.DataSource() 
+        &gt;&gt;&gt; repos.exists('www.google.com/index.html') 
+        False 
+        &gt;&gt;&gt; repos.exists('http://www.google.com/index.html') 
+        True 
+ 
+    Temporary directories are deleted when the DataSource is deleted. 
+ 
+    Examples 
+    -------- 
+    :: 
+ 
+        &gt;&gt;&gt; ds = np.lib.npyio.DataSource('/home/guido') 
+        &gt;&gt;&gt; urlname = 'http://www.google.com/' 
+        &gt;&gt;&gt; gfile = ds.open('http://www.google.com/') 
+        &gt;&gt;&gt; ds.abspath(urlname) 
+        '/home/guido/www.google.com/index.html' 
+ 
+        &gt;&gt;&gt; ds = np.lib.npyio.DataSource(None)  # use with temporary file 
+        &gt;&gt;&gt; ds.open('/home/guido/foobar.txt') 
+        &lt;open file '/home/guido.foobar.txt', mode 'r' at 0x91d4430&gt; 
+        &gt;&gt;&gt; ds.abspath('/home/guido/foobar.txt') 
+        '/tmp/.../home/guido/foobar.txt' 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">destpath</span><span class="s3">=</span><span class="s1">os</span><span class="s3">.</span><span class="s1">curdir</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Create a DataSource with a local path at destpath.&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">destpath</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_destpath </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">abspath</span><span class="s3">(</span><span class="s1">destpath</span><span class="s3">)</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_istmpdest </span><span class="s3">= </span><span class="s2">False</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">import </span><span class="s1">tempfile  </span><span class="s5"># deferring import to improve startup time</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_destpath </span><span class="s3">= </span><span class="s1">tempfile</span><span class="s3">.</span><span class="s1">mkdtemp</span><span class="s3">()</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_istmpdest </span><span class="s3">= </span><span class="s2">True</span>
+
+    <span class="s2">def </span><span class="s1">__del__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s5"># Remove temp directories</span>
+        <span class="s2">if </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s4">'_istmpdest'</span><span class="s3">) </span><span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_istmpdest</span><span class="s3">:</span>
+            <span class="s2">import </span><span class="s1">shutil</span>
+
+            <span class="s1">shutil</span><span class="s3">.</span><span class="s1">rmtree</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_destpath</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_iszip</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">filename</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Test if the filename is a zip file by looking at the file extension. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">fname</span><span class="s3">, </span><span class="s1">ext </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">splitext</span><span class="s3">(</span><span class="s1">filename</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">ext </span><span class="s2">in </span><span class="s1">_file_openers</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">_iswritemode</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">mode</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Test if the given mode will open a file for writing.&quot;&quot;&quot;</span>
+
+        <span class="s5"># Currently only used to test the bz2 files.</span>
+        <span class="s1">_writemodes </span><span class="s3">= (</span><span class="s4">&quot;w&quot;</span><span class="s3">, </span><span class="s4">&quot;+&quot;</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">any</span><span class="s3">(</span><span class="s1">c </span><span class="s2">in </span><span class="s1">_writemodes </span><span class="s2">for </span><span class="s1">c </span><span class="s2">in </span><span class="s1">mode</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_splitzipext</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">filename</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Split zip extension from filename and return filename. 
+ 
+        Returns 
+        ------- 
+        base, zip_ext : {tuple} 
+ 
+        &quot;&quot;&quot;</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_iszip</span><span class="s3">(</span><span class="s1">filename</span><span class="s3">):</span>
+            <span class="s2">return </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">splitext</span><span class="s3">(</span><span class="s1">filename</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">filename</span><span class="s3">, </span><span class="s2">None</span>
+
+    <span class="s2">def </span><span class="s1">_possible_names</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">filename</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Return a tuple containing compressed filename variations.&quot;&quot;&quot;</span>
+        <span class="s1">names </span><span class="s3">= [</span><span class="s1">filename</span><span class="s3">]</span>
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_iszip</span><span class="s3">(</span><span class="s1">filename</span><span class="s3">):</span>
+            <span class="s2">for </span><span class="s1">zipext </span><span class="s2">in </span><span class="s1">_file_openers</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">():</span>
+                <span class="s2">if </span><span class="s1">zipext</span><span class="s3">:</span>
+                    <span class="s1">names</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">filename </span><span class="s3">+ </span><span class="s1">zipext</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">names</span>
+
+    <span class="s2">def </span><span class="s1">_isurl</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">path</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Test if path is a net location.  Tests the scheme and netloc.&quot;&quot;&quot;</span>
+
+        <span class="s5"># We do this here to reduce the 'import numpy' initial import time.</span>
+        <span class="s2">from </span><span class="s1">urllib</span><span class="s3">.</span><span class="s1">parse </span><span class="s2">import </span><span class="s1">urlparse</span>
+
+        <span class="s5"># BUG : URLs require a scheme string ('http://') to be used.</span>
+        <span class="s5">#       www.google.com will fail.</span>
+        <span class="s5">#       Should we prepend the scheme for those that don't have it and</span>
+        <span class="s5">#       test that also?  Similar to the way we append .gz and test for</span>
+        <span class="s5">#       for compressed versions of files.</span>
+
+        <span class="s1">scheme</span><span class="s3">, </span><span class="s1">netloc</span><span class="s3">, </span><span class="s1">upath</span><span class="s3">, </span><span class="s1">uparams</span><span class="s3">, </span><span class="s1">uquery</span><span class="s3">, </span><span class="s1">ufrag </span><span class="s3">= </span><span class="s1">urlparse</span><span class="s3">(</span><span class="s1">path</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">bool</span><span class="s3">(</span><span class="s1">scheme </span><span class="s2">and </span><span class="s1">netloc</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_cache</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">path</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Cache the file specified by path. 
+ 
+        Creates a copy of the file in the datasource cache. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s5"># We import these here because importing them is slow and</span>
+        <span class="s5"># a significant fraction of numpy's total import time.</span>
+        <span class="s2">import </span><span class="s1">shutil</span>
+        <span class="s2">from </span><span class="s1">urllib</span><span class="s3">.</span><span class="s1">request </span><span class="s2">import </span><span class="s1">urlopen</span>
+
+        <span class="s1">upath </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">abspath</span><span class="s3">(</span><span class="s1">path</span><span class="s3">)</span>
+
+        <span class="s5"># ensure directory exists</span>
+        <span class="s2">if not </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">exists</span><span class="s3">(</span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">dirname</span><span class="s3">(</span><span class="s1">upath</span><span class="s3">)):</span>
+            <span class="s1">os</span><span class="s3">.</span><span class="s1">makedirs</span><span class="s3">(</span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">dirname</span><span class="s3">(</span><span class="s1">upath</span><span class="s3">))</span>
+
+        <span class="s5"># TODO: Doesn't handle compressed files!</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_isurl</span><span class="s3">(</span><span class="s1">path</span><span class="s3">):</span>
+            <span class="s2">with </span><span class="s1">urlopen</span><span class="s3">(</span><span class="s1">path</span><span class="s3">) </span><span class="s2">as </span><span class="s1">openedurl</span><span class="s3">:</span>
+                <span class="s2">with </span><span class="s1">_open</span><span class="s3">(</span><span class="s1">upath</span><span class="s3">, </span><span class="s4">'wb'</span><span class="s3">) </span><span class="s2">as </span><span class="s1">f</span><span class="s3">:</span>
+                    <span class="s1">shutil</span><span class="s3">.</span><span class="s1">copyfileobj</span><span class="s3">(</span><span class="s1">openedurl</span><span class="s3">, </span><span class="s1">f</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">shutil</span><span class="s3">.</span><span class="s1">copyfile</span><span class="s3">(</span><span class="s1">path</span><span class="s3">, </span><span class="s1">upath</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">upath</span>
+
+    <span class="s2">def </span><span class="s1">_findfile</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">path</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Searches for ``path`` and returns full path if found. 
+ 
+        If path is a URL, _findfile will cache a local copy and return the 
+        path to the cached file.  If path is a local file, _findfile will 
+        return a path to that local file. 
+ 
+        The search will include possible compressed versions of the file 
+        and return the first occurrence found. 
+ 
+        &quot;&quot;&quot;</span>
+
+        <span class="s5"># Build list of possible local file paths</span>
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_isurl</span><span class="s3">(</span><span class="s1">path</span><span class="s3">):</span>
+            <span class="s5"># Valid local paths</span>
+            <span class="s1">filelist </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_possible_names</span><span class="s3">(</span><span class="s1">path</span><span class="s3">)</span>
+            <span class="s5"># Paths in self._destpath</span>
+            <span class="s1">filelist </span><span class="s3">+= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_possible_names</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">abspath</span><span class="s3">(</span><span class="s1">path</span><span class="s3">))</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s5"># Cached URLs in self._destpath</span>
+            <span class="s1">filelist </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_possible_names</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">abspath</span><span class="s3">(</span><span class="s1">path</span><span class="s3">))</span>
+            <span class="s5"># Remote URLs</span>
+            <span class="s1">filelist </span><span class="s3">= </span><span class="s1">filelist </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_possible_names</span><span class="s3">(</span><span class="s1">path</span><span class="s3">)</span>
+
+        <span class="s2">for </span><span class="s1">name </span><span class="s2">in </span><span class="s1">filelist</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">exists</span><span class="s3">(</span><span class="s1">name</span><span class="s3">):</span>
+                <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_isurl</span><span class="s3">(</span><span class="s1">name</span><span class="s3">):</span>
+                    <span class="s1">name </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_cache</span><span class="s3">(</span><span class="s1">name</span><span class="s3">)</span>
+                <span class="s2">return </span><span class="s1">name</span>
+        <span class="s2">return None</span>
+
+    <span class="s2">def </span><span class="s1">abspath</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">path</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return absolute path of file in the DataSource directory. 
+ 
+        If `path` is a URL, then `abspath` will return either the location 
+        the file exists locally or the location it would exist when opened 
+        using the `open` method. 
+ 
+        Parameters 
+        ---------- 
+        path : str or pathlib.Path 
+            Can be a local file or a remote URL. 
+ 
+        Returns 
+        ------- 
+        out : str 
+            Complete path, including the `DataSource` destination directory. 
+ 
+        Notes 
+        ----- 
+        The functionality is based on `os.path.abspath`. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s5"># We do this here to reduce the 'import numpy' initial import time.</span>
+        <span class="s2">from </span><span class="s1">urllib</span><span class="s3">.</span><span class="s1">parse </span><span class="s2">import </span><span class="s1">urlparse</span>
+
+        <span class="s5"># TODO:  This should be more robust.  Handles case where path includes</span>
+        <span class="s5">#        the destpath, but not other sub-paths. Failing case:</span>
+        <span class="s5">#        path = /home/guido/datafile.txt</span>
+        <span class="s5">#        destpath = /home/alex/</span>
+        <span class="s5">#        upath = self.abspath(path)</span>
+        <span class="s5">#        upath == '/home/alex/home/guido/datafile.txt'</span>
+
+        <span class="s5"># handle case where path includes self._destpath</span>
+        <span class="s1">splitpath </span><span class="s3">= </span><span class="s1">path</span><span class="s3">.</span><span class="s1">split</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_destpath</span><span class="s3">, </span><span class="s6">2</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">splitpath</span><span class="s3">) &gt; </span><span class="s6">1</span><span class="s3">:</span>
+            <span class="s1">path </span><span class="s3">= </span><span class="s1">splitpath</span><span class="s3">[</span><span class="s6">1</span><span class="s3">]</span>
+        <span class="s1">scheme</span><span class="s3">, </span><span class="s1">netloc</span><span class="s3">, </span><span class="s1">upath</span><span class="s3">, </span><span class="s1">uparams</span><span class="s3">, </span><span class="s1">uquery</span><span class="s3">, </span><span class="s1">ufrag </span><span class="s3">= </span><span class="s1">urlparse</span><span class="s3">(</span><span class="s1">path</span><span class="s3">)</span>
+        <span class="s1">netloc </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_sanitize_relative_path</span><span class="s3">(</span><span class="s1">netloc</span><span class="s3">)</span>
+        <span class="s1">upath </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_sanitize_relative_path</span><span class="s3">(</span><span class="s1">upath</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_destpath</span><span class="s3">, </span><span class="s1">netloc</span><span class="s3">, </span><span class="s1">upath</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_sanitize_relative_path</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">path</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Return a sanitised relative path for which 
+        os.path.abspath(os.path.join(base, path)).startswith(base) 
+        &quot;&quot;&quot;</span>
+        <span class="s1">last </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s1">path </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">normpath</span><span class="s3">(</span><span class="s1">path</span><span class="s3">)</span>
+        <span class="s2">while </span><span class="s1">path </span><span class="s3">!= </span><span class="s1">last</span><span class="s3">:</span>
+            <span class="s1">last </span><span class="s3">= </span><span class="s1">path</span>
+            <span class="s5"># Note: os.path.join treats '/' as os.sep on Windows</span>
+            <span class="s1">path </span><span class="s3">= </span><span class="s1">path</span><span class="s3">.</span><span class="s1">lstrip</span><span class="s3">(</span><span class="s1">os</span><span class="s3">.</span><span class="s1">sep</span><span class="s3">).</span><span class="s1">lstrip</span><span class="s3">(</span><span class="s4">'/'</span><span class="s3">)</span>
+            <span class="s1">path </span><span class="s3">= </span><span class="s1">path</span><span class="s3">.</span><span class="s1">lstrip</span><span class="s3">(</span><span class="s1">os</span><span class="s3">.</span><span class="s1">pardir</span><span class="s3">).</span><span class="s1">removeprefix</span><span class="s3">(</span><span class="s4">'..'</span><span class="s3">)</span>
+            <span class="s1">drive</span><span class="s3">, </span><span class="s1">path </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">splitdrive</span><span class="s3">(</span><span class="s1">path</span><span class="s3">)  </span><span class="s5"># for Windows</span>
+        <span class="s2">return </span><span class="s1">path</span>
+
+    <span class="s2">def </span><span class="s1">exists</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">path</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Test if path exists. 
+ 
+        Test if `path` exists as (and in this order): 
+ 
+        - a local file. 
+        - a remote URL that has been downloaded and stored locally in the 
+          `DataSource` directory. 
+        - a remote URL that has not been downloaded, but is valid and 
+          accessible. 
+ 
+        Parameters 
+        ---------- 
+        path : str or pathlib.Path 
+            Can be a local file or a remote URL. 
+ 
+        Returns 
+        ------- 
+        out : bool 
+            True if `path` exists. 
+ 
+        Notes 
+        ----- 
+        When `path` is a URL, `exists` will return True if it's either 
+        stored locally in the `DataSource` directory, or is a valid remote 
+        URL.  `DataSource` does not discriminate between the two, the file 
+        is accessible if it exists in either location. 
+ 
+        &quot;&quot;&quot;</span>
+
+        <span class="s5"># First test for local path</span>
+        <span class="s2">if </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">exists</span><span class="s3">(</span><span class="s1">path</span><span class="s3">):</span>
+            <span class="s2">return True</span>
+
+        <span class="s5"># We import this here because importing urllib is slow and</span>
+        <span class="s5"># a significant fraction of numpy's total import time.</span>
+        <span class="s2">from </span><span class="s1">urllib</span><span class="s3">.</span><span class="s1">error </span><span class="s2">import </span><span class="s1">URLError</span>
+        <span class="s2">from </span><span class="s1">urllib</span><span class="s3">.</span><span class="s1">request </span><span class="s2">import </span><span class="s1">urlopen</span>
+
+        <span class="s5"># Test cached url</span>
+        <span class="s1">upath </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">abspath</span><span class="s3">(</span><span class="s1">path</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">exists</span><span class="s3">(</span><span class="s1">upath</span><span class="s3">):</span>
+            <span class="s2">return True</span>
+
+        <span class="s5"># Test remote url</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_isurl</span><span class="s3">(</span><span class="s1">path</span><span class="s3">):</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">netfile </span><span class="s3">= </span><span class="s1">urlopen</span><span class="s3">(</span><span class="s1">path</span><span class="s3">)</span>
+                <span class="s1">netfile</span><span class="s3">.</span><span class="s1">close</span><span class="s3">()</span>
+                <span class="s2">del </span><span class="s1">netfile</span>
+                <span class="s2">return True</span>
+            <span class="s2">except </span><span class="s1">URLError</span><span class="s3">:</span>
+                <span class="s2">return False</span>
+        <span class="s2">return False</span>
+
+    <span class="s2">def </span><span class="s1">open</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">path</span><span class="s3">, </span><span class="s1">mode</span><span class="s3">=</span><span class="s4">'r'</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">newline</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Open and return file-like object. 
+ 
+        If `path` is a URL, it will be downloaded, stored in the 
+        `DataSource` directory and opened from there. 
+ 
+        Parameters 
+        ---------- 
+        path : str or pathlib.Path 
+            Local file path or URL to open. 
+        mode : {'r', 'w', 'a'}, optional 
+            Mode to open `path`.  Mode 'r' for reading, 'w' for writing, 
+            'a' to append. Available modes depend on the type of object 
+            specified by `path`. Default is 'r'. 
+        encoding : {None, str}, optional 
+            Open text file with given encoding. The default encoding will be 
+            what `open` uses. 
+        newline : {None, str}, optional 
+            Newline to use when reading text file. 
+ 
+        Returns 
+        ------- 
+        out : file object 
+            File object. 
+ 
+        &quot;&quot;&quot;</span>
+
+        <span class="s5"># TODO: There is no support for opening a file for writing which</span>
+        <span class="s5">#       doesn't exist yet (creating a file).  Should there be?</span>
+
+        <span class="s5"># TODO: Add a ``subdir`` parameter for specifying the subdirectory</span>
+        <span class="s5">#       used to store URLs in self._destpath.</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_isurl</span><span class="s3">(</span><span class="s1">path</span><span class="s3">) </span><span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_iswritemode</span><span class="s3">(</span><span class="s1">mode</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;URLs are not writeable&quot;</span><span class="s3">)</span>
+
+        <span class="s5"># NOTE: _findfile will fail on a new file opened for writing.</span>
+        <span class="s1">found </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_findfile</span><span class="s3">(</span><span class="s1">path</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">found</span><span class="s3">:</span>
+            <span class="s1">_fname</span><span class="s3">, </span><span class="s1">ext </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_splitzipext</span><span class="s3">(</span><span class="s1">found</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">ext </span><span class="s3">== </span><span class="s4">'bz2'</span><span class="s3">:</span>
+                <span class="s1">mode</span><span class="s3">.</span><span class="s1">replace</span><span class="s3">(</span><span class="s4">&quot;+&quot;</span><span class="s3">, </span><span class="s4">&quot;&quot;</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">_file_openers</span><span class="s3">[</span><span class="s1">ext</span><span class="s3">](</span><span class="s1">found</span><span class="s3">, </span><span class="s1">mode</span><span class="s3">=</span><span class="s1">mode</span><span class="s3">,</span>
+                                      <span class="s1">encoding</span><span class="s3">=</span><span class="s1">encoding</span><span class="s3">, </span><span class="s1">newline</span><span class="s3">=</span><span class="s1">newline</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">FileNotFoundError</span><span class="s3">(</span><span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">path</span><span class="s2">} </span><span class="s4">not found.&quot;</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">Repository </span><span class="s3">(</span><span class="s1">DataSource</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Repository(baseurl, destpath='.') 
+ 
+    A data repository where multiple DataSource's share a base 
+    URL/directory. 
+ 
+    `Repository` extends `DataSource` by prepending a base URL (or 
+    directory) to all the files it handles. Use `Repository` when you will 
+    be working with multiple files from one base URL.  Initialize 
+    `Repository` with the base URL, then refer to each file by its filename 
+    only. 
+ 
+    Parameters 
+    ---------- 
+    baseurl : str 
+        Path to the local directory or remote location that contains the 
+        data files. 
+    destpath : str or None, optional 
+        Path to the directory where the source file gets downloaded to for 
+        use.  If `destpath` is None, a temporary directory will be created. 
+        The default path is the current directory. 
+ 
+    Examples 
+    -------- 
+    To analyze all files in the repository, do something like this 
+    (note: this is not self-contained code):: 
+ 
+        &gt;&gt;&gt; repos = np.lib._datasource.Repository('/home/user/data/dir/') 
+        &gt;&gt;&gt; for filename in filelist: 
+        ...     fp = repos.open(filename) 
+        ...     fp.analyze() 
+        ...     fp.close() 
+ 
+    Similarly you could use a URL for a repository:: 
+ 
+        &gt;&gt;&gt; repos = np.lib._datasource.Repository('http://www.xyz.edu/data') 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">baseurl</span><span class="s3">, </span><span class="s1">destpath</span><span class="s3">=</span><span class="s1">os</span><span class="s3">.</span><span class="s1">curdir</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Create a Repository with a shared url or directory of baseurl.&quot;&quot;&quot;</span>
+        <span class="s1">DataSource</span><span class="s3">.</span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">destpath</span><span class="s3">=</span><span class="s1">destpath</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_baseurl </span><span class="s3">= </span><span class="s1">baseurl</span>
+
+    <span class="s2">def </span><span class="s1">__del__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">DataSource</span><span class="s3">.</span><span class="s1">__del__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_fullpath</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">path</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Return complete path for path.  Prepends baseurl if necessary.&quot;&quot;&quot;</span>
+        <span class="s1">splitpath </span><span class="s3">= </span><span class="s1">path</span><span class="s3">.</span><span class="s1">split</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_baseurl</span><span class="s3">, </span><span class="s6">2</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">splitpath</span><span class="s3">) == </span><span class="s6">1</span><span class="s3">:</span>
+            <span class="s1">result </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_baseurl</span><span class="s3">, </span><span class="s1">path</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">result </span><span class="s3">= </span><span class="s1">path    </span><span class="s5"># path contains baseurl already</span>
+        <span class="s2">return </span><span class="s1">result</span>
+
+    <span class="s2">def </span><span class="s1">_findfile</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">path</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Extend DataSource method to prepend baseurl to ``path``.&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">DataSource</span><span class="s3">.</span><span class="s1">_findfile</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_fullpath</span><span class="s3">(</span><span class="s1">path</span><span class="s3">))</span>
+
+    <span class="s2">def </span><span class="s1">abspath</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">path</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return absolute path of file in the Repository directory. 
+ 
+        If `path` is a URL, then `abspath` will return either the location 
+        the file exists locally or the location it would exist when opened 
+        using the `open` method. 
+ 
+        Parameters 
+        ---------- 
+        path : str or pathlib.Path 
+            Can be a local file or a remote URL. This may, but does not 
+            have to, include the `baseurl` with which the `Repository` was 
+            initialized. 
+ 
+        Returns 
+        ------- 
+        out : str 
+            Complete path, including the `DataSource` destination directory. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">DataSource</span><span class="s3">.</span><span class="s1">abspath</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_fullpath</span><span class="s3">(</span><span class="s1">path</span><span class="s3">))</span>
+
+    <span class="s2">def </span><span class="s1">exists</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">path</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Test if path exists prepending Repository base URL to path. 
+ 
+        Test if `path` exists as (and in this order): 
+ 
+        - a local file. 
+        - a remote URL that has been downloaded and stored locally in the 
+          `DataSource` directory. 
+        - a remote URL that has not been downloaded, but is valid and 
+          accessible. 
+ 
+        Parameters 
+        ---------- 
+        path : str or pathlib.Path 
+            Can be a local file or a remote URL. This may, but does not 
+            have to, include the `baseurl` with which the `Repository` was 
+            initialized. 
+ 
+        Returns 
+        ------- 
+        out : bool 
+            True if `path` exists. 
+ 
+        Notes 
+        ----- 
+        When `path` is a URL, `exists` will return True if it's either 
+        stored locally in the `DataSource` directory, or is a valid remote 
+        URL.  `DataSource` does not discriminate between the two, the file 
+        is accessible if it exists in either location. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">DataSource</span><span class="s3">.</span><span class="s1">exists</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_fullpath</span><span class="s3">(</span><span class="s1">path</span><span class="s3">))</span>
+
+    <span class="s2">def </span><span class="s1">open</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">path</span><span class="s3">, </span><span class="s1">mode</span><span class="s3">=</span><span class="s4">'r'</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">newline</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Open and return file-like object prepending Repository base URL. 
+ 
+        If `path` is a URL, it will be downloaded, stored in the 
+        DataSource directory and opened from there. 
+ 
+        Parameters 
+        ---------- 
+        path : str or pathlib.Path 
+            Local file path or URL to open. This may, but does not have to, 
+            include the `baseurl` with which the `Repository` was 
+            initialized. 
+        mode : {'r', 'w', 'a'}, optional 
+            Mode to open `path`.  Mode 'r' for reading, 'w' for writing, 
+            'a' to append. Available modes depend on the type of object 
+            specified by `path`. Default is 'r'. 
+        encoding : {None, str}, optional 
+            Open text file with given encoding. The default encoding will be 
+            what `open` uses. 
+        newline : {None, str}, optional 
+            Newline to use when reading text file. 
+ 
+        Returns 
+        ------- 
+        out : file object 
+            File object. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">DataSource</span><span class="s3">.</span><span class="s1">open</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_fullpath</span><span class="s3">(</span><span class="s1">path</span><span class="s3">), </span><span class="s1">mode</span><span class="s3">,</span>
+                               <span class="s1">encoding</span><span class="s3">=</span><span class="s1">encoding</span><span class="s3">, </span><span class="s1">newline</span><span class="s3">=</span><span class="s1">newline</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">listdir</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        List files in the source Repository. 
+ 
+        Returns 
+        ------- 
+        files : list of str or pathlib.Path 
+            List of file names (not containing a directory part). 
+ 
+        Notes 
+        ----- 
+        Does not currently work for remote repositories. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_isurl</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_baseurl</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">NotImplementedError</span><span class="s3">(</span>
+                  <span class="s4">&quot;Directory listing of URLs, not supported yet.&quot;</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">os</span><span class="s3">.</span><span class="s1">listdir</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_baseurl</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

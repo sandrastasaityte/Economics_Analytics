@@ -1,0 +1,535 @@
+<html>
+<head>
+<title>cell_range.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #5f826b; font-style: italic;}
+.s5 { color: #2aacb8;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+cell_range.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright (c) 2010-2024 openpyxl</span>
+
+<span class="s2">from </span><span class="s1">copy </span><span class="s2">import </span><span class="s1">copy</span>
+<span class="s2">from </span><span class="s1">operator </span><span class="s2">import </span><span class="s1">attrgetter</span>
+
+<span class="s2">from </span><span class="s1">openpyxl</span><span class="s3">.</span><span class="s1">descriptors </span><span class="s2">import </span><span class="s1">Strict</span>
+<span class="s2">from </span><span class="s1">openpyxl</span><span class="s3">.</span><span class="s1">descriptors </span><span class="s2">import </span><span class="s1">MinMax</span>
+<span class="s2">from </span><span class="s1">openpyxl</span><span class="s3">.</span><span class="s1">descriptors</span><span class="s3">.</span><span class="s1">sequence </span><span class="s2">import </span><span class="s1">UniqueSequence</span>
+<span class="s2">from </span><span class="s1">openpyxl</span><span class="s3">.</span><span class="s1">descriptors</span><span class="s3">.</span><span class="s1">serialisable </span><span class="s2">import </span><span class="s1">Serialisable</span>
+
+<span class="s2">from </span><span class="s1">openpyxl</span><span class="s3">.</span><span class="s1">utils </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">range_boundaries</span><span class="s3">,</span>
+    <span class="s1">range_to_tuple</span><span class="s3">,</span>
+    <span class="s1">get_column_letter</span><span class="s3">,</span>
+    <span class="s1">quote_sheetname</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">class </span><span class="s1">CellRange</span><span class="s3">(</span><span class="s1">Serialisable</span><span class="s3">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Represents a range in a sheet: title and coordinates. 
+ 
+    This object is used to perform operations on ranges, like: 
+ 
+    - shift, expand or shrink 
+    - union/intersection with another sheet range, 
+ 
+    We can check whether a range is: 
+ 
+    - equal or not equal to another, 
+    - disjoint of another, 
+    - contained in another. 
+ 
+    We can get: 
+ 
+    - the size of a range. 
+    - the range bounds (vertices) 
+    - the coordinates, 
+    - the string representation, 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">min_col </span><span class="s3">= </span><span class="s1">MinMax</span><span class="s3">(</span><span class="s1">min</span><span class="s3">=</span><span class="s5">1</span><span class="s3">, </span><span class="s1">max</span><span class="s3">=</span><span class="s5">18278</span><span class="s3">, </span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">int</span><span class="s3">)</span>
+    <span class="s1">min_row </span><span class="s3">= </span><span class="s1">MinMax</span><span class="s3">(</span><span class="s1">min</span><span class="s3">=</span><span class="s5">1</span><span class="s3">, </span><span class="s1">max</span><span class="s3">=</span><span class="s5">1048576</span><span class="s3">, </span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">int</span><span class="s3">)</span>
+    <span class="s1">max_col </span><span class="s3">= </span><span class="s1">MinMax</span><span class="s3">(</span><span class="s1">min</span><span class="s3">=</span><span class="s5">1</span><span class="s3">, </span><span class="s1">max</span><span class="s3">=</span><span class="s5">18278</span><span class="s3">, </span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">int</span><span class="s3">)</span>
+    <span class="s1">max_row </span><span class="s3">= </span><span class="s1">MinMax</span><span class="s3">(</span><span class="s1">min</span><span class="s3">=</span><span class="s5">1</span><span class="s3">, </span><span class="s1">max</span><span class="s3">=</span><span class="s5">1048576</span><span class="s3">, </span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">int</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">range_string</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">min_col</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">min_row</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">max_col</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">max_row</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">title</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">range_string </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s6">&quot;!&quot; </span><span class="s2">in </span><span class="s1">range_string</span><span class="s3">:</span>
+                <span class="s1">title</span><span class="s3">, (</span><span class="s1">min_col</span><span class="s3">, </span><span class="s1">min_row</span><span class="s3">, </span><span class="s1">max_col</span><span class="s3">, </span><span class="s1">max_row</span><span class="s3">) = </span><span class="s1">range_to_tuple</span><span class="s3">(</span><span class="s1">range_string</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">min_col</span><span class="s3">, </span><span class="s1">min_row</span><span class="s3">, </span><span class="s1">max_col</span><span class="s3">, </span><span class="s1">max_row </span><span class="s3">= </span><span class="s1">range_boundaries</span><span class="s3">(</span><span class="s1">range_string</span><span class="s3">)</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">min_col </span><span class="s3">= </span><span class="s1">min_col</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">min_row </span><span class="s3">= </span><span class="s1">min_row</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">max_col </span><span class="s3">= </span><span class="s1">max_col</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">max_row </span><span class="s3">= </span><span class="s1">max_row</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">title </span><span class="s3">= </span><span class="s1">title</span>
+
+        <span class="s2">if </span><span class="s1">min_col </span><span class="s3">&gt; </span><span class="s1">max_col</span><span class="s3">:</span>
+            <span class="s1">fmt </span><span class="s3">= </span><span class="s6">&quot;{max_col} must be greater than {min_col}&quot;</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">min_col</span><span class="s3">=</span><span class="s1">min_col</span><span class="s3">, </span><span class="s1">max_col</span><span class="s3">=</span><span class="s1">max_col</span><span class="s3">))</span>
+        <span class="s2">if </span><span class="s1">min_row </span><span class="s3">&gt; </span><span class="s1">max_row</span><span class="s3">:</span>
+            <span class="s1">fmt </span><span class="s3">= </span><span class="s6">&quot;{max_row} must be greater than {min_row}&quot;</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">min_row</span><span class="s3">=</span><span class="s1">min_row</span><span class="s3">, </span><span class="s1">max_row</span><span class="s3">=</span><span class="s1">max_row</span><span class="s3">))</span>
+
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">bounds</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Vertices of the range as a tuple 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span>
+
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">coord</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Excel-style representation of the range 
+        &quot;&quot;&quot;</span>
+        <span class="s1">fmt </span><span class="s3">= </span><span class="s6">&quot;{min_col}{min_row}:{max_col}{max_row}&quot;</span>
+        <span class="s2">if </span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col </span><span class="s3">== </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col</span>
+            <span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row </span><span class="s3">== </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span><span class="s3">):</span>
+            <span class="s1">fmt </span><span class="s3">= </span><span class="s6">&quot;{min_col}{min_row}&quot;</span>
+
+        <span class="s2">return </span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span>
+            <span class="s1">min_col</span><span class="s3">=</span><span class="s1">get_column_letter</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col</span><span class="s3">),</span>
+            <span class="s1">min_row</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span><span class="s3">,</span>
+            <span class="s1">max_col</span><span class="s3">=</span><span class="s1">get_column_letter</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col</span><span class="s3">),</span>
+            <span class="s1">max_row</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span>
+        <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">rows</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Return cell coordinates as rows 
+        &quot;&quot;&quot;</span>
+        <span class="s2">for </span><span class="s1">row </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span><span class="s3">+</span><span class="s5">1</span><span class="s3">):</span>
+            <span class="s2">yield </span><span class="s3">[(</span><span class="s1">row</span><span class="s3">, </span><span class="s1">col</span><span class="s3">) </span><span class="s2">for </span><span class="s1">col </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col</span><span class="s3">+</span><span class="s5">1</span><span class="s3">)]</span>
+
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">cols</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Return cell coordinates as columns 
+        &quot;&quot;&quot;</span>
+        <span class="s2">for </span><span class="s1">col </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col</span><span class="s3">+</span><span class="s5">1</span><span class="s3">):</span>
+            <span class="s2">yield </span><span class="s3">[(</span><span class="s1">row</span><span class="s3">, </span><span class="s1">col</span><span class="s3">) </span><span class="s2">for </span><span class="s1">row </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span><span class="s3">+</span><span class="s5">1</span><span class="s3">)]</span>
+
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">cells</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">from </span><span class="s1">itertools </span><span class="s2">import </span><span class="s1">product</span>
+        <span class="s2">return </span><span class="s1">product</span><span class="s3">(</span><span class="s1">range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span><span class="s3">+</span><span class="s5">1</span><span class="s3">), </span><span class="s1">range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col</span><span class="s3">+</span><span class="s5">1</span><span class="s3">))</span>
+
+
+    <span class="s2">def </span><span class="s1">_check_title</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Check whether comparisons between ranges are possible. 
+        Cannot compare ranges from different worksheets 
+        Skip if the range passed in has no title. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">other</span><span class="s3">, </span><span class="s1">CellRange</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span><span class="s1">repr</span><span class="s3">(</span><span class="s1">type</span><span class="s3">(</span><span class="s1">other</span><span class="s3">)))</span>
+
+        <span class="s2">if </span><span class="s1">other</span><span class="s3">.</span><span class="s1">title </span><span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">title </span><span class="s3">!= </span><span class="s1">other</span><span class="s3">.</span><span class="s1">title</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s6">&quot;Cannot work with ranges from different worksheets&quot;</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">__repr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">fmt </span><span class="s3">= </span><span class="s6">u&quot;&lt;{cls} {coord}&gt;&quot;</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">title</span><span class="s3">:</span>
+            <span class="s1">fmt </span><span class="s3">= </span><span class="s6">u&quot;&lt;{cls} {title!r}!{coord}&gt;&quot;</span>
+        <span class="s2">return </span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">__class__</span><span class="s3">.</span><span class="s1">__name__</span><span class="s3">, </span><span class="s1">title</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">title</span><span class="s3">, </span><span class="s1">coord</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">coord</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">__hash__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">hash</span><span class="s3">((</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col</span><span class="s3">))</span>
+
+
+    <span class="s2">def </span><span class="s1">__str__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">fmt </span><span class="s3">= </span><span class="s6">&quot;{coord}&quot;</span>
+        <span class="s1">title </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">title</span>
+        <span class="s2">if </span><span class="s1">title</span><span class="s3">:</span>
+            <span class="s1">fmt </span><span class="s3">= </span><span class="s6">u&quot;{title}!{coord}&quot;</span>
+            <span class="s1">title </span><span class="s3">= </span><span class="s1">quote_sheetname</span><span class="s3">(</span><span class="s1">title</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">title</span><span class="s3">=</span><span class="s1">title</span><span class="s3">, </span><span class="s1">coord</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">coord</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">__copy__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">__class__</span><span class="s3">(</span><span class="s1">min_col</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col</span><span class="s3">, </span><span class="s1">min_row</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span><span class="s3">,</span>
+                              <span class="s1">max_col</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col</span><span class="s3">, </span><span class="s1">max_row</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span><span class="s3">,</span>
+                              <span class="s1">title</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">title</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">shift</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">col_shift</span><span class="s3">=</span><span class="s5">0</span><span class="s3">, </span><span class="s1">row_shift</span><span class="s3">=</span><span class="s5">0</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Shift the focus of the range according to the shift values (*col_shift*, *row_shift*). 
+ 
+        :type col_shift: int 
+        :param col_shift: number of columns to be moved by, can be negative 
+        :type row_shift: int 
+        :param row_shift: number of rows to be moved by, can be negative 
+        :raise: :class:`ValueError` if any row or column index &lt; 1 
+        &quot;&quot;&quot;</span>
+
+        <span class="s2">if </span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col </span><span class="s3">+ </span><span class="s1">col_shift </span><span class="s3">&lt;= </span><span class="s5">0</span>
+            <span class="s2">or </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row </span><span class="s3">+ </span><span class="s1">row_shift </span><span class="s3">&lt;= </span><span class="s5">0</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s6">&quot;Invalid shift value: col_shift={0}, row_shift={1}&quot;</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">col_shift</span><span class="s3">, </span><span class="s1">row_shift</span><span class="s3">))</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">min_col </span><span class="s3">+= </span><span class="s1">col_shift</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">min_row </span><span class="s3">+= </span><span class="s1">row_shift</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">max_col </span><span class="s3">+= </span><span class="s1">col_shift</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">max_row </span><span class="s3">+= </span><span class="s1">row_shift</span>
+
+
+    <span class="s2">def </span><span class="s1">__ne__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Test whether the ranges are not equal. 
+ 
+        :type other: openpyxl.worksheet.cell_range.CellRange 
+        :param other: Other sheet range 
+        :return: ``True`` if *range* != *other*. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_check_title</span><span class="s3">(</span><span class="s1">other</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s1">ValueError</span><span class="s3">:</span>
+            <span class="s2">return True</span>
+
+        <span class="s2">return </span><span class="s3">(</span>
+            <span class="s1">other</span><span class="s3">.</span><span class="s1">min_row </span><span class="s3">!= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span>
+            <span class="s2">or </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row </span><span class="s3">!= </span><span class="s1">other</span><span class="s3">.</span><span class="s1">max_row</span>
+            <span class="s2">or </span><span class="s1">other</span><span class="s3">.</span><span class="s1">min_col </span><span class="s3">!= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col</span>
+            <span class="s2">or </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col </span><span class="s3">!= </span><span class="s1">other</span><span class="s3">.</span><span class="s1">max_col</span>
+        <span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">__eq__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Test whether the ranges are equal. 
+ 
+        :type other: openpyxl.worksheet.cell_range.CellRange 
+        :param other: Other sheet range 
+        :return: ``True`` if *range* == *other*. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">__ne__</span><span class="s3">(</span><span class="s1">other</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">issubset</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Test whether every cell in this range is also in *other*. 
+ 
+        :type other: openpyxl.worksheet.cell_range.CellRange 
+        :param other: Other sheet range 
+        :return: ``True`` if *range* &lt;= *other*. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_check_title</span><span class="s3">(</span><span class="s1">other</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">other</span><span class="s3">.</span><span class="s1">__superset</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+    <span class="s1">__le__ </span><span class="s3">= </span><span class="s1">issubset</span>
+
+
+    <span class="s2">def </span><span class="s1">__lt__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Test whether *other* contains every cell of this range, and more. 
+ 
+        :type other: openpyxl.worksheet.cell_range.CellRange 
+        :param other: Other sheet range 
+        :return: ``True`` if *range* &lt; *other*. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">__le__</span><span class="s3">(</span><span class="s1">other</span><span class="s3">) </span><span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">__ne__</span><span class="s3">(</span><span class="s1">other</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">__superset</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s3">(</span>
+            <span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row </span><span class="s3">&lt;= </span><span class="s1">other</span><span class="s3">.</span><span class="s1">min_row </span><span class="s3">&lt;= </span><span class="s1">other</span><span class="s3">.</span><span class="s1">max_row </span><span class="s3">&lt;= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span><span class="s3">)</span>
+            <span class="s2">and</span>
+            <span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col </span><span class="s3">&lt;= </span><span class="s1">other</span><span class="s3">.</span><span class="s1">min_col </span><span class="s3">&lt;= </span><span class="s1">other</span><span class="s3">.</span><span class="s1">max_col </span><span class="s3">&lt;= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col</span><span class="s3">)</span>
+        <span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">issuperset</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Test whether every cell in *other* is in this range. 
+ 
+        :type other: openpyxl.worksheet.cell_range.CellRange 
+        :param other: Other sheet range 
+        :return: ``True`` if *range* &gt;= *other* (or *other* in *range*). 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_check_title</span><span class="s3">(</span><span class="s1">other</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">__superset</span><span class="s3">(</span><span class="s1">other</span><span class="s3">)</span>
+
+    <span class="s1">__ge__ </span><span class="s3">= </span><span class="s1">issuperset</span>
+
+
+    <span class="s2">def </span><span class="s1">__contains__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">coord</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Check whether the range contains a particular cell coordinate 
+        &quot;&quot;&quot;</span>
+        <span class="s1">cr </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">__class__</span><span class="s3">(</span><span class="s1">coord</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">__superset</span><span class="s3">(</span><span class="s1">cr</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">__gt__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Test whether this range contains every cell in *other*, and more. 
+ 
+        :type other: openpyxl.worksheet.cell_range.CellRange 
+        :param other: Other sheet range 
+        :return: ``True`` if *range* &gt; *other*. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">__ge__</span><span class="s3">(</span><span class="s1">other</span><span class="s3">) </span><span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">__ne__</span><span class="s3">(</span><span class="s1">other</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">isdisjoint</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Return ``True`` if this range has no cell in common with *other*. 
+        Ranges are disjoint if and only if their intersection is the empty range. 
+ 
+        :type other: openpyxl.worksheet.cell_range.CellRange 
+        :param other: Other sheet range. 
+        :return: ``True`` if the range has no cells in common with other. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_check_title</span><span class="s3">(</span><span class="s1">other</span><span class="s3">)</span>
+
+        <span class="s0"># Sort by top-left vertex</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">bounds </span><span class="s3">&gt; </span><span class="s1">other</span><span class="s3">.</span><span class="s1">bounds</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">, </span><span class="s1">other </span><span class="s3">= </span><span class="s1">other</span><span class="s3">, </span><span class="s1">self</span>
+
+        <span class="s2">return </span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col </span><span class="s3">&lt; </span><span class="s1">other</span><span class="s3">.</span><span class="s1">min_col</span>
+                <span class="s2">or </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row </span><span class="s3">&lt; </span><span class="s1">other</span><span class="s3">.</span><span class="s1">min_row</span>
+                <span class="s2">or </span><span class="s1">other</span><span class="s3">.</span><span class="s1">max_row </span><span class="s3">&lt; </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">intersection</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Return a new range with cells common to this range and *other* 
+ 
+        :type other: openpyxl.worksheet.cell_range.CellRange 
+        :param other: Other sheet range. 
+        :return: the intersecting sheet range. 
+        :raise: :class:`ValueError` if the *other* range doesn't intersect 
+            with this range. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">isdisjoint</span><span class="s3">(</span><span class="s1">other</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s6">&quot;Range {0} doesn't intersect {0}&quot;</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">))</span>
+
+        <span class="s1">min_row </span><span class="s3">= </span><span class="s1">max</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span><span class="s3">, </span><span class="s1">other</span><span class="s3">.</span><span class="s1">min_row</span><span class="s3">)</span>
+        <span class="s1">max_row </span><span class="s3">= </span><span class="s1">min</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span><span class="s3">, </span><span class="s1">other</span><span class="s3">.</span><span class="s1">max_row</span><span class="s3">)</span>
+        <span class="s1">min_col </span><span class="s3">= </span><span class="s1">max</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col</span><span class="s3">, </span><span class="s1">other</span><span class="s3">.</span><span class="s1">min_col</span><span class="s3">)</span>
+        <span class="s1">max_col </span><span class="s3">= </span><span class="s1">min</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col</span><span class="s3">, </span><span class="s1">other</span><span class="s3">.</span><span class="s1">max_col</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">CellRange</span><span class="s3">(</span><span class="s1">min_col</span><span class="s3">=</span><span class="s1">min_col</span><span class="s3">, </span><span class="s1">min_row</span><span class="s3">=</span><span class="s1">min_row</span><span class="s3">, </span><span class="s1">max_col</span><span class="s3">=</span><span class="s1">max_col</span><span class="s3">,</span>
+                         <span class="s1">max_row</span><span class="s3">=</span><span class="s1">max_row</span><span class="s3">)</span>
+
+    <span class="s1">__and__ </span><span class="s3">= </span><span class="s1">intersection</span>
+
+
+    <span class="s2">def </span><span class="s1">union</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Return the minimal superset of this range and *other*. This new range 
+        will contain all cells from this range, *other*, and any additional 
+        cells required to form a rectangular ``CellRange``. 
+ 
+        :type other: openpyxl.worksheet.cell_range.CellRange 
+        :param other: Other sheet range. 
+        :return: a ``CellRange`` that is a superset of this and *other*. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_check_title</span><span class="s3">(</span><span class="s1">other</span><span class="s3">)</span>
+
+        <span class="s1">min_row </span><span class="s3">= </span><span class="s1">min</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span><span class="s3">, </span><span class="s1">other</span><span class="s3">.</span><span class="s1">min_row</span><span class="s3">)</span>
+        <span class="s1">max_row </span><span class="s3">= </span><span class="s1">max</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span><span class="s3">, </span><span class="s1">other</span><span class="s3">.</span><span class="s1">max_row</span><span class="s3">)</span>
+        <span class="s1">min_col </span><span class="s3">= </span><span class="s1">min</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col</span><span class="s3">, </span><span class="s1">other</span><span class="s3">.</span><span class="s1">min_col</span><span class="s3">)</span>
+        <span class="s1">max_col </span><span class="s3">= </span><span class="s1">max</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col</span><span class="s3">, </span><span class="s1">other</span><span class="s3">.</span><span class="s1">max_col</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">CellRange</span><span class="s3">(</span><span class="s1">min_col</span><span class="s3">=</span><span class="s1">min_col</span><span class="s3">, </span><span class="s1">min_row</span><span class="s3">=</span><span class="s1">min_row</span><span class="s3">, </span><span class="s1">max_col</span><span class="s3">=</span><span class="s1">max_col</span><span class="s3">,</span>
+                         <span class="s1">max_row</span><span class="s3">=</span><span class="s1">max_row</span><span class="s3">, </span><span class="s1">title</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">title</span><span class="s3">)</span>
+
+    <span class="s1">__or__ </span><span class="s3">= </span><span class="s1">union</span>
+
+
+    <span class="s2">def </span><span class="s1">__iter__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        For use as a dictionary elsewhere in the library. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">__attrs__</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">x </span><span class="s3">== </span><span class="s6">&quot;title&quot;</span><span class="s3">:</span>
+                <span class="s2">continue</span>
+            <span class="s1">v </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">x</span><span class="s3">)</span>
+            <span class="s2">yield </span><span class="s1">x</span><span class="s3">, </span><span class="s1">v</span>
+
+
+    <span class="s2">def </span><span class="s1">expand</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">right</span><span class="s3">=</span><span class="s5">0</span><span class="s3">, </span><span class="s1">down</span><span class="s3">=</span><span class="s5">0</span><span class="s3">, </span><span class="s1">left</span><span class="s3">=</span><span class="s5">0</span><span class="s3">, </span><span class="s1">up</span><span class="s3">=</span><span class="s5">0</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Expand the range by the dimensions provided. 
+ 
+        :type right: int 
+        :param right: expand range to the right by this number of cells 
+        :type down: int 
+        :param down: expand range down by this number of cells 
+        :type left: int 
+        :param left: expand range to the left by this number of cells 
+        :type up: int 
+        :param up: expand range up by this number of cells 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">min_col </span><span class="s3">-= </span><span class="s1">left</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">min_row </span><span class="s3">-= </span><span class="s1">up</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">max_col </span><span class="s3">+= </span><span class="s1">right</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">max_row </span><span class="s3">+= </span><span class="s1">down</span>
+
+
+    <span class="s2">def </span><span class="s1">shrink</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">right</span><span class="s3">=</span><span class="s5">0</span><span class="s3">, </span><span class="s1">bottom</span><span class="s3">=</span><span class="s5">0</span><span class="s3">, </span><span class="s1">left</span><span class="s3">=</span><span class="s5">0</span><span class="s3">, </span><span class="s1">top</span><span class="s3">=</span><span class="s5">0</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Shrink the range by the dimensions provided. 
+ 
+        :type right: int 
+        :param right: shrink range from the right by this number of cells 
+        :type down: int 
+        :param down: shrink range from the top by this number of cells 
+        :type left: int 
+        :param left: shrink range from the left by this number of cells 
+        :type up: int 
+        :param up: shrink range from the bottom by this number of cells 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">min_col </span><span class="s3">+= </span><span class="s1">left</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">min_row </span><span class="s3">+= </span><span class="s1">top</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">max_col </span><span class="s3">-= </span><span class="s1">right</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">max_row </span><span class="s3">-= </span><span class="s1">bottom</span>
+
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">size</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; Return the size of the range as a dictionary of rows and columns. &quot;&quot;&quot;</span>
+        <span class="s1">cols </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col </span><span class="s3">+ </span><span class="s5">1 </span><span class="s3">- </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col</span>
+        <span class="s1">rows </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row </span><span class="s3">+ </span><span class="s5">1 </span><span class="s3">- </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span>
+        <span class="s2">return </span><span class="s3">{</span><span class="s6">'columns'</span><span class="s3">:</span><span class="s1">cols</span><span class="s3">, </span><span class="s6">'rows'</span><span class="s3">:</span><span class="s1">rows</span><span class="s3">}</span>
+
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">top</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot;A list of cell coordinates that comprise the top of the range&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s3">[(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span><span class="s3">, </span><span class="s1">col</span><span class="s3">) </span><span class="s2">for </span><span class="s1">col </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col</span><span class="s3">+</span><span class="s5">1</span><span class="s3">)]</span>
+
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">bottom</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot;A list of cell coordinates that comprise the bottom of the range&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s3">[(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span><span class="s3">, </span><span class="s1">col</span><span class="s3">) </span><span class="s2">for </span><span class="s1">col </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col</span><span class="s3">+</span><span class="s5">1</span><span class="s3">)]</span>
+
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">left</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot;A list of cell coordinates that comprise the left-side of the range&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s3">[(</span><span class="s1">row</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col</span><span class="s3">) </span><span class="s2">for </span><span class="s1">row </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span><span class="s3">+</span><span class="s5">1</span><span class="s3">)]</span>
+
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">right</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot;A list of cell coordinates that comprise the right-side of the range&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s3">[(</span><span class="s1">row</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col</span><span class="s3">) </span><span class="s2">for </span><span class="s1">row </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span><span class="s3">+</span><span class="s5">1</span><span class="s3">)]</span>
+
+
+<span class="s2">class </span><span class="s1">MultiCellRange</span><span class="s3">(</span><span class="s1">Strict</span><span class="s3">):</span>
+
+
+    <span class="s1">ranges </span><span class="s3">= </span><span class="s1">UniqueSequence</span><span class="s3">(</span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">CellRange</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">ranges</span><span class="s3">=</span><span class="s1">set</span><span class="s3">()):</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">ranges</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+            <span class="s1">ranges </span><span class="s3">= [</span><span class="s1">CellRange</span><span class="s3">(</span><span class="s1">r</span><span class="s3">) </span><span class="s2">for </span><span class="s1">r </span><span class="s2">in </span><span class="s1">ranges</span><span class="s3">.</span><span class="s1">split</span><span class="s3">()]</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">ranges </span><span class="s3">= </span><span class="s1">set</span><span class="s3">(</span><span class="s1">ranges</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">__contains__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">coord</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">coord</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+            <span class="s1">coord </span><span class="s3">= </span><span class="s1">CellRange</span><span class="s3">(</span><span class="s1">coord</span><span class="s3">)</span>
+        <span class="s2">for </span><span class="s1">r </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">ranges</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">coord </span><span class="s3">&lt;= </span><span class="s1">r</span><span class="s3">:</span>
+                <span class="s2">return True</span>
+        <span class="s2">return False</span>
+
+
+    <span class="s2">def </span><span class="s1">__repr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">ranges </span><span class="s3">= </span><span class="s6">&quot; &quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">([</span><span class="s1">str</span><span class="s3">(</span><span class="s1">r</span><span class="s3">) </span><span class="s2">for </span><span class="s1">r </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">sorted</span><span class="s3">()])</span>
+        <span class="s2">return </span><span class="s6">f&quot;&lt;</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">__class__</span><span class="s3">.</span><span class="s1">__name__</span><span class="s2">} </span><span class="s6">[</span><span class="s2">{</span><span class="s1">ranges</span><span class="s2">}</span><span class="s6">]&gt;&quot;</span>
+
+
+    <span class="s2">def </span><span class="s1">__str__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">ranges </span><span class="s3">= </span><span class="s6">u&quot; &quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">([</span><span class="s1">str</span><span class="s3">(</span><span class="s1">r</span><span class="s3">) </span><span class="s2">for </span><span class="s1">r </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">sorted</span><span class="s3">()])</span>
+        <span class="s2">return </span><span class="s1">ranges</span>
+
+
+    <span class="s2">def </span><span class="s1">__hash__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">hash</span><span class="s3">(</span><span class="s1">str</span><span class="s3">(</span><span class="s1">self</span><span class="s3">))</span>
+
+
+    <span class="s2">def </span><span class="s1">sorted</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Return a sorted list of items 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">sorted</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">ranges</span><span class="s3">, </span><span class="s1">key</span><span class="s3">=</span><span class="s1">attrgetter</span><span class="s3">(</span><span class="s6">'min_col'</span><span class="s3">, </span><span class="s6">'min_row'</span><span class="s3">, </span><span class="s6">'max_col'</span><span class="s3">, </span><span class="s6">'max_row'</span><span class="s3">))</span>
+
+
+    <span class="s2">def </span><span class="s1">add</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">coord</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Add a cell coordinate or CellRange 
+        &quot;&quot;&quot;</span>
+        <span class="s1">cr </span><span class="s3">= </span><span class="s1">coord</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">coord</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+            <span class="s1">cr </span><span class="s3">= </span><span class="s1">CellRange</span><span class="s3">(</span><span class="s1">coord</span><span class="s3">)</span>
+        <span class="s2">elif not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">coord</span><span class="s3">, </span><span class="s1">CellRange</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s6">&quot;You can only add CellRanges&quot;</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">cr </span><span class="s2">not in </span><span class="s1">self</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">ranges</span><span class="s3">.</span><span class="s1">add</span><span class="s3">(</span><span class="s1">cr</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">__iadd__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">coord</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">add</span><span class="s3">(</span><span class="s1">coord</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">self</span>
+
+
+    <span class="s2">def </span><span class="s1">__eq__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s2">if  </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">other</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+            <span class="s1">other </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">__class__</span><span class="s3">(</span><span class="s1">other</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">ranges </span><span class="s3">== </span><span class="s1">other</span><span class="s3">.</span><span class="s1">ranges</span>
+
+
+    <span class="s2">def </span><span class="s1">__ne__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s2">return not </span><span class="s1">self </span><span class="s3">== </span><span class="s1">other</span>
+
+
+    <span class="s2">def </span><span class="s1">__bool__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">bool</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">ranges</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">remove</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">coord</span><span class="s3">):</span>
+        <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">coord</span><span class="s3">, </span><span class="s1">CellRange</span><span class="s3">):</span>
+            <span class="s1">coord </span><span class="s3">= </span><span class="s1">CellRange</span><span class="s3">(</span><span class="s1">coord</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">ranges</span><span class="s3">.</span><span class="s1">remove</span><span class="s3">(</span><span class="s1">coord</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">__iter__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">for </span><span class="s1">cr </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">ranges</span><span class="s3">:</span>
+            <span class="s2">yield </span><span class="s1">cr</span>
+
+
+    <span class="s2">def </span><span class="s1">__copy__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">ranges </span><span class="s3">= {</span><span class="s1">copy</span><span class="s3">(</span><span class="s1">r</span><span class="s3">) </span><span class="s2">for </span><span class="s1">r </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">ranges</span><span class="s3">}</span>
+        <span class="s2">return </span><span class="s1">MultiCellRange</span><span class="s3">(</span><span class="s1">ranges</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

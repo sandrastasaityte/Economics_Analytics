@@ -1,0 +1,189 @@
+<html>
+<head>
+<title>translate.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #7a7e85;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+translate.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+This module contains code to translate formulae across cells in a worksheet. 
+ 
+The idea is that if A1 has formula &quot;=B1+C1&quot;, then translating it to cell A2 
+results in formula &quot;=B2+C2&quot;. The algorithm relies on the formula tokenizer 
+to identify the parts of the formula that need to change. 
+ 
+&quot;&quot;&quot;</span>
+
+<span class="s2">import </span><span class="s1">re</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">tokenizer </span><span class="s2">import </span><span class="s1">Tokenizer</span><span class="s3">, </span><span class="s1">Token</span>
+<span class="s2">from </span><span class="s1">openpyxl</span><span class="s3">.</span><span class="s1">utils </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">coordinate_to_tuple</span><span class="s3">,</span>
+    <span class="s1">column_index_from_string</span><span class="s3">,</span>
+    <span class="s1">get_column_letter</span>
+<span class="s3">)</span>
+
+<span class="s2">class </span><span class="s1">TranslatorError</span><span class="s3">(</span><span class="s1">Exception</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Raised when a formula can't be translated across cells. 
+ 
+    This error arises when a formula's references would be translated outside 
+    the worksheet's bounds on the top or left. Excel represents these 
+    situations with a #REF! literal error. E.g., if the formula at B2 is 
+    '=A1', attempting to translate the formula to B1 raises TranslatorError, 
+    since there's no cell above A1. Similarly, translating the same formula 
+    from B2 to A2 raises TranslatorError, since there's no cell to the left of 
+    A1. 
+ 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Translator</span><span class="s3">:</span>
+
+    <span class="s0">&quot;&quot;&quot; 
+    Modifies a formula so that it can be translated from one cell to another. 
+ 
+    `formula`: The str string to translate. Must include the leading '=' 
+               character. 
+    `origin`: The cell address (in A1 notation) where this formula was 
+              defined (excluding the worksheet name). 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">formula</span><span class="s3">, </span><span class="s1">origin</span><span class="s3">):</span>
+        <span class="s4"># Excel errors out when a workbook has formulae in R1C1 notation,</span>
+        <span class="s4"># regardless of the calcPr:refMode setting, so I'm assuming the</span>
+        <span class="s4"># formulae stored in the workbook must be in A1 notation.</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">row</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">col </span><span class="s3">= </span><span class="s1">coordinate_to_tuple</span><span class="s3">(</span><span class="s1">origin</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">tokenizer </span><span class="s3">= </span><span class="s1">Tokenizer</span><span class="s3">(</span><span class="s1">formula</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">get_tokens</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;Returns a list with the tokens comprising the formula.&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tokenizer</span><span class="s3">.</span><span class="s1">items</span>
+
+    <span class="s1">ROW_RANGE_RE </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s5">r&quot;(\$?[1-9][0-9]{0,6}):(\$?[1-9][0-9]{0,6})$&quot;</span><span class="s3">)</span>
+    <span class="s1">COL_RANGE_RE </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s5">r&quot;(\$?[A-Za-z]{1,3}):(\$?[A-Za-z]{1,3})$&quot;</span><span class="s3">)</span>
+    <span class="s1">CELL_REF_RE </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s5">r&quot;(\$?[A-Za-z]{1,3})(\$?[1-9][0-9]{0,6})$&quot;</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">staticmethod</span>
+    <span class="s2">def </span><span class="s1">translate_row</span><span class="s3">(</span><span class="s1">row_str</span><span class="s3">, </span><span class="s1">rdelta</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Translate a range row-snippet by the given number of rows. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">row_str</span><span class="s3">.</span><span class="s1">startswith</span><span class="s3">(</span><span class="s5">'$'</span><span class="s3">):</span>
+            <span class="s2">return </span><span class="s1">row_str</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">new_row </span><span class="s3">= </span><span class="s1">int</span><span class="s3">(</span><span class="s1">row_str</span><span class="s3">) + </span><span class="s1">rdelta</span>
+            <span class="s2">if </span><span class="s1">new_row </span><span class="s3">&lt;= </span><span class="s6">0</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">TranslatorError</span><span class="s3">(</span><span class="s5">&quot;Formula out of range&quot;</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">str</span><span class="s3">(</span><span class="s1">new_row</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">staticmethod</span>
+    <span class="s2">def </span><span class="s1">translate_col</span><span class="s3">(</span><span class="s1">col_str</span><span class="s3">, </span><span class="s1">cdelta</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Translate a range col-snippet by the given number of columns 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">col_str</span><span class="s3">.</span><span class="s1">startswith</span><span class="s3">(</span><span class="s5">'$'</span><span class="s3">):</span>
+            <span class="s2">return </span><span class="s1">col_str</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">get_column_letter</span><span class="s3">(</span>
+                    <span class="s1">column_index_from_string</span><span class="s3">(</span><span class="s1">col_str</span><span class="s3">) + </span><span class="s1">cdelta</span><span class="s3">)</span>
+            <span class="s2">except </span><span class="s1">ValueError</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">TranslatorError</span><span class="s3">(</span><span class="s5">&quot;Formula out of range&quot;</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">staticmethod</span>
+    <span class="s2">def </span><span class="s1">strip_ws_name</span><span class="s3">(</span><span class="s1">range_str</span><span class="s3">):</span>
+        <span class="s0">&quot;Splits out the worksheet reference, if any, from a range reference.&quot;</span>
+        <span class="s4"># This code assumes that named ranges cannot contain any exclamation</span>
+        <span class="s4"># marks. Excel refuses to create these (even using VBA), and</span>
+        <span class="s4"># complains of a corrupt workbook when there are names with</span>
+        <span class="s4"># exclamation marks. The ECMA spec only states that named ranges will</span>
+        <span class="s4"># be of `ST_Xstring` type, which in theory allows '!' (char code</span>
+        <span class="s4"># 0x21) per http://www.w3.org/TR/xml/#charsets</span>
+        <span class="s2">if </span><span class="s5">'!' </span><span class="s2">in </span><span class="s1">range_str</span><span class="s3">:</span>
+            <span class="s1">sheet</span><span class="s3">, </span><span class="s1">range_str </span><span class="s3">= </span><span class="s1">range_str</span><span class="s3">.</span><span class="s1">rsplit</span><span class="s3">(</span><span class="s5">'!'</span><span class="s3">, </span><span class="s6">1</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">sheet </span><span class="s3">+ </span><span class="s5">&quot;!&quot;</span><span class="s3">, </span><span class="s1">range_str</span>
+        <span class="s2">return </span><span class="s5">&quot;&quot;</span><span class="s3">, </span><span class="s1">range_str</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">translate_range</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">range_str</span><span class="s3">, </span><span class="s1">rdelta</span><span class="s3">, </span><span class="s1">cdelta</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Translate an A1-style range reference to the destination cell. 
+ 
+        `rdelta`: the row offset to add to the range 
+        `cdelta`: the column offset to add to the range 
+        `range_str`: an A1-style reference to a range. Potentially includes 
+                     the worksheet reference. Could also be a named range. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">ws_part</span><span class="s3">, </span><span class="s1">range_str </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">strip_ws_name</span><span class="s3">(</span><span class="s1">range_str</span><span class="s3">)</span>
+        <span class="s1">match </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">ROW_RANGE_RE</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s1">range_str</span><span class="s3">)  </span><span class="s4"># e.g. `3:4`</span>
+        <span class="s2">if </span><span class="s1">match </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s3">(</span><span class="s1">ws_part </span><span class="s3">+ </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">translate_row</span><span class="s3">(</span><span class="s1">match</span><span class="s3">.</span><span class="s1">group</span><span class="s3">(</span><span class="s6">1</span><span class="s3">), </span><span class="s1">rdelta</span><span class="s3">) + </span><span class="s5">&quot;:&quot;</span>
+                    <span class="s3">+ </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">translate_row</span><span class="s3">(</span><span class="s1">match</span><span class="s3">.</span><span class="s1">group</span><span class="s3">(</span><span class="s6">2</span><span class="s3">), </span><span class="s1">rdelta</span><span class="s3">))</span>
+        <span class="s1">match </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">COL_RANGE_RE</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s1">range_str</span><span class="s3">)  </span><span class="s4"># e.g. `A:BC`</span>
+        <span class="s2">if </span><span class="s1">match </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s3">(</span><span class="s1">ws_part </span><span class="s3">+ </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">translate_col</span><span class="s3">(</span><span class="s1">match</span><span class="s3">.</span><span class="s1">group</span><span class="s3">(</span><span class="s6">1</span><span class="s3">), </span><span class="s1">cdelta</span><span class="s3">) + </span><span class="s5">':'</span>
+                    <span class="s3">+ </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">translate_col</span><span class="s3">(</span><span class="s1">match</span><span class="s3">.</span><span class="s1">group</span><span class="s3">(</span><span class="s6">2</span><span class="s3">), </span><span class="s1">cdelta</span><span class="s3">))</span>
+        <span class="s2">if </span><span class="s5">':' </span><span class="s2">in </span><span class="s1">range_str</span><span class="s3">: </span><span class="s4"># e.g. `A1:B5`</span>
+            <span class="s4"># The check is necessarily general because range references can</span>
+            <span class="s4"># have one or both endpoints specified by named ranges. I.e.,</span>
+            <span class="s4"># `named_range:C2`, `C2:named_range`, and `name1:name2` are all</span>
+            <span class="s4"># valid references. Further, Excel allows chaining multiple</span>
+            <span class="s4"># colons together (with unclear meaning)</span>
+            <span class="s2">return </span><span class="s1">ws_part </span><span class="s3">+ </span><span class="s5">&quot;:&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span>
+                <span class="s1">cls</span><span class="s3">.</span><span class="s1">translate_range</span><span class="s3">(</span><span class="s1">piece</span><span class="s3">, </span><span class="s1">rdelta</span><span class="s3">, </span><span class="s1">cdelta</span><span class="s3">)</span>
+                <span class="s2">for </span><span class="s1">piece </span><span class="s2">in </span><span class="s1">range_str</span><span class="s3">.</span><span class="s1">split</span><span class="s3">(</span><span class="s5">':'</span><span class="s3">))</span>
+        <span class="s1">match </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">CELL_REF_RE</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s1">range_str</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">match </span><span class="s2">is None</span><span class="s3">:  </span><span class="s4"># Must be a named range</span>
+            <span class="s2">return </span><span class="s1">range_str</span>
+        <span class="s2">return </span><span class="s3">(</span><span class="s1">ws_part </span><span class="s3">+ </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">translate_col</span><span class="s3">(</span><span class="s1">match</span><span class="s3">.</span><span class="s1">group</span><span class="s3">(</span><span class="s6">1</span><span class="s3">), </span><span class="s1">cdelta</span><span class="s3">)</span>
+                <span class="s3">+ </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">translate_row</span><span class="s3">(</span><span class="s1">match</span><span class="s3">.</span><span class="s1">group</span><span class="s3">(</span><span class="s6">2</span><span class="s3">), </span><span class="s1">rdelta</span><span class="s3">))</span>
+
+    <span class="s2">def </span><span class="s1">translate_formula</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dest</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">row_delta</span><span class="s3">=</span><span class="s6">0</span><span class="s3">, </span><span class="s1">col_delta</span><span class="s3">=</span><span class="s6">0</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Convert the formula into A1 notation, or as row and column coordinates 
+ 
+        The formula is converted into A1 assuming it is assigned to the cell 
+        whose address is `dest` (no worksheet name). 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">tokens </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">get_tokens</span><span class="s3">()</span>
+        <span class="s2">if not </span><span class="s1">tokens</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s5">&quot;&quot;</span>
+        <span class="s2">elif </span><span class="s1">tokens</span><span class="s3">[</span><span class="s6">0</span><span class="s3">].</span><span class="s1">type </span><span class="s3">== </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">LITERAL</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">tokens</span><span class="s3">[</span><span class="s6">0</span><span class="s3">].</span><span class="s1">value</span>
+        <span class="s1">out </span><span class="s3">= [</span><span class="s5">'='</span><span class="s3">]</span>
+        <span class="s4"># per the spec:</span>
+        <span class="s4"># A compliant producer or consumer considers a defined name in the</span>
+        <span class="s4"># range A1-XFD1048576 to be an error. All other names outside this</span>
+        <span class="s4"># range can be defined as names and overrides a cell reference if an</span>
+        <span class="s4"># ambiguity exists. (I.18.2.5)</span>
+        <span class="s2">if </span><span class="s1">dest</span><span class="s3">:</span>
+            <span class="s1">row</span><span class="s3">, </span><span class="s1">col </span><span class="s3">= </span><span class="s1">coordinate_to_tuple</span><span class="s3">(</span><span class="s1">dest</span><span class="s3">)</span>
+            <span class="s1">row_delta </span><span class="s3">= </span><span class="s1">row </span><span class="s3">- </span><span class="s1">self</span><span class="s3">.</span><span class="s1">row</span>
+            <span class="s1">col_delta </span><span class="s3">= </span><span class="s1">col </span><span class="s3">- </span><span class="s1">self</span><span class="s3">.</span><span class="s1">col</span>
+        <span class="s2">for </span><span class="s1">token </span><span class="s2">in </span><span class="s1">tokens</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s3">(</span><span class="s1">token</span><span class="s3">.</span><span class="s1">type </span><span class="s3">== </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">OPERAND</span>
+                <span class="s2">and </span><span class="s1">token</span><span class="s3">.</span><span class="s1">subtype </span><span class="s3">== </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">RANGE</span><span class="s3">):</span>
+                <span class="s1">out</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">translate_range</span><span class="s3">(</span><span class="s1">token</span><span class="s3">.</span><span class="s1">value</span><span class="s3">, </span><span class="s1">row_delta</span><span class="s3">,</span>
+                                                <span class="s1">col_delta</span><span class="s3">))</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">out</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">token</span><span class="s3">.</span><span class="s1">value</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s5">&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">out</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

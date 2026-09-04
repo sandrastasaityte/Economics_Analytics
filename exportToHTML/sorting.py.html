@@ -1,0 +1,759 @@
+<html>
+<head>
+<title>sorting.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+sorting.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;miscellaneous sorting / groupby utilities&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">import </span><span class="s1">itertools</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s3">,</span>
+    <span class="s1">cast</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">algos</span><span class="s3">,</span>
+    <span class="s1">hashtable</span><span class="s3">,</span>
+    <span class="s1">lib</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs</span><span class="s3">.</span><span class="s1">hashtable </span><span class="s2">import </span><span class="s1">unique_label_indices</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">common </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">ensure_int64</span><span class="s3">,</span>
+    <span class="s1">ensure_platform_int</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">generic </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">ABCMultiIndex</span><span class="s3">,</span>
+    <span class="s1">ABCRangeIndex</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">missing </span><span class="s2">import </span><span class="s1">isna</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">construction </span><span class="s2">import </span><span class="s1">extract_array</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">collections</span><span class="s3">.</span><span class="s1">abc </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">Callable</span><span class="s3">,</span>
+        <span class="s1">Hashable</span><span class="s3">,</span>
+        <span class="s1">Sequence</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_typing </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">ArrayLike</span><span class="s3">,</span>
+        <span class="s1">AxisInt</span><span class="s3">,</span>
+        <span class="s1">IndexKeyFunc</span><span class="s3">,</span>
+        <span class="s1">Level</span><span class="s3">,</span>
+        <span class="s1">NaPosition</span><span class="s3">,</span>
+        <span class="s1">Shape</span><span class="s3">,</span>
+        <span class="s1">SortKind</span><span class="s3">,</span>
+        <span class="s1">npt</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+    <span class="s2">from </span><span class="s1">pandas </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">MultiIndex</span><span class="s3">,</span>
+        <span class="s1">Series</span><span class="s3">,</span>
+    <span class="s3">)</span>
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">arrays </span><span class="s2">import </span><span class="s1">ExtensionArray</span>
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">indexes</span><span class="s3">.</span><span class="s1">base </span><span class="s2">import </span><span class="s1">Index</span>
+
+
+<span class="s2">def </span><span class="s1">get_indexer_indexer</span><span class="s3">(</span>
+    <span class="s1">target</span><span class="s3">: </span><span class="s1">Index</span><span class="s3">,</span>
+    <span class="s1">level</span><span class="s3">: </span><span class="s1">Level </span><span class="s3">| </span><span class="s1">list</span><span class="s3">[</span><span class="s1">Level</span><span class="s3">] | </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">ascending</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">bool</span><span class="s3">] | </span><span class="s1">bool</span><span class="s3">,</span>
+    <span class="s1">kind</span><span class="s3">: </span><span class="s1">SortKind</span><span class="s3">,</span>
+    <span class="s1">na_position</span><span class="s3">: </span><span class="s1">NaPosition</span><span class="s3">,</span>
+    <span class="s1">sort_remaining</span><span class="s3">: </span><span class="s1">bool</span><span class="s3">,</span>
+    <span class="s1">key</span><span class="s3">: </span><span class="s1">IndexKeyFunc</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">] | </span><span class="s2">None</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Helper method that return the indexer according to input parameters for 
+    the sort_index method of DataFrame and Series. 
+ 
+    Parameters 
+    ---------- 
+    target : Index 
+    level : int or level name or list of ints or list of level names 
+    ascending : bool or list of bools, default True 
+    kind : {'quicksort', 'mergesort', 'heapsort', 'stable'} 
+    na_position : {'first', 'last'} 
+    sort_remaining : bool 
+    key : callable, optional 
+ 
+    Returns 
+    ------- 
+    Optional[ndarray[intp]] 
+        The indexer for the new index. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s4"># error: Incompatible types in assignment (expression has type</span>
+    <span class="s4"># &quot;Union[ExtensionArray, ndarray[Any, Any], Index, Series]&quot;, variable has</span>
+    <span class="s4"># type &quot;Index&quot;)</span>
+    <span class="s1">target </span><span class="s3">= </span><span class="s1">ensure_key_mapped</span><span class="s3">(</span><span class="s1">target</span><span class="s3">, </span><span class="s1">key</span><span class="s3">, </span><span class="s1">levels</span><span class="s3">=</span><span class="s1">level</span><span class="s3">)  </span><span class="s4"># type: ignore[assignment]</span>
+    <span class="s1">target </span><span class="s3">= </span><span class="s1">target</span><span class="s3">.</span><span class="s1">_sort_levels_monotonic</span><span class="s3">()</span>
+
+    <span class="s2">if </span><span class="s1">level </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s1">_</span><span class="s3">, </span><span class="s1">indexer </span><span class="s3">= </span><span class="s1">target</span><span class="s3">.</span><span class="s1">sortlevel</span><span class="s3">(</span>
+            <span class="s1">level</span><span class="s3">,</span>
+            <span class="s1">ascending</span><span class="s3">=</span><span class="s1">ascending</span><span class="s3">,</span>
+            <span class="s1">sort_remaining</span><span class="s3">=</span><span class="s1">sort_remaining</span><span class="s3">,</span>
+            <span class="s1">na_position</span><span class="s3">=</span><span class="s1">na_position</span><span class="s3">,</span>
+        <span class="s3">)</span>
+    <span class="s2">elif </span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">all</span><span class="s3">(</span><span class="s1">ascending</span><span class="s3">) </span><span class="s2">and </span><span class="s1">target</span><span class="s3">.</span><span class="s1">is_monotonic_increasing</span><span class="s3">) </span><span class="s2">or </span><span class="s3">(</span>
+        <span class="s2">not </span><span class="s1">np</span><span class="s3">.</span><span class="s1">any</span><span class="s3">(</span><span class="s1">ascending</span><span class="s3">) </span><span class="s2">and </span><span class="s1">target</span><span class="s3">.</span><span class="s1">is_monotonic_decreasing</span>
+    <span class="s3">):</span>
+        <span class="s4"># Check monotonic-ness before sort an index (GH 11080)</span>
+        <span class="s2">return None</span>
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">target</span><span class="s3">, </span><span class="s1">ABCMultiIndex</span><span class="s3">):</span>
+        <span class="s1">codes </span><span class="s3">= [</span><span class="s1">lev</span><span class="s3">.</span><span class="s1">codes </span><span class="s2">for </span><span class="s1">lev </span><span class="s2">in </span><span class="s1">target</span><span class="s3">.</span><span class="s1">_get_codes_for_sorting</span><span class="s3">()]</span>
+        <span class="s1">indexer </span><span class="s3">= </span><span class="s1">lexsort_indexer</span><span class="s3">(</span>
+            <span class="s1">codes</span><span class="s3">, </span><span class="s1">orders</span><span class="s3">=</span><span class="s1">ascending</span><span class="s3">, </span><span class="s1">na_position</span><span class="s3">=</span><span class="s1">na_position</span><span class="s3">, </span><span class="s1">codes_given</span><span class="s3">=</span><span class="s2">True</span>
+        <span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s4"># ascending can only be a Sequence for MultiIndex</span>
+        <span class="s1">indexer </span><span class="s3">= </span><span class="s1">nargsort</span><span class="s3">(</span>
+            <span class="s1">target</span><span class="s3">,</span>
+            <span class="s1">kind</span><span class="s3">=</span><span class="s1">kind</span><span class="s3">,</span>
+            <span class="s1">ascending</span><span class="s3">=</span><span class="s1">cast</span><span class="s3">(</span><span class="s1">bool</span><span class="s3">, </span><span class="s1">ascending</span><span class="s3">),</span>
+            <span class="s1">na_position</span><span class="s3">=</span><span class="s1">na_position</span><span class="s3">,</span>
+        <span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">indexer</span>
+
+
+<span class="s2">def </span><span class="s1">get_group_index</span><span class="s3">(</span>
+    <span class="s1">labels</span><span class="s3">, </span><span class="s1">shape</span><span class="s3">: </span><span class="s1">Shape</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">: </span><span class="s1">bool</span><span class="s3">, </span><span class="s1">xnull</span><span class="s3">: </span><span class="s1">bool</span>
+<span class="s3">) </span><span class="s1">-&gt; npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    For the particular label_list, gets the offsets into the hypothetical list 
+    representing the totally ordered cartesian product of all possible label 
+    combinations, *as long as* this space fits within int64 bounds; 
+    otherwise, though group indices identify unique combinations of 
+    labels, they cannot be deconstructed. 
+    - If `sort`, rank of returned ids preserve lexical ranks of labels. 
+      i.e. returned id's can be used to do lexical sort on labels; 
+    - If `xnull` nulls (-1 labels) are passed through. 
+ 
+    Parameters 
+    ---------- 
+    labels : sequence of arrays 
+        Integers identifying levels at each location 
+    shape : tuple[int, ...] 
+        Number of unique levels at each location 
+    sort : bool 
+        If the ranks of returned ids should match lexical ranks of labels 
+    xnull : bool 
+        If true nulls are excluded. i.e. -1 values in the labels are 
+        passed through. 
+ 
+    Returns 
+    ------- 
+    An array of type int64 where two elements are equal if their corresponding 
+    labels are equal at all location. 
+ 
+    Notes 
+    ----- 
+    The length of `labels` and `shape` must be identical. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">_int64_cut_off</span><span class="s3">(</span><span class="s1">shape</span><span class="s3">) </span><span class="s1">-&gt; int</span><span class="s3">:</span>
+        <span class="s1">acc </span><span class="s3">= </span><span class="s5">1</span>
+        <span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">mul </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">shape</span><span class="s3">):</span>
+            <span class="s1">acc </span><span class="s3">*= </span><span class="s1">int</span><span class="s3">(</span><span class="s1">mul</span><span class="s3">)</span>
+            <span class="s2">if not </span><span class="s1">acc </span><span class="s3">&lt; </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">i8max</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">i</span>
+        <span class="s2">return </span><span class="s1">len</span><span class="s3">(</span><span class="s1">shape</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">maybe_lift</span><span class="s3">(</span><span class="s1">lab</span><span class="s3">, </span><span class="s1">size</span><span class="s3">: </span><span class="s1">int</span><span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">, </span><span class="s1">int</span><span class="s3">]:</span>
+        <span class="s4"># promote nan values (assigned -1 label in lab array)</span>
+        <span class="s4"># so that all output values are non-negative</span>
+        <span class="s2">return </span><span class="s3">(</span><span class="s1">lab </span><span class="s3">+ </span><span class="s5">1</span><span class="s3">, </span><span class="s1">size </span><span class="s3">+ </span><span class="s5">1</span><span class="s3">) </span><span class="s2">if </span><span class="s3">(</span><span class="s1">lab </span><span class="s3">== -</span><span class="s5">1</span><span class="s3">).</span><span class="s1">any</span><span class="s3">() </span><span class="s2">else </span><span class="s3">(</span><span class="s1">lab</span><span class="s3">, </span><span class="s1">size</span><span class="s3">)</span>
+
+    <span class="s1">labels </span><span class="s3">= [</span><span class="s1">ensure_int64</span><span class="s3">(</span><span class="s1">x</span><span class="s3">) </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">labels</span><span class="s3">]</span>
+    <span class="s1">lshape </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">shape</span><span class="s3">)</span>
+    <span class="s2">if not </span><span class="s1">xnull</span><span class="s3">:</span>
+        <span class="s2">for </span><span class="s1">i</span><span class="s3">, (</span><span class="s1">lab</span><span class="s3">, </span><span class="s1">size</span><span class="s3">) </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">zip</span><span class="s3">(</span><span class="s1">labels</span><span class="s3">, </span><span class="s1">shape</span><span class="s3">, </span><span class="s1">strict</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)):</span>
+            <span class="s1">labels</span><span class="s3">[</span><span class="s1">i</span><span class="s3">], </span><span class="s1">lshape</span><span class="s3">[</span><span class="s1">i</span><span class="s3">] = </span><span class="s1">maybe_lift</span><span class="s3">(</span><span class="s1">lab</span><span class="s3">, </span><span class="s1">size</span><span class="s3">)</span>
+
+    <span class="s4"># Iteratively process all the labels in chunks sized so less</span>
+    <span class="s4"># than lib.i8max unique int ids will be required for each chunk</span>
+    <span class="s2">while True</span><span class="s3">:</span>
+        <span class="s4"># how many levels can be done without overflow:</span>
+        <span class="s1">nlev </span><span class="s3">= </span><span class="s1">_int64_cut_off</span><span class="s3">(</span><span class="s1">lshape</span><span class="s3">)</span>
+
+        <span class="s4"># compute flat ids for the first `nlev` levels</span>
+        <span class="s1">stride </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">prod</span><span class="s3">(</span><span class="s1">lshape</span><span class="s3">[</span><span class="s5">1</span><span class="s3">:</span><span class="s1">nlev</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s6">&quot;i8&quot;</span><span class="s3">)</span>
+        <span class="s1">out </span><span class="s3">= </span><span class="s1">stride </span><span class="s3">* </span><span class="s1">labels</span><span class="s3">[</span><span class="s5">0</span><span class="s3">].</span><span class="s1">astype</span><span class="s3">(</span><span class="s6">&quot;i8&quot;</span><span class="s3">, </span><span class="s1">subok</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+
+        <span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s5">1</span><span class="s3">, </span><span class="s1">nlev</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">lshape</span><span class="s3">[</span><span class="s1">i</span><span class="s3">] == </span><span class="s5">0</span><span class="s3">:</span>
+                <span class="s1">stride </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">(</span><span class="s5">0</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">stride </span><span class="s3">//= </span><span class="s1">lshape</span><span class="s3">[</span><span class="s1">i</span><span class="s3">]</span>
+            <span class="s1">out </span><span class="s3">+= </span><span class="s1">labels</span><span class="s3">[</span><span class="s1">i</span><span class="s3">] * </span><span class="s1">stride</span>
+
+        <span class="s2">if </span><span class="s1">xnull</span><span class="s3">:  </span><span class="s4"># exclude nulls</span>
+            <span class="s1">mask </span><span class="s3">= </span><span class="s1">labels</span><span class="s3">[</span><span class="s5">0</span><span class="s3">] == -</span><span class="s5">1</span>
+            <span class="s2">for </span><span class="s1">lab </span><span class="s2">in </span><span class="s1">labels</span><span class="s3">[</span><span class="s5">1</span><span class="s3">:</span><span class="s1">nlev</span><span class="s3">]:</span>
+                <span class="s1">mask </span><span class="s3">|= </span><span class="s1">lab </span><span class="s3">== -</span><span class="s5">1</span>
+            <span class="s1">out</span><span class="s3">[</span><span class="s1">mask</span><span class="s3">] = -</span><span class="s5">1</span>
+
+        <span class="s2">if </span><span class="s1">nlev </span><span class="s3">== </span><span class="s1">len</span><span class="s3">(</span><span class="s1">lshape</span><span class="s3">):  </span><span class="s4"># all levels done!</span>
+            <span class="s2">break</span>
+
+        <span class="s4"># compress what has been done so far in order to avoid overflow</span>
+        <span class="s4"># to retain lexical ranks, obs_ids should be sorted</span>
+        <span class="s1">comp_ids</span><span class="s3">, </span><span class="s1">obs_ids </span><span class="s3">= </span><span class="s1">compress_group_index</span><span class="s3">(</span><span class="s1">out</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">=</span><span class="s1">sort</span><span class="s3">)</span>
+
+        <span class="s1">labels </span><span class="s3">= [</span><span class="s1">comp_ids</span><span class="s3">, *</span><span class="s1">labels</span><span class="s3">[</span><span class="s1">nlev</span><span class="s3">:]]</span>
+        <span class="s1">lshape </span><span class="s3">= [</span><span class="s1">len</span><span class="s3">(</span><span class="s1">obs_ids</span><span class="s3">), *</span><span class="s1">lshape</span><span class="s3">[</span><span class="s1">nlev</span><span class="s3">:]]</span>
+
+    <span class="s2">return </span><span class="s1">out</span>
+
+
+<span class="s2">def </span><span class="s1">get_compressed_ids</span><span class="s3">(</span>
+    <span class="s1">labels</span><span class="s3">, </span><span class="s1">sizes</span><span class="s3">: </span><span class="s1">Shape</span>
+<span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">], </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">]]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Group_index is offsets into cartesian product of all possible labels. This 
+    space can be huge, so this function compresses it, by computing offsets 
+    (comp_ids) into the list of unique labels (obs_group_ids). 
+ 
+    Parameters 
+    ---------- 
+    labels : list of label arrays 
+    sizes : tuple[int] of size of the levels 
+ 
+    Returns 
+    ------- 
+    np.ndarray[np.intp] 
+        comp_ids 
+    np.ndarray[np.int64] 
+        obs_group_ids 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ids </span><span class="s3">= </span><span class="s1">get_group_index</span><span class="s3">(</span><span class="s1">labels</span><span class="s3">, </span><span class="s1">sizes</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">xnull</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">compress_group_index</span><span class="s3">(</span><span class="s1">ids</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">is_int64_overflow_possible</span><span class="s3">(</span><span class="s1">shape</span><span class="s3">: </span><span class="s1">Shape</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+    <span class="s1">the_prod </span><span class="s3">= </span><span class="s5">1</span>
+    <span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">shape</span><span class="s3">:</span>
+        <span class="s1">the_prod </span><span class="s3">*= </span><span class="s1">int</span><span class="s3">(</span><span class="s1">x</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">the_prod </span><span class="s3">&gt;= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">i8max</span>
+
+
+<span class="s2">def </span><span class="s1">_decons_group_index</span><span class="s3">(</span>
+    <span class="s1">comp_labels</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">], </span><span class="s1">shape</span><span class="s3">: </span><span class="s1">Shape</span>
+<span class="s3">) </span><span class="s1">-&gt; list</span><span class="s3">[</span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">]]:</span>
+    <span class="s4"># reconstruct labels</span>
+    <span class="s2">if </span><span class="s1">is_int64_overflow_possible</span><span class="s3">(</span><span class="s1">shape</span><span class="s3">):</span>
+        <span class="s4"># at some point group indices are factorized,</span>
+        <span class="s4"># and may not be deconstructed here! wrong path!</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s6">&quot;cannot deconstruct factorized group indices!&quot;</span><span class="s3">)</span>
+
+    <span class="s1">label_list </span><span class="s3">= []</span>
+    <span class="s1">factor </span><span class="s3">= </span><span class="s5">1</span>
+    <span class="s1">y </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s5">0</span><span class="s3">)</span>
+    <span class="s1">x </span><span class="s3">= </span><span class="s1">comp_labels</span>
+    <span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">reversed</span><span class="s3">(</span><span class="s1">range</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">shape</span><span class="s3">))):</span>
+        <span class="s1">labels </span><span class="s3">= (</span><span class="s1">x </span><span class="s3">- </span><span class="s1">y</span><span class="s3">) % (</span><span class="s1">factor </span><span class="s3">* </span><span class="s1">shape</span><span class="s3">[</span><span class="s1">i</span><span class="s3">]) // </span><span class="s1">factor</span>
+        <span class="s1">np</span><span class="s3">.</span><span class="s1">putmask</span><span class="s3">(</span><span class="s1">labels</span><span class="s3">, </span><span class="s1">comp_labels </span><span class="s3">&lt; </span><span class="s5">0</span><span class="s3">, -</span><span class="s5">1</span><span class="s3">)</span>
+        <span class="s1">label_list</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">labels</span><span class="s3">)</span>
+        <span class="s1">y </span><span class="s3">= </span><span class="s1">labels </span><span class="s3">* </span><span class="s1">factor</span>
+        <span class="s1">factor </span><span class="s3">*= </span><span class="s1">shape</span><span class="s3">[</span><span class="s1">i</span><span class="s3">]</span>
+    <span class="s2">return </span><span class="s1">label_list</span><span class="s3">[::-</span><span class="s5">1</span><span class="s3">]</span>
+
+
+<span class="s2">def </span><span class="s1">decons_obs_group_ids</span><span class="s3">(</span>
+    <span class="s1">comp_ids</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">],</span>
+    <span class="s1">obs_ids</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">],</span>
+    <span class="s1">shape</span><span class="s3">: </span><span class="s1">Shape</span><span class="s3">,</span>
+    <span class="s1">labels</span><span class="s3">: </span><span class="s1">Sequence</span><span class="s3">[</span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">signedinteger</span><span class="s3">]],</span>
+    <span class="s1">xnull</span><span class="s3">: </span><span class="s1">bool</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; list</span><span class="s3">[</span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">]]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Reconstruct labels from observed group ids. 
+ 
+    Parameters 
+    ---------- 
+    comp_ids : np.ndarray[np.intp] 
+    obs_ids: np.ndarray[np.intp] 
+    shape : tuple[int] 
+    labels : Sequence[np.ndarray[np.signedinteger]] 
+    xnull : bool 
+        If nulls are excluded; i.e. -1 labels are passed through. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if not </span><span class="s1">xnull</span><span class="s3">:</span>
+        <span class="s1">lift </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">fromiter</span><span class="s3">(((</span><span class="s1">a </span><span class="s3">== -</span><span class="s5">1</span><span class="s3">).</span><span class="s1">any</span><span class="s3">() </span><span class="s2">for </span><span class="s1">a </span><span class="s2">in </span><span class="s1">labels</span><span class="s3">), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">)</span>
+        <span class="s1">arr_shape </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">shape</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">) + </span><span class="s1">lift</span>
+        <span class="s1">shape </span><span class="s3">= </span><span class="s1">tuple</span><span class="s3">(</span><span class="s1">arr_shape</span><span class="s3">)</span>
+
+    <span class="s2">if not </span><span class="s1">is_int64_overflow_possible</span><span class="s3">(</span><span class="s1">shape</span><span class="s3">):</span>
+        <span class="s4"># obs ids are deconstructable! take the fast route!</span>
+        <span class="s1">out </span><span class="s3">= </span><span class="s1">_decons_group_index</span><span class="s3">(</span><span class="s1">obs_ids</span><span class="s3">, </span><span class="s1">shape</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s3">(</span>
+            <span class="s1">out</span>
+            <span class="s2">if </span><span class="s1">xnull </span><span class="s2">or not </span><span class="s1">lift</span><span class="s3">.</span><span class="s1">any</span><span class="s3">()</span>
+            <span class="s2">else </span><span class="s3">[</span><span class="s1">x </span><span class="s3">- </span><span class="s1">y </span><span class="s2">for </span><span class="s1">x</span><span class="s3">, </span><span class="s1">y </span><span class="s2">in </span><span class="s1">zip</span><span class="s3">(</span><span class="s1">out</span><span class="s3">, </span><span class="s1">lift</span><span class="s3">, </span><span class="s1">strict</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)]</span>
+        <span class="s3">)</span>
+
+    <span class="s1">indexer </span><span class="s3">= </span><span class="s1">unique_label_indices</span><span class="s3">(</span><span class="s1">comp_ids</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s3">[</span><span class="s1">lab</span><span class="s3">[</span><span class="s1">indexer</span><span class="s3">].</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">, </span><span class="s1">subok</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">True</span><span class="s3">) </span><span class="s2">for </span><span class="s1">lab </span><span class="s2">in </span><span class="s1">labels</span><span class="s3">]</span>
+
+
+<span class="s2">def </span><span class="s1">lexsort_indexer</span><span class="s3">(</span>
+    <span class="s1">keys</span><span class="s3">: </span><span class="s1">Sequence</span><span class="s3">[</span><span class="s1">ArrayLike </span><span class="s3">| </span><span class="s1">Index </span><span class="s3">| </span><span class="s1">Series</span><span class="s3">],</span>
+    <span class="s1">orders</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">na_position</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s6">&quot;last&quot;</span><span class="s3">,</span>
+    <span class="s1">key</span><span class="s3">: </span><span class="s1">Callable </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">codes_given</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Performs lexical sorting on a set of keys 
+ 
+    Parameters 
+    ---------- 
+    keys : Sequence[ArrayLike | Index | Series] 
+        Sequence of arrays to be sorted by the indexer 
+        Sequence[Series] is only if key is not None. 
+    orders : bool or list of booleans, optional 
+        Determines the sorting order for each element in keys. If a list, 
+        it must be the same length as keys. This determines whether the 
+        corresponding element in keys should be sorted in ascending 
+        (True) or descending (False) order. if bool, applied to all 
+        elements as above. if None, defaults to True. 
+    na_position : {'first', 'last'}, default 'last' 
+        Determines placement of NA elements in the sorted list (&quot;last&quot; or &quot;first&quot;) 
+    key : Callable, optional 
+        Callable key function applied to every element in keys before sorting 
+    codes_given: bool, False 
+        Avoid categorical materialization if codes are already provided. 
+ 
+    Returns 
+    ------- 
+    np.ndarray[np.intp] 
+    &quot;&quot;&quot;</span>
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">arrays </span><span class="s2">import </span><span class="s1">Categorical</span>
+
+    <span class="s2">if </span><span class="s1">na_position </span><span class="s2">not in </span><span class="s3">[</span><span class="s6">&quot;last&quot;</span><span class="s3">, </span><span class="s6">&quot;first&quot;</span><span class="s3">]:</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s6">f&quot;invalid na_position: </span><span class="s2">{</span><span class="s1">na_position</span><span class="s2">}</span><span class="s6">&quot;</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">orders</span><span class="s3">, </span><span class="s1">bool</span><span class="s3">):</span>
+        <span class="s1">orders </span><span class="s3">= </span><span class="s1">itertools</span><span class="s3">.</span><span class="s1">repeat</span><span class="s3">(</span><span class="s1">orders</span><span class="s3">, </span><span class="s1">len</span><span class="s3">(</span><span class="s1">keys</span><span class="s3">))</span>
+    <span class="s2">elif </span><span class="s1">orders </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">orders </span><span class="s3">= </span><span class="s1">itertools</span><span class="s3">.</span><span class="s1">repeat</span><span class="s3">(</span><span class="s2">True</span><span class="s3">, </span><span class="s1">len</span><span class="s3">(</span><span class="s1">keys</span><span class="s3">))</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">orders </span><span class="s3">= </span><span class="s1">reversed</span><span class="s3">(</span><span class="s1">orders</span><span class="s3">)</span>
+
+    <span class="s1">labels </span><span class="s3">= []</span>
+
+    <span class="s2">for </span><span class="s1">k</span><span class="s3">, </span><span class="s1">order </span><span class="s2">in </span><span class="s1">zip</span><span class="s3">(</span><span class="s1">reversed</span><span class="s3">(</span><span class="s1">keys</span><span class="s3">), </span><span class="s1">orders</span><span class="s3">, </span><span class="s1">strict</span><span class="s3">=</span><span class="s2">True</span><span class="s3">):</span>
+        <span class="s1">k </span><span class="s3">= </span><span class="s1">ensure_key_mapped</span><span class="s3">(</span><span class="s1">k</span><span class="s3">, </span><span class="s1">key</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">codes_given</span><span class="s3">:</span>
+            <span class="s1">codes </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">, </span><span class="s1">k</span><span class="s3">)</span>
+            <span class="s1">n </span><span class="s3">= </span><span class="s1">codes</span><span class="s3">.</span><span class="s1">max</span><span class="s3">() + </span><span class="s5">1 </span><span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">codes</span><span class="s3">) </span><span class="s2">else </span><span class="s5">0</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">cat </span><span class="s3">= </span><span class="s1">Categorical</span><span class="s3">(</span><span class="s1">k</span><span class="s3">, </span><span class="s1">ordered</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+            <span class="s1">codes </span><span class="s3">= </span><span class="s1">cat</span><span class="s3">.</span><span class="s1">codes</span>
+            <span class="s1">n </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">cat</span><span class="s3">.</span><span class="s1">categories</span><span class="s3">)</span>
+
+        <span class="s1">mask </span><span class="s3">= </span><span class="s1">codes </span><span class="s3">== -</span><span class="s5">1</span>
+
+        <span class="s2">if </span><span class="s1">na_position </span><span class="s3">== </span><span class="s6">&quot;last&quot; </span><span class="s2">and </span><span class="s1">mask</span><span class="s3">.</span><span class="s1">any</span><span class="s3">():</span>
+            <span class="s1">codes </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">mask</span><span class="s3">, </span><span class="s1">n</span><span class="s3">, </span><span class="s1">codes</span><span class="s3">)</span>
+
+        <span class="s4"># not order means descending</span>
+        <span class="s2">if not </span><span class="s1">order</span><span class="s3">:</span>
+            <span class="s1">codes </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">mask</span><span class="s3">, </span><span class="s1">codes</span><span class="s3">, </span><span class="s1">n </span><span class="s3">- </span><span class="s1">codes </span><span class="s3">- </span><span class="s5">1</span><span class="s3">)</span>
+
+        <span class="s1">labels</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">codes</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">np</span><span class="s3">.</span><span class="s1">lexsort</span><span class="s3">(</span><span class="s1">labels</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">nargsort</span><span class="s3">(</span>
+    <span class="s1">items</span><span class="s3">: </span><span class="s1">ArrayLike </span><span class="s3">| </span><span class="s1">Index </span><span class="s3">| </span><span class="s1">Series</span><span class="s3">,</span>
+    <span class="s1">kind</span><span class="s3">: </span><span class="s1">SortKind </span><span class="s3">= </span><span class="s6">&quot;quicksort&quot;</span><span class="s3">,</span>
+    <span class="s1">ascending</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">na_position</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s6">&quot;last&quot;</span><span class="s3">,</span>
+    <span class="s1">key</span><span class="s3">: </span><span class="s1">Callable </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">mask</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">bool_</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Intended to be a drop-in replacement for np.argsort which handles NaNs. 
+ 
+    Adds ascending, na_position, and key parameters. 
+ 
+    (GH #6399, #5231, #27237) 
+ 
+    Parameters 
+    ---------- 
+    items : np.ndarray, ExtensionArray, Index, or Series 
+    kind : {'quicksort', 'mergesort', 'heapsort', 'stable'}, default 'quicksort' 
+    ascending : bool, default True 
+    na_position : {'first', 'last'}, default 'last' 
+    key : Optional[Callable], default None 
+    mask : Optional[np.ndarray[bool]], default None 
+        Passed when called by ExtensionArray.argsort. 
+ 
+    Returns 
+    ------- 
+    np.ndarray[np.intp] 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">if </span><span class="s1">key </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s4"># see TestDataFrameSortKey, TestRangeIndex::test_sort_values_key</span>
+        <span class="s1">items </span><span class="s3">= </span><span class="s1">ensure_key_mapped</span><span class="s3">(</span><span class="s1">items</span><span class="s3">, </span><span class="s1">key</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">nargsort</span><span class="s3">(</span>
+            <span class="s1">items</span><span class="s3">,</span>
+            <span class="s1">kind</span><span class="s3">=</span><span class="s1">kind</span><span class="s3">,</span>
+            <span class="s1">ascending</span><span class="s3">=</span><span class="s1">ascending</span><span class="s3">,</span>
+            <span class="s1">na_position</span><span class="s3">=</span><span class="s1">na_position</span><span class="s3">,</span>
+            <span class="s1">key</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+            <span class="s1">mask</span><span class="s3">=</span><span class="s1">mask</span><span class="s3">,</span>
+        <span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">items</span><span class="s3">, </span><span class="s1">ABCRangeIndex</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">items</span><span class="s3">.</span><span class="s1">argsort</span><span class="s3">(</span><span class="s1">ascending</span><span class="s3">=</span><span class="s1">ascending</span><span class="s3">)</span>
+    <span class="s2">elif not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">items</span><span class="s3">, </span><span class="s1">ABCMultiIndex</span><span class="s3">):</span>
+        <span class="s1">items </span><span class="s3">= </span><span class="s1">extract_array</span><span class="s3">(</span><span class="s1">items</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span>
+            <span class="s6">&quot;nargsort does not support MultiIndex. Use index.sort_values instead.&quot;</span>
+        <span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">mask </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">mask </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">isna</span><span class="s3">(</span><span class="s1">items</span><span class="s3">))</span>
+
+    <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">items</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">):</span>
+        <span class="s4"># i.e. ExtensionArray</span>
+        <span class="s2">return </span><span class="s1">items</span><span class="s3">.</span><span class="s1">argsort</span><span class="s3">(</span>
+            <span class="s1">ascending</span><span class="s3">=</span><span class="s1">ascending</span><span class="s3">,</span>
+            <span class="s1">kind</span><span class="s3">=</span><span class="s1">kind</span><span class="s3">,</span>
+            <span class="s1">na_position</span><span class="s3">=</span><span class="s1">na_position</span><span class="s3">,</span>
+        <span class="s3">)</span>
+
+    <span class="s1">idx </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">arange</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">items</span><span class="s3">))</span>
+    <span class="s1">non_nans </span><span class="s3">= </span><span class="s1">items</span><span class="s3">[~</span><span class="s1">mask</span><span class="s3">]</span>
+    <span class="s1">non_nan_idx </span><span class="s3">= </span><span class="s1">idx</span><span class="s3">[~</span><span class="s1">mask</span><span class="s3">]</span>
+
+    <span class="s1">nan_idx </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">nonzero</span><span class="s3">(</span><span class="s1">mask</span><span class="s3">)[</span><span class="s5">0</span><span class="s3">]</span>
+    <span class="s2">if not </span><span class="s1">ascending</span><span class="s3">:</span>
+        <span class="s1">non_nans </span><span class="s3">= </span><span class="s1">non_nans</span><span class="s3">[::-</span><span class="s5">1</span><span class="s3">]</span>
+        <span class="s1">non_nan_idx </span><span class="s3">= </span><span class="s1">non_nan_idx</span><span class="s3">[::-</span><span class="s5">1</span><span class="s3">]</span>
+    <span class="s1">indexer </span><span class="s3">= </span><span class="s1">non_nan_idx</span><span class="s3">[</span><span class="s1">non_nans</span><span class="s3">.</span><span class="s1">argsort</span><span class="s3">(</span><span class="s1">kind</span><span class="s3">=</span><span class="s1">kind</span><span class="s3">)]</span>
+    <span class="s2">if not </span><span class="s1">ascending</span><span class="s3">:</span>
+        <span class="s1">indexer </span><span class="s3">= </span><span class="s1">indexer</span><span class="s3">[::-</span><span class="s5">1</span><span class="s3">]</span>
+    <span class="s4"># Finally, place the NaNs at the end or the beginning according to</span>
+    <span class="s4"># na_position</span>
+    <span class="s2">if </span><span class="s1">na_position </span><span class="s3">== </span><span class="s6">&quot;last&quot;</span><span class="s3">:</span>
+        <span class="s1">indexer </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">concatenate</span><span class="s3">([</span><span class="s1">indexer</span><span class="s3">, </span><span class="s1">nan_idx</span><span class="s3">])</span>
+    <span class="s2">elif </span><span class="s1">na_position </span><span class="s3">== </span><span class="s6">&quot;first&quot;</span><span class="s3">:</span>
+        <span class="s1">indexer </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">concatenate</span><span class="s3">([</span><span class="s1">nan_idx</span><span class="s3">, </span><span class="s1">indexer</span><span class="s3">])</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s6">f&quot;invalid na_position: </span><span class="s2">{</span><span class="s1">na_position</span><span class="s2">}</span><span class="s6">&quot;</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">ensure_platform_int</span><span class="s3">(</span><span class="s1">indexer</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">nargminmax</span><span class="s3">(</span><span class="s1">values</span><span class="s3">: </span><span class="s1">ExtensionArray</span><span class="s3">, </span><span class="s1">method</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">: </span><span class="s1">AxisInt </span><span class="s3">= </span><span class="s5">0</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Implementation of np.argmin/argmax but for ExtensionArray and which 
+    handles missing values. 
+ 
+    Parameters 
+    ---------- 
+    values : ExtensionArray 
+    method : {&quot;argmax&quot;, &quot;argmin&quot;} 
+    axis : int, default 0 
+ 
+    Returns 
+    ------- 
+    int 
+    &quot;&quot;&quot;</span>
+    <span class="s2">assert </span><span class="s1">method </span><span class="s2">in </span><span class="s3">{</span><span class="s6">&quot;argmax&quot;</span><span class="s3">, </span><span class="s6">&quot;argmin&quot;</span><span class="s3">}</span>
+    <span class="s1">func </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">argmax </span><span class="s2">if </span><span class="s1">method </span><span class="s3">== </span><span class="s6">&quot;argmax&quot; </span><span class="s2">else </span><span class="s1">np</span><span class="s3">.</span><span class="s1">argmin</span>
+
+    <span class="s1">mask </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">isna</span><span class="s3">(</span><span class="s1">values</span><span class="s3">))</span>
+    <span class="s1">arr_values </span><span class="s3">= </span><span class="s1">values</span><span class="s3">.</span><span class="s1">_values_for_argsort</span><span class="s3">()</span>
+
+    <span class="s2">if </span><span class="s1">arr_values</span><span class="s3">.</span><span class="s1">ndim </span><span class="s3">&gt; </span><span class="s5">1</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">mask</span><span class="s3">.</span><span class="s1">any</span><span class="s3">():</span>
+            <span class="s2">if </span><span class="s1">axis </span><span class="s3">== </span><span class="s5">1</span><span class="s3">:</span>
+                <span class="s1">zipped </span><span class="s3">= </span><span class="s1">zip</span><span class="s3">(</span><span class="s1">arr_values</span><span class="s3">, </span><span class="s1">mask</span><span class="s3">, </span><span class="s1">strict</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">zipped </span><span class="s3">= </span><span class="s1">zip</span><span class="s3">(</span><span class="s1">arr_values</span><span class="s3">.</span><span class="s1">T</span><span class="s3">, </span><span class="s1">mask</span><span class="s3">.</span><span class="s1">T</span><span class="s3">, </span><span class="s1">strict</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">_nanargminmax</span><span class="s3">(</span><span class="s1">v</span><span class="s3">, </span><span class="s1">m</span><span class="s3">, </span><span class="s1">func</span><span class="s3">) </span><span class="s2">for </span><span class="s1">v</span><span class="s3">, </span><span class="s1">m </span><span class="s2">in </span><span class="s1">zipped</span><span class="s3">])</span>
+        <span class="s2">return </span><span class="s1">func</span><span class="s3">(</span><span class="s1">arr_values</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">=</span><span class="s1">axis</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">_nanargminmax</span><span class="s3">(</span><span class="s1">arr_values</span><span class="s3">, </span><span class="s1">mask</span><span class="s3">, </span><span class="s1">func</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_nanargminmax</span><span class="s3">(</span><span class="s1">values</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">, </span><span class="s1">mask</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">bool_</span><span class="s3">], </span><span class="s1">func</span><span class="s3">) </span><span class="s1">-&gt; int</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    See nanargminmax.__doc__. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">idx </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">arange</span><span class="s3">(</span><span class="s1">values</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">[</span><span class="s5">0</span><span class="s3">])</span>
+    <span class="s1">non_nans </span><span class="s3">= </span><span class="s1">values</span><span class="s3">[~</span><span class="s1">mask</span><span class="s3">]</span>
+    <span class="s1">non_nan_idx </span><span class="s3">= </span><span class="s1">idx</span><span class="s3">[~</span><span class="s1">mask</span><span class="s3">]</span>
+
+    <span class="s2">return </span><span class="s1">non_nan_idx</span><span class="s3">[</span><span class="s1">func</span><span class="s3">(</span><span class="s1">non_nans</span><span class="s3">)]</span>
+
+
+<span class="s2">def </span><span class="s1">_ensure_key_mapped_multiindex</span><span class="s3">(</span>
+    <span class="s1">index</span><span class="s3">: </span><span class="s1">MultiIndex</span><span class="s3">, </span><span class="s1">key</span><span class="s3">: </span><span class="s1">Callable</span><span class="s3">, </span><span class="s1">level</span><span class="s3">=</span><span class="s2">None</span>
+<span class="s3">) </span><span class="s1">-&gt; MultiIndex</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Returns a new MultiIndex in which key has been applied 
+    to all levels specified in level (or all levels if level 
+    is None). Used for key sorting for MultiIndex. 
+ 
+    Parameters 
+    ---------- 
+    index : MultiIndex 
+        Index to which to apply the key function on the 
+        specified levels. 
+    key : Callable 
+        Function that takes an Index and returns an Index of 
+        the same shape. This key is applied to each level 
+        separately. The name of the level can be used to 
+        distinguish different levels for application. 
+    level : list-like, int or str, default None 
+        Level or list of levels to apply the key function to. 
+        If None, key function is applied to all levels. Other 
+        levels are left unchanged. 
+ 
+    Returns 
+    ------- 
+    labels : MultiIndex 
+        Resulting MultiIndex with modified levels. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">if </span><span class="s1">level </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">level</span><span class="s3">, (</span><span class="s1">str</span><span class="s3">, </span><span class="s1">int</span><span class="s3">)):</span>
+            <span class="s1">level_iter </span><span class="s3">= [</span><span class="s1">level</span><span class="s3">]</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">level_iter </span><span class="s3">= </span><span class="s1">level</span>
+
+        <span class="s1">sort_levels</span><span class="s3">: </span><span class="s1">range </span><span class="s3">| </span><span class="s1">set </span><span class="s3">= {</span><span class="s1">index</span><span class="s3">.</span><span class="s1">_get_level_number</span><span class="s3">(</span><span class="s1">lev</span><span class="s3">) </span><span class="s2">for </span><span class="s1">lev </span><span class="s2">in </span><span class="s1">level_iter</span><span class="s3">}</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">sort_levels </span><span class="s3">= </span><span class="s1">range</span><span class="s3">(</span><span class="s1">index</span><span class="s3">.</span><span class="s1">nlevels</span><span class="s3">)</span>
+
+    <span class="s1">mapped </span><span class="s3">= [</span>
+        <span class="s3">(</span>
+            <span class="s1">ensure_key_mapped</span><span class="s3">(</span><span class="s1">index</span><span class="s3">.</span><span class="s1">_get_level_values</span><span class="s3">(</span><span class="s1">level</span><span class="s3">), </span><span class="s1">key</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">level </span><span class="s2">in </span><span class="s1">sort_levels</span>
+            <span class="s2">else </span><span class="s1">index</span><span class="s3">.</span><span class="s1">_get_level_values</span><span class="s3">(</span><span class="s1">level</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s2">for </span><span class="s1">level </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">index</span><span class="s3">.</span><span class="s1">nlevels</span><span class="s3">)</span>
+    <span class="s3">]</span>
+
+    <span class="s2">return </span><span class="s1">type</span><span class="s3">(</span><span class="s1">index</span><span class="s3">).</span><span class="s1">from_arrays</span><span class="s3">(</span><span class="s1">mapped</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">ensure_key_mapped</span><span class="s3">(</span>
+    <span class="s1">values</span><span class="s3">: </span><span class="s1">ArrayLike </span><span class="s3">| </span><span class="s1">Index </span><span class="s3">| </span><span class="s1">Series</span><span class="s3">, </span><span class="s1">key</span><span class="s3">: </span><span class="s1">Callable </span><span class="s3">| </span><span class="s2">None</span><span class="s3">, </span><span class="s1">levels</span><span class="s3">=</span><span class="s2">None</span>
+<span class="s3">) </span><span class="s1">-&gt; ArrayLike </span><span class="s3">| </span><span class="s1">Index </span><span class="s3">| </span><span class="s1">Series</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Applies a callable key function to the values function and checks 
+    that the resulting value has the same shape. Can be called on Index 
+    subclasses, Series, DataFrames, or ndarrays. 
+ 
+    Parameters 
+    ---------- 
+    values : Series, DataFrame, Index subclass, or ndarray 
+    key : Optional[Callable], key to be called on the values array 
+    levels : Optional[List], if values is a MultiIndex, list of levels to 
+    apply the key to. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">indexes</span><span class="s3">.</span><span class="s1">api </span><span class="s2">import </span><span class="s1">Index</span>
+
+    <span class="s2">if not </span><span class="s1">key</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">values</span>
+
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, </span><span class="s1">ABCMultiIndex</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">_ensure_key_mapped_multiindex</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, </span><span class="s1">key</span><span class="s3">, </span><span class="s1">level</span><span class="s3">=</span><span class="s1">levels</span><span class="s3">)</span>
+
+    <span class="s1">result </span><span class="s3">= </span><span class="s1">key</span><span class="s3">(</span><span class="s1">values</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">())</span>
+    <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">result</span><span class="s3">) != </span><span class="s1">len</span><span class="s3">(</span><span class="s1">values</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+            <span class="s6">&quot;User-provided `key` function must not change the shape of the array.&quot;</span>
+        <span class="s3">)</span>
+
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span>
+            <span class="s1">values</span><span class="s3">, </span><span class="s1">Index</span>
+        <span class="s3">):  </span><span class="s4"># convert to a new Index subclass, not necessarily the same</span>
+            <span class="s1">result </span><span class="s3">= </span><span class="s1">Index</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">tupleize_cols</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s4"># try to revert to original type otherwise</span>
+            <span class="s1">type_of_values </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">values</span><span class="s3">)</span>
+            <span class="s4">#  error: Too many arguments for &quot;ExtensionArray&quot;</span>
+            <span class="s1">result </span><span class="s3">= </span><span class="s1">type_of_values</span><span class="s3">(</span><span class="s1">result</span><span class="s3">)  </span><span class="s4"># type: ignore[call-arg]</span>
+    <span class="s2">except </span><span class="s1">TypeError </span><span class="s2">as </span><span class="s1">err</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span>
+            <span class="s6">f&quot;User-provided `key` function returned an invalid type </span><span class="s2">{</span><span class="s1">type</span><span class="s3">(</span><span class="s1">result</span><span class="s3">)</span><span class="s2">} \ 
+            </span><span class="s6">which could not be converted to </span><span class="s2">{</span><span class="s1">type</span><span class="s3">(</span><span class="s1">values</span><span class="s3">)</span><span class="s2">}</span><span class="s6">.&quot;</span>
+        <span class="s3">) </span><span class="s2">from </span><span class="s1">err</span>
+
+    <span class="s2">return </span><span class="s1">result</span>
+
+
+<span class="s2">def </span><span class="s1">get_indexer_dict</span><span class="s3">(</span>
+    <span class="s1">label_list</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">], </span><span class="s1">keys</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">Index</span><span class="s3">]</span>
+<span class="s3">) </span><span class="s1">-&gt; dict</span><span class="s3">[</span><span class="s1">Hashable</span><span class="s3">, </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">]]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Returns 
+    ------- 
+    dict: 
+        Labels mapped to indexers. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">shape </span><span class="s3">= </span><span class="s1">tuple</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">x</span><span class="s3">) </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">keys</span><span class="s3">)</span>
+
+    <span class="s1">group_index </span><span class="s3">= </span><span class="s1">get_group_index</span><span class="s3">(</span><span class="s1">label_list</span><span class="s3">, </span><span class="s1">shape</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">xnull</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">np</span><span class="s3">.</span><span class="s1">all</span><span class="s3">(</span><span class="s1">group_index </span><span class="s3">== -</span><span class="s5">1</span><span class="s3">):</span>
+        <span class="s4"># Short-circuit, lib.indices_fast will return the same</span>
+        <span class="s2">return </span><span class="s3">{}</span>
+    <span class="s1">ngroups </span><span class="s3">= (</span>
+        <span class="s3">((</span><span class="s1">group_index</span><span class="s3">.</span><span class="s1">size </span><span class="s2">and </span><span class="s1">group_index</span><span class="s3">.</span><span class="s1">max</span><span class="s3">()) + </span><span class="s5">1</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">is_int64_overflow_possible</span><span class="s3">(</span><span class="s1">shape</span><span class="s3">)</span>
+        <span class="s2">else </span><span class="s1">np</span><span class="s3">.</span><span class="s1">prod</span><span class="s3">(</span><span class="s1">shape</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s6">&quot;i8&quot;</span><span class="s3">)</span>
+    <span class="s3">)</span>
+
+    <span class="s1">sorter </span><span class="s3">= </span><span class="s1">get_group_index_sorter</span><span class="s3">(</span><span class="s1">group_index</span><span class="s3">, </span><span class="s1">ngroups</span><span class="s3">)</span>
+
+    <span class="s1">sorted_labels </span><span class="s3">= [</span><span class="s1">lab</span><span class="s3">.</span><span class="s1">take</span><span class="s3">(</span><span class="s1">sorter</span><span class="s3">) </span><span class="s2">for </span><span class="s1">lab </span><span class="s2">in </span><span class="s1">label_list</span><span class="s3">]</span>
+    <span class="s1">group_index </span><span class="s3">= </span><span class="s1">group_index</span><span class="s3">.</span><span class="s1">take</span><span class="s3">(</span><span class="s1">sorter</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">indices_fast</span><span class="s3">(</span><span class="s1">sorter</span><span class="s3">, </span><span class="s1">group_index</span><span class="s3">, </span><span class="s1">keys</span><span class="s3">, </span><span class="s1">sorted_labels</span><span class="s3">)</span>
+
+
+<span class="s4"># ----------------------------------------------------------------------</span>
+<span class="s4"># sorting levels...cleverly?</span>
+
+
+<span class="s2">def </span><span class="s1">get_group_index_sorter</span><span class="s3">(</span>
+    <span class="s1">group_index</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">], </span><span class="s1">ngroups</span><span class="s3">: </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span>
+<span class="s3">) </span><span class="s1">-&gt; npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    algos.groupsort_indexer implements `counting sort` and it is at least 
+    O(ngroups), where 
+        ngroups = prod(shape) 
+        shape = map(len, keys) 
+    that is, linear in the number of combinations (cartesian product) of unique 
+    values of groupby keys. This can be huge when doing multi-key groupby. 
+    np.argsort(kind='mergesort') is O(count x log(count)) where count is the 
+    length of the data-frame; 
+    Both algorithms are `stable` sort and that is necessary for correctness of 
+    groupby operations. e.g. consider: 
+        df.groupby(key)[col].transform('first') 
+ 
+    Parameters 
+    ---------- 
+    group_index : np.ndarray[np.intp] 
+        signed integer dtype 
+    ngroups : int or None, default None 
+ 
+    Returns 
+    ------- 
+    np.ndarray[np.intp] 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">ngroups </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">ngroups </span><span class="s3">= </span><span class="s5">1 </span><span class="s3">+ </span><span class="s1">group_index</span><span class="s3">.</span><span class="s1">max</span><span class="s3">()</span>
+    <span class="s1">count </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">group_index</span><span class="s3">)</span>
+    <span class="s1">alpha </span><span class="s3">= </span><span class="s5">0.0  </span><span class="s4"># taking complexities literally; there may be</span>
+    <span class="s1">beta </span><span class="s3">= </span><span class="s5">1.0  </span><span class="s4"># some room for fine-tuning these parameters</span>
+    <span class="s1">do_groupsort </span><span class="s3">= </span><span class="s1">count </span><span class="s3">&gt; </span><span class="s5">0 </span><span class="s2">and </span><span class="s3">((</span><span class="s1">alpha </span><span class="s3">+ </span><span class="s1">beta </span><span class="s3">* </span><span class="s1">ngroups</span><span class="s3">) &lt; (</span><span class="s1">count </span><span class="s3">* </span><span class="s1">np</span><span class="s3">.</span><span class="s1">log</span><span class="s3">(</span><span class="s1">count</span><span class="s3">)))</span>
+    <span class="s2">if </span><span class="s1">do_groupsort</span><span class="s3">:</span>
+        <span class="s1">sorter</span><span class="s3">, </span><span class="s1">_ </span><span class="s3">= </span><span class="s1">algos</span><span class="s3">.</span><span class="s1">groupsort_indexer</span><span class="s3">(</span>
+            <span class="s1">ensure_platform_int</span><span class="s3">(</span><span class="s1">group_index</span><span class="s3">),</span>
+            <span class="s1">ngroups</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s4"># sorter _should_ already be intp, but mypy is not yet able to verify</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">sorter </span><span class="s3">= </span><span class="s1">group_index</span><span class="s3">.</span><span class="s1">argsort</span><span class="s3">(</span><span class="s1">kind</span><span class="s3">=</span><span class="s6">&quot;mergesort&quot;</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">ensure_platform_int</span><span class="s3">(</span><span class="s1">sorter</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">compress_group_index</span><span class="s3">(</span>
+    <span class="s1">group_index</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">], </span><span class="s1">sort</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span>
+<span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">], </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">]]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Group_index is offsets into cartesian product of all possible labels. This 
+    space can be huge, so this function compresses it, by computing offsets 
+    (comp_ids) into the list of unique labels (obs_group_ids). 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">group_index</span><span class="s3">) </span><span class="s2">and </span><span class="s1">np</span><span class="s3">.</span><span class="s1">all</span><span class="s3">(</span><span class="s1">group_index</span><span class="s3">[</span><span class="s5">1</span><span class="s3">:] &gt;= </span><span class="s1">group_index</span><span class="s3">[:-</span><span class="s5">1</span><span class="s3">]):</span>
+        <span class="s4"># GH 53806: fast path for sorted group_index</span>
+        <span class="s1">unique_mask </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">concatenate</span><span class="s3">(</span>
+            <span class="s3">[</span><span class="s1">group_index</span><span class="s3">[:</span><span class="s5">1</span><span class="s3">] &gt; -</span><span class="s5">1</span><span class="s3">, </span><span class="s1">group_index</span><span class="s3">[</span><span class="s5">1</span><span class="s3">:] != </span><span class="s1">group_index</span><span class="s3">[:-</span><span class="s5">1</span><span class="s3">]]</span>
+        <span class="s3">)</span>
+        <span class="s1">comp_ids </span><span class="s3">= </span><span class="s1">unique_mask</span><span class="s3">.</span><span class="s1">cumsum</span><span class="s3">()</span>
+        <span class="s1">comp_ids </span><span class="s3">-= </span><span class="s5">1</span>
+        <span class="s1">obs_group_ids </span><span class="s3">= </span><span class="s1">group_index</span><span class="s3">[</span><span class="s1">unique_mask</span><span class="s3">]</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">size_hint </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">group_index</span><span class="s3">)</span>
+        <span class="s1">table </span><span class="s3">= </span><span class="s1">hashtable</span><span class="s3">.</span><span class="s1">Int64HashTable</span><span class="s3">(</span><span class="s1">size_hint</span><span class="s3">)</span>
+
+        <span class="s1">group_index </span><span class="s3">= </span><span class="s1">ensure_int64</span><span class="s3">(</span><span class="s1">group_index</span><span class="s3">)</span>
+
+        <span class="s4"># note, group labels come out ascending (ie, 1,2,3 etc)</span>
+        <span class="s1">comp_ids</span><span class="s3">, </span><span class="s1">obs_group_ids </span><span class="s3">= </span><span class="s1">table</span><span class="s3">.</span><span class="s1">get_labels_groupby</span><span class="s3">(</span><span class="s1">group_index</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">sort </span><span class="s2">and </span><span class="s1">len</span><span class="s3">(</span><span class="s1">obs_group_ids</span><span class="s3">) &gt; </span><span class="s5">0</span><span class="s3">:</span>
+            <span class="s1">obs_group_ids</span><span class="s3">, </span><span class="s1">comp_ids </span><span class="s3">= </span><span class="s1">_reorder_by_uniques</span><span class="s3">(</span><span class="s1">obs_group_ids</span><span class="s3">, </span><span class="s1">comp_ids</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">ensure_int64</span><span class="s3">(</span><span class="s1">comp_ids</span><span class="s3">), </span><span class="s1">ensure_int64</span><span class="s3">(</span><span class="s1">obs_group_ids</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_reorder_by_uniques</span><span class="s3">(</span>
+    <span class="s1">uniques</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">], </span><span class="s1">labels</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">]</span>
+<span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">], </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">]]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Parameters 
+    ---------- 
+    uniques : np.ndarray[np.int64] 
+    labels : np.ndarray[np.intp] 
+ 
+    Returns 
+    ------- 
+    np.ndarray[np.int64] 
+    np.ndarray[np.intp] 
+    &quot;&quot;&quot;</span>
+    <span class="s4"># sorter is index where elements ought to go</span>
+    <span class="s1">sorter </span><span class="s3">= </span><span class="s1">uniques</span><span class="s3">.</span><span class="s1">argsort</span><span class="s3">()</span>
+
+    <span class="s4"># reverse_indexer is where elements came from</span>
+    <span class="s1">reverse_indexer </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">sorter</span><span class="s3">), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">)</span>
+    <span class="s1">reverse_indexer</span><span class="s3">.</span><span class="s1">put</span><span class="s3">(</span><span class="s1">sorter</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">arange</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">sorter</span><span class="s3">)))</span>
+
+    <span class="s1">mask </span><span class="s3">= </span><span class="s1">labels </span><span class="s3">&lt; </span><span class="s5">0</span>
+
+    <span class="s4"># move labels to right locations (ie, unsort ascending labels)</span>
+    <span class="s1">labels </span><span class="s3">= </span><span class="s1">reverse_indexer</span><span class="s3">.</span><span class="s1">take</span><span class="s3">(</span><span class="s1">labels</span><span class="s3">)</span>
+    <span class="s1">np</span><span class="s3">.</span><span class="s1">putmask</span><span class="s3">(</span><span class="s1">labels</span><span class="s3">, </span><span class="s1">mask</span><span class="s3">, -</span><span class="s5">1</span><span class="s3">)</span>
+
+    <span class="s4"># sort observed ids</span>
+    <span class="s1">uniques </span><span class="s3">= </span><span class="s1">uniques</span><span class="s3">.</span><span class="s1">take</span><span class="s3">(</span><span class="s1">sorter</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">uniques</span><span class="s3">, </span><span class="s1">labels</span>
+</pre>
+</body>
+</html>

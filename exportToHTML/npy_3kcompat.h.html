@@ -1,0 +1,396 @@
+<html>
+<head>
+<title>npy_3kcompat.h</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #6aab73;}
+.s4 { color: #c77dbb;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+npy_3kcompat.h</font>
+</center></td></tr></table>
+<pre><span class="s0">/* 
+ * This is a convenience header file providing compatibility utilities 
+ * for supporting different minor versions of Python 3. 
+ * It was originally used to support the transition from Python 2, 
+ * hence the &quot;3k&quot; naming. 
+ * 
+ * If you want to use this for your own projects, it's recommended to make a 
+ * copy of it. We don't provide backwards compatibility guarantees. 
+ */</span>
+
+<span class="s2">#ifndef </span><span class="s1">NUMPY_CORE_INCLUDE_NUMPY_NPY_3KCOMPAT_H_</span>
+<span class="s2">#define </span><span class="s1">NUMPY_CORE_INCLUDE_NUMPY_NPY_3KCOMPAT_H_</span>
+
+<span class="s2">#include </span><span class="s1">&lt;Python.h&gt;</span>
+<span class="s2">#include </span><span class="s1">&lt;stdio.h&gt;</span>
+
+<span class="s2">#include </span><span class="s3">&quot;npy_common.h&quot;</span>
+
+<span class="s2">#ifdef </span><span class="s1">__cplusplus</span>
+<span class="s2">extern </span><span class="s3">&quot;C&quot; </span><span class="s1">{</span>
+<span class="s2">#endif</span>
+
+<span class="s0">/* Python13 removes _PyLong_AsInt */</span>
+<span class="s2">static </span><span class="s4">inline </span><span class="s2">int</span>
+<span class="s1">Npy__PyLong_AsInt(PyObject *obj)</span>
+<span class="s1">{</span>
+    <span class="s2">int </span><span class="s1">overflow;</span>
+    <span class="s2">long </span><span class="s1">result = PyLong_AsLongAndOverflow(obj, &amp;overflow);</span>
+
+    <span class="s0">/* INT_MAX and INT_MIN are defined in Python.h */</span>
+    <span class="s2">if </span><span class="s1">(overflow || result &gt; INT_MAX || result &lt; INT_MIN) {</span>
+        <span class="s0">/* XXX: could be cute and give a different 
+           message for overflow == -1 */</span>
+        <span class="s1">PyErr_SetString(PyExc_OverflowError,</span>
+                        <span class="s3">&quot;Python int too large to convert to C int&quot;</span><span class="s1">);</span>
+        <span class="s2">return </span><span class="s1">-</span><span class="s5">1</span><span class="s1">;</span>
+    <span class="s1">}</span>
+    <span class="s2">return </span><span class="s1">(</span><span class="s2">int</span><span class="s1">)result;</span>
+<span class="s1">}</span>
+
+<span class="s2">#if </span><span class="s1">defined _MSC_VER &amp;&amp; _MSC_VER &gt;= </span><span class="s5">1900</span>
+
+<span class="s2">#include </span><span class="s1">&lt;stdlib.h&gt;</span>
+
+<span class="s0">/* 
+ * Macros to protect CRT calls against instant termination when passed an 
+ * invalid parameter (https://bugs.python.org/issue23524). 
+ */</span>
+<span class="s2">extern </span><span class="s1">_invalid_parameter_handler _Py_silent_invalid_parameter_handler;</span>
+<span class="s2">#define </span><span class="s1">NPY_BEGIN_SUPPRESS_IPH { _invalid_parameter_handler _Py_old_handler = \</span>
+    <span class="s1">_set_thread_local_invalid_parameter_handler(_Py_silent_invalid_parameter_handler);</span>
+<span class="s2">#define </span><span class="s1">NPY_END_SUPPRESS_IPH _set_thread_local_invalid_parameter_handler(_Py_old_handler); }</span>
+
+<span class="s2">#else</span>
+
+<span class="s2">#define </span><span class="s1">NPY_BEGIN_SUPPRESS_IPH</span>
+<span class="s2">#define </span><span class="s1">NPY_END_SUPPRESS_IPH</span>
+
+<span class="s2">#endif </span><span class="s0">/* _MSC_VER &gt;= 1900 */</span>
+
+<span class="s0">/* 
+ * PyFile_* compatibility 
+ */</span>
+
+<span class="s0">/* 
+ * Get a FILE* handle to the file represented by the Python object 
+ */</span>
+<span class="s2">static </span><span class="s4">inline </span><span class="s1">FILE*</span>
+<span class="s1">npy_PyFile_Dup2(PyObject *file, </span><span class="s2">char </span><span class="s1">*mode, npy_off_t *orig_pos)</span>
+<span class="s1">{</span>
+    <span class="s2">int </span><span class="s1">fd, fd2, unbuf;</span>
+    <span class="s1">Py_ssize_t fd2_tmp;</span>
+    <span class="s1">PyObject *ret, *os, *io, *io_raw;</span>
+    <span class="s1">npy_off_t pos;</span>
+    <span class="s1">FILE *handle;</span>
+
+    <span class="s0">/* Flush first to ensure things end up in the file in the correct order */</span>
+    <span class="s1">ret = PyObject_CallMethod(file, </span><span class="s3">&quot;flush&quot;</span><span class="s1">, </span><span class="s3">&quot;&quot;</span><span class="s1">);</span>
+    <span class="s2">if </span><span class="s1">(ret == NULL) {</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s1">Py_DECREF(ret);</span>
+    <span class="s1">fd = PyObject_AsFileDescriptor(file);</span>
+    <span class="s2">if </span><span class="s1">(fd == -</span><span class="s5">1</span><span class="s1">) {</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+
+    <span class="s0">/* 
+     * The handle needs to be dup'd because we have to call fclose 
+     * at the end 
+     */</span>
+    <span class="s1">os = PyImport_ImportModule(</span><span class="s3">&quot;os&quot;</span><span class="s1">);</span>
+    <span class="s2">if </span><span class="s1">(os == NULL) {</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s1">ret = PyObject_CallMethod(os, </span><span class="s3">&quot;dup&quot;</span><span class="s1">, </span><span class="s3">&quot;i&quot;</span><span class="s1">, fd);</span>
+    <span class="s1">Py_DECREF(os);</span>
+    <span class="s2">if </span><span class="s1">(ret == NULL) {</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s1">fd2_tmp = PyNumber_AsSsize_t(ret, PyExc_IOError);</span>
+    <span class="s1">Py_DECREF(ret);</span>
+    <span class="s2">if </span><span class="s1">(fd2_tmp == -</span><span class="s5">1 </span><span class="s1">&amp;&amp; PyErr_Occurred()) {</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s2">if </span><span class="s1">(fd2_tmp &lt; INT_MIN || fd2_tmp &gt; INT_MAX) {</span>
+        <span class="s1">PyErr_SetString(PyExc_IOError,</span>
+                        <span class="s3">&quot;Getting an 'int' from os.dup() failed&quot;</span><span class="s1">);</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s1">fd2 = (</span><span class="s2">int</span><span class="s1">)fd2_tmp;</span>
+
+    <span class="s0">/* Convert to FILE* handle */</span>
+<span class="s2">#ifdef </span><span class="s1">_WIN32</span>
+    <span class="s1">NPY_BEGIN_SUPPRESS_IPH</span>
+    <span class="s1">handle = _fdopen(fd2, mode);</span>
+    <span class="s1">NPY_END_SUPPRESS_IPH</span>
+<span class="s2">#else</span>
+    <span class="s1">handle = fdopen(fd2, mode);</span>
+<span class="s2">#endif</span>
+    <span class="s2">if </span><span class="s1">(handle == NULL) {</span>
+        <span class="s1">PyErr_SetString(PyExc_IOError,</span>
+                        <span class="s3">&quot;Getting a FILE* from a Python file object via &quot;</span>
+                        <span class="s3">&quot;_fdopen failed. If you built NumPy, you probably &quot;</span>
+                        <span class="s3">&quot;linked with the wrong debug/release runtime&quot;</span><span class="s1">);</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+
+    <span class="s0">/* Record the original raw file handle position */</span>
+    <span class="s1">*orig_pos = npy_ftell(handle);</span>
+    <span class="s2">if </span><span class="s1">(*orig_pos == -</span><span class="s5">1</span><span class="s1">) {</span>
+        <span class="s0">/* The io module is needed to determine if buffering is used */</span>
+        <span class="s1">io = PyImport_ImportModule(</span><span class="s3">&quot;io&quot;</span><span class="s1">);</span>
+        <span class="s2">if </span><span class="s1">(io == NULL) {</span>
+            <span class="s1">fclose(handle);</span>
+            <span class="s2">return </span><span class="s1">NULL;</span>
+        <span class="s1">}</span>
+        <span class="s0">/* File object instances of RawIOBase are unbuffered */</span>
+        <span class="s1">io_raw = PyObject_GetAttrString(io, </span><span class="s3">&quot;RawIOBase&quot;</span><span class="s1">);</span>
+        <span class="s1">Py_DECREF(io);</span>
+        <span class="s2">if </span><span class="s1">(io_raw == NULL) {</span>
+            <span class="s1">fclose(handle);</span>
+            <span class="s2">return </span><span class="s1">NULL;</span>
+        <span class="s1">}</span>
+        <span class="s1">unbuf = PyObject_IsInstance(file, io_raw);</span>
+        <span class="s1">Py_DECREF(io_raw);</span>
+        <span class="s2">if </span><span class="s1">(unbuf == </span><span class="s5">1</span><span class="s1">) {</span>
+            <span class="s0">/* Succeed if the IO is unbuffered */</span>
+            <span class="s2">return </span><span class="s1">handle;</span>
+        <span class="s1">}</span>
+        <span class="s2">else </span><span class="s1">{</span>
+            <span class="s1">PyErr_SetString(PyExc_IOError, </span><span class="s3">&quot;obtaining file position failed&quot;</span><span class="s1">);</span>
+            <span class="s1">fclose(handle);</span>
+            <span class="s2">return </span><span class="s1">NULL;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s0">/* Seek raw handle to the Python-side position */</span>
+    <span class="s1">ret = PyObject_CallMethod(file, </span><span class="s3">&quot;tell&quot;</span><span class="s1">, </span><span class="s3">&quot;&quot;</span><span class="s1">);</span>
+    <span class="s2">if </span><span class="s1">(ret == NULL) {</span>
+        <span class="s1">fclose(handle);</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s1">pos = PyLong_AsLongLong(ret);</span>
+    <span class="s1">Py_DECREF(ret);</span>
+    <span class="s2">if </span><span class="s1">(PyErr_Occurred()) {</span>
+        <span class="s1">fclose(handle);</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s2">if </span><span class="s1">(npy_fseek(handle, pos, SEEK_SET) == -</span><span class="s5">1</span><span class="s1">) {</span>
+        <span class="s1">PyErr_SetString(PyExc_IOError, </span><span class="s3">&quot;seeking file failed&quot;</span><span class="s1">);</span>
+        <span class="s1">fclose(handle);</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s2">return </span><span class="s1">handle;</span>
+<span class="s1">}</span>
+
+<span class="s0">/* 
+ * Close the dup-ed file handle, and seek the Python one to the current position 
+ */</span>
+<span class="s2">static </span><span class="s4">inline </span><span class="s2">int</span>
+<span class="s1">npy_PyFile_DupClose2(PyObject *file, FILE* handle, npy_off_t orig_pos)</span>
+<span class="s1">{</span>
+    <span class="s2">int </span><span class="s1">fd, unbuf;</span>
+    <span class="s1">PyObject *ret, *io, *io_raw;</span>
+    <span class="s1">npy_off_t position;</span>
+
+    <span class="s1">position = npy_ftell(handle);</span>
+
+    <span class="s0">/* Close the FILE* handle */</span>
+    <span class="s1">fclose(handle);</span>
+
+    <span class="s0">/* 
+     * Restore original file handle position, in order to not confuse 
+     * Python-side data structures 
+     */</span>
+    <span class="s1">fd = PyObject_AsFileDescriptor(file);</span>
+    <span class="s2">if </span><span class="s1">(fd == -</span><span class="s5">1</span><span class="s1">) {</span>
+        <span class="s2">return </span><span class="s1">-</span><span class="s5">1</span><span class="s1">;</span>
+    <span class="s1">}</span>
+
+    <span class="s2">if </span><span class="s1">(npy_lseek(fd, orig_pos, SEEK_SET) == -</span><span class="s5">1</span><span class="s1">) {</span>
+
+        <span class="s0">/* The io module is needed to determine if buffering is used */</span>
+        <span class="s1">io = PyImport_ImportModule(</span><span class="s3">&quot;io&quot;</span><span class="s1">);</span>
+        <span class="s2">if </span><span class="s1">(io == NULL) {</span>
+            <span class="s2">return </span><span class="s1">-</span><span class="s5">1</span><span class="s1">;</span>
+        <span class="s1">}</span>
+        <span class="s0">/* File object instances of RawIOBase are unbuffered */</span>
+        <span class="s1">io_raw = PyObject_GetAttrString(io, </span><span class="s3">&quot;RawIOBase&quot;</span><span class="s1">);</span>
+        <span class="s1">Py_DECREF(io);</span>
+        <span class="s2">if </span><span class="s1">(io_raw == NULL) {</span>
+            <span class="s2">return </span><span class="s1">-</span><span class="s5">1</span><span class="s1">;</span>
+        <span class="s1">}</span>
+        <span class="s1">unbuf = PyObject_IsInstance(file, io_raw);</span>
+        <span class="s1">Py_DECREF(io_raw);</span>
+        <span class="s2">if </span><span class="s1">(unbuf == </span><span class="s5">1</span><span class="s1">) {</span>
+            <span class="s0">/* Succeed if the IO is unbuffered */</span>
+            <span class="s2">return </span><span class="s5">0</span><span class="s1">;</span>
+        <span class="s1">}</span>
+        <span class="s2">else </span><span class="s1">{</span>
+            <span class="s1">PyErr_SetString(PyExc_IOError, </span><span class="s3">&quot;seeking file failed&quot;</span><span class="s1">);</span>
+            <span class="s2">return </span><span class="s1">-</span><span class="s5">1</span><span class="s1">;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s2">if </span><span class="s1">(position == -</span><span class="s5">1</span><span class="s1">) {</span>
+        <span class="s1">PyErr_SetString(PyExc_IOError, </span><span class="s3">&quot;obtaining file position failed&quot;</span><span class="s1">);</span>
+        <span class="s2">return </span><span class="s1">-</span><span class="s5">1</span><span class="s1">;</span>
+    <span class="s1">}</span>
+
+    <span class="s0">/* Seek Python-side handle to the FILE* handle position */</span>
+    <span class="s1">ret = PyObject_CallMethod(file, </span><span class="s3">&quot;seek&quot;</span><span class="s1">, NPY_OFF_T_PYFMT </span><span class="s3">&quot;i&quot;</span><span class="s1">, position, </span><span class="s5">0</span><span class="s1">);</span>
+    <span class="s2">if </span><span class="s1">(ret == NULL) {</span>
+        <span class="s2">return </span><span class="s1">-</span><span class="s5">1</span><span class="s1">;</span>
+    <span class="s1">}</span>
+    <span class="s1">Py_DECREF(ret);</span>
+    <span class="s2">return </span><span class="s5">0</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s2">static </span><span class="s4">inline </span><span class="s1">PyObject*</span>
+<span class="s1">npy_PyFile_OpenFile(PyObject *filename, </span><span class="s2">const char </span><span class="s1">*mode)</span>
+<span class="s1">{</span>
+    <span class="s1">PyObject *open;</span>
+    <span class="s1">open = PyDict_GetItemString(PyEval_GetBuiltins(), </span><span class="s3">&quot;open&quot;</span><span class="s1">); </span><span class="s0">// noqa: borrowed-ref OK</span>
+    <span class="s2">if </span><span class="s1">(open == NULL) {</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s2">return </span><span class="s1">PyObject_CallFunction(open, </span><span class="s3">&quot;Os&quot;</span><span class="s1">, filename, mode);</span>
+<span class="s1">}</span>
+
+<span class="s2">static </span><span class="s4">inline </span><span class="s2">int</span>
+<span class="s1">npy_PyFile_CloseFile(PyObject *file)</span>
+<span class="s1">{</span>
+    <span class="s1">PyObject *ret;</span>
+
+    <span class="s1">ret = PyObject_CallMethod(file, </span><span class="s3">&quot;close&quot;</span><span class="s1">, NULL);</span>
+    <span class="s2">if </span><span class="s1">(ret == NULL) {</span>
+        <span class="s2">return </span><span class="s1">-</span><span class="s5">1</span><span class="s1">;</span>
+    <span class="s1">}</span>
+    <span class="s1">Py_DECREF(ret);</span>
+    <span class="s2">return </span><span class="s5">0</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s0">/* This is a copy of _PyErr_ChainExceptions, which 
+ *  is no longer exported from Python3.12 
+ */</span>
+<span class="s2">static </span><span class="s4">inline </span><span class="s2">void</span>
+<span class="s1">npy_PyErr_ChainExceptions(PyObject *exc, PyObject *val, PyObject *tb)</span>
+<span class="s1">{</span>
+    <span class="s2">if </span><span class="s1">(exc == NULL)</span>
+        <span class="s2">return</span><span class="s1">;</span>
+
+    <span class="s2">if </span><span class="s1">(PyErr_Occurred()) {</span>
+        <span class="s1">PyObject *exc2, *val2, *tb2;</span>
+        <span class="s1">PyErr_Fetch(&amp;exc2, &amp;val2, &amp;tb2);</span>
+        <span class="s1">PyErr_NormalizeException(&amp;exc, &amp;val, &amp;tb);</span>
+        <span class="s2">if </span><span class="s1">(tb != NULL) {</span>
+            <span class="s1">PyException_SetTraceback(val, tb);</span>
+            <span class="s1">Py_DECREF(tb);</span>
+        <span class="s1">}</span>
+        <span class="s1">Py_DECREF(exc);</span>
+        <span class="s1">PyErr_NormalizeException(&amp;exc2, &amp;val2, &amp;tb2);</span>
+        <span class="s1">PyException_SetContext(val2, val);</span>
+        <span class="s1">PyErr_Restore(exc2, val2, tb2);</span>
+    <span class="s1">}</span>
+    <span class="s2">else </span><span class="s1">{</span>
+        <span class="s1">PyErr_Restore(exc, val, tb);</span>
+    <span class="s1">}</span>
+<span class="s1">}</span>
+
+<span class="s0">/* This is a copy of _PyErr_ChainExceptions, with: 
+ *  __cause__ used instead of __context__ 
+ */</span>
+<span class="s2">static </span><span class="s4">inline </span><span class="s2">void</span>
+<span class="s1">npy_PyErr_ChainExceptionsCause(PyObject *exc, PyObject *val, PyObject *tb)</span>
+<span class="s1">{</span>
+    <span class="s2">if </span><span class="s1">(exc == NULL)</span>
+        <span class="s2">return</span><span class="s1">;</span>
+
+    <span class="s2">if </span><span class="s1">(PyErr_Occurred()) {</span>
+        <span class="s1">PyObject *exc2, *val2, *tb2;</span>
+        <span class="s1">PyErr_Fetch(&amp;exc2, &amp;val2, &amp;tb2);</span>
+        <span class="s1">PyErr_NormalizeException(&amp;exc, &amp;val, &amp;tb);</span>
+        <span class="s2">if </span><span class="s1">(tb != NULL) {</span>
+            <span class="s1">PyException_SetTraceback(val, tb);</span>
+            <span class="s1">Py_DECREF(tb);</span>
+        <span class="s1">}</span>
+        <span class="s1">Py_DECREF(exc);</span>
+        <span class="s1">PyErr_NormalizeException(&amp;exc2, &amp;val2, &amp;tb2);</span>
+        <span class="s1">PyException_SetCause(val2, val);</span>
+        <span class="s1">PyErr_Restore(exc2, val2, tb2);</span>
+    <span class="s1">}</span>
+    <span class="s2">else </span><span class="s1">{</span>
+        <span class="s1">PyErr_Restore(exc, val, tb);</span>
+    <span class="s1">}</span>
+<span class="s1">}</span>
+
+<span class="s0">/* 
+ * PyCObject functions adapted to PyCapsules. 
+ * 
+ * The main job here is to get rid of the improved error handling 
+ * of PyCapsules. It's a shame... 
+ */</span>
+<span class="s2">static </span><span class="s4">inline </span><span class="s1">PyObject *</span>
+<span class="s1">NpyCapsule_FromVoidPtr(</span><span class="s2">void </span><span class="s1">*ptr, </span><span class="s2">void </span><span class="s1">(*dtor)(PyObject *))</span>
+<span class="s1">{</span>
+    <span class="s1">PyObject *ret = PyCapsule_New(ptr, NULL, dtor);</span>
+    <span class="s2">if </span><span class="s1">(ret == NULL) {</span>
+        <span class="s1">PyErr_Clear();</span>
+    <span class="s1">}</span>
+    <span class="s2">return </span><span class="s1">ret;</span>
+<span class="s1">}</span>
+
+<span class="s2">static </span><span class="s4">inline </span><span class="s1">PyObject *</span>
+<span class="s1">NpyCapsule_FromVoidPtrAndDesc(</span><span class="s2">void </span><span class="s1">*ptr, </span><span class="s2">void</span><span class="s1">* context, </span><span class="s2">void </span><span class="s1">(*dtor)(PyObject *))</span>
+<span class="s1">{</span>
+    <span class="s1">PyObject *ret = NpyCapsule_FromVoidPtr(ptr, dtor);</span>
+    <span class="s2">if </span><span class="s1">(ret != NULL &amp;&amp; PyCapsule_SetContext(ret, context) != </span><span class="s5">0</span><span class="s1">) {</span>
+        <span class="s1">PyErr_Clear();</span>
+        <span class="s1">Py_DECREF(ret);</span>
+        <span class="s1">ret = NULL;</span>
+    <span class="s1">}</span>
+    <span class="s2">return </span><span class="s1">ret;</span>
+<span class="s1">}</span>
+
+<span class="s2">static </span><span class="s4">inline </span><span class="s2">void </span><span class="s1">*</span>
+<span class="s1">NpyCapsule_AsVoidPtr(PyObject *obj)</span>
+<span class="s1">{</span>
+    <span class="s2">void </span><span class="s1">*ret = PyCapsule_GetPointer(obj, NULL);</span>
+    <span class="s2">if </span><span class="s1">(ret == NULL) {</span>
+        <span class="s1">PyErr_Clear();</span>
+    <span class="s1">}</span>
+    <span class="s2">return </span><span class="s1">ret;</span>
+<span class="s1">}</span>
+
+<span class="s2">static </span><span class="s4">inline </span><span class="s2">void </span><span class="s1">*</span>
+<span class="s1">NpyCapsule_GetDesc(PyObject *obj)</span>
+<span class="s1">{</span>
+    <span class="s2">return </span><span class="s1">PyCapsule_GetContext(obj);</span>
+<span class="s1">}</span>
+
+<span class="s2">static </span><span class="s4">inline </span><span class="s2">int</span>
+<span class="s1">NpyCapsule_Check(PyObject *ptr)</span>
+<span class="s1">{</span>
+    <span class="s2">return </span><span class="s1">PyCapsule_CheckExact(ptr);</span>
+<span class="s1">}</span>
+
+<span class="s2">#ifdef </span><span class="s1">__cplusplus</span>
+<span class="s1">}</span>
+<span class="s2">#endif</span>
+
+
+<span class="s2">#endif  </span><span class="s0">/* NUMPY_CORE_INCLUDE_NUMPY_NPY_3KCOMPAT_H_ */</span>
+</pre>
+</body>
+</html>

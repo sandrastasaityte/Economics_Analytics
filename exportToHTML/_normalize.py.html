@@ -1,0 +1,677 @@
+<html>
+<head>
+<title>_normalize.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #5f826b; font-style: italic;}
+.s5 { color: #2aacb8;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_normalize.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># ---------------------------------------------------------------------</span>
+<span class="s0"># JSON normalization routines</span>
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">from </span><span class="s1">collections </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">abc</span><span class="s3">,</span>
+    <span class="s1">defaultdict</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">import </span><span class="s1">copy</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s3">,</span>
+    <span class="s1">Any</span><span class="s3">,</span>
+    <span class="s1">DefaultDict</span><span class="s3">,</span>
+    <span class="s1">overload</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs</span><span class="s3">.</span><span class="s1">writers </span><span class="s2">import </span><span class="s1">convert_json_to_lines</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">_decorators </span><span class="s2">import </span><span class="s1">set_module</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">common </span><span class="s2">import </span><span class="s1">is_scalar</span>
+
+<span class="s2">import </span><span class="s1">pandas </span><span class="s2">as </span><span class="s1">pd</span>
+<span class="s2">from </span><span class="s1">pandas </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">DataFrame</span><span class="s3">,</span>
+    <span class="s1">Series</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">collections</span><span class="s3">.</span><span class="s1">abc </span><span class="s2">import </span><span class="s1">Iterable</span>
+
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_typing </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">IgnoreRaise</span><span class="s3">,</span>
+        <span class="s1">Scalar</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">convert_to_line_delimits</span><span class="s3">(</span><span class="s1">s</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Helper function that converts JSON lists to line delimited JSON. 
+    &quot;&quot;&quot;</span>
+    <span class="s0"># Determine we have a JSON list to turn to lines otherwise just return the</span>
+    <span class="s0"># json object, only lists can</span>
+    <span class="s2">if not </span><span class="s1">s</span><span class="s3">[</span><span class="s5">0</span><span class="s3">] == </span><span class="s6">&quot;[&quot; </span><span class="s2">and </span><span class="s1">s</span><span class="s3">[-</span><span class="s5">1</span><span class="s3">] == </span><span class="s6">&quot;]&quot;</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">s</span>
+    <span class="s1">s </span><span class="s3">= </span><span class="s1">s</span><span class="s3">[</span><span class="s5">1</span><span class="s3">:-</span><span class="s5">1</span><span class="s3">]</span>
+
+    <span class="s2">return </span><span class="s1">convert_json_to_lines</span><span class="s3">(</span><span class="s1">s</span><span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">overload</span>
+<span class="s2">def </span><span class="s1">nested_to_record</span><span class="s3">(</span>
+    <span class="s1">ds</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">,</span>
+    <span class="s1">prefix</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= ...,</span>
+    <span class="s1">sep</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= ...,</span>
+    <span class="s1">level</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= ...,</span>
+    <span class="s1">max_level</span><span class="s3">: </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= ...,</span>
+<span class="s3">) </span><span class="s1">-&gt; dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">]: ...</span>
+
+
+<span class="s3">@</span><span class="s1">overload</span>
+<span class="s2">def </span><span class="s1">nested_to_record</span><span class="s3">(</span>
+    <span class="s1">ds</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">dict</span><span class="s3">],</span>
+    <span class="s1">prefix</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= ...,</span>
+    <span class="s1">sep</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= ...,</span>
+    <span class="s1">level</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= ...,</span>
+    <span class="s1">max_level</span><span class="s3">: </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= ...,</span>
+<span class="s3">) </span><span class="s1">-&gt; list</span><span class="s3">[</span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">]]: ...</span>
+
+
+<span class="s2">def </span><span class="s1">nested_to_record</span><span class="s3">(</span>
+    <span class="s1">ds</span><span class="s3">: </span><span class="s1">dict </span><span class="s3">| </span><span class="s1">list</span><span class="s3">[</span><span class="s1">dict</span><span class="s3">],</span>
+    <span class="s1">prefix</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s6">&quot;&quot;</span><span class="s3">,</span>
+    <span class="s1">sep</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s6">&quot;.&quot;</span><span class="s3">,</span>
+    <span class="s1">level</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s5">0</span><span class="s3">,</span>
+    <span class="s1">max_level</span><span class="s3">: </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">] | </span><span class="s1">list</span><span class="s3">[</span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">]]:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    A simplified json_normalize 
+ 
+    Converts a nested dict into a flat dict (&quot;record&quot;), unlike json_normalize, 
+    it does not attempt to extract a subset of the data. 
+ 
+    Parameters 
+    ---------- 
+    ds : dict or list of dicts 
+    prefix: the prefix, optional, default: &quot;&quot; 
+    sep : str, default '.' 
+        Nested records will generate names separated by sep, 
+        e.g., for sep='.', { 'foo' : { 'bar' : 0 } } -&gt; foo.bar 
+    level: int, optional, default: 0 
+        The number of levels in the json string. 
+ 
+    max_level: int, optional, default: None 
+        The max depth to normalize. 
+ 
+    Returns 
+    ------- 
+    d - dict or list of dicts, matching `ds` 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; nested_to_record( 
+    ...     dict(flat1=1, dict1=dict(c=1, d=2), nested=dict(e=dict(c=1, d=2), d=2)) 
+    ... ) 
+    {\ 
+'flat1': 1, \ 
+'dict1.c': 1, \ 
+'dict1.d': 2, \ 
+'nested.e.c': 1, \ 
+'nested.e.d': 2, \ 
+'nested.d': 2\ 
+} 
+    &quot;&quot;&quot;</span>
+    <span class="s1">singleton </span><span class="s3">= </span><span class="s2">False</span>
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">ds</span><span class="s3">, </span><span class="s1">dict</span><span class="s3">):</span>
+        <span class="s1">ds </span><span class="s3">= [</span><span class="s1">ds</span><span class="s3">]</span>
+        <span class="s1">singleton </span><span class="s3">= </span><span class="s2">True</span>
+    <span class="s1">new_ds </span><span class="s3">= []</span>
+    <span class="s2">for </span><span class="s1">d </span><span class="s2">in </span><span class="s1">ds</span><span class="s3">:</span>
+        <span class="s1">new_d </span><span class="s3">= </span><span class="s1">copy</span><span class="s3">.</span><span class="s1">deepcopy</span><span class="s3">(</span><span class="s1">d</span><span class="s3">)</span>
+        <span class="s2">for </span><span class="s1">k</span><span class="s3">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">d</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+            <span class="s0"># each key gets renamed with prefix</span>
+            <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">k</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+                <span class="s1">k </span><span class="s3">= </span><span class="s1">str</span><span class="s3">(</span><span class="s1">k</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">level </span><span class="s3">== </span><span class="s5">0</span><span class="s3">:</span>
+                <span class="s1">newkey </span><span class="s3">= </span><span class="s1">k</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">newkey </span><span class="s3">= </span><span class="s1">prefix </span><span class="s3">+ </span><span class="s1">sep </span><span class="s3">+ </span><span class="s1">k</span>
+
+            <span class="s0"># flatten if type is dict and</span>
+            <span class="s0"># current dict level  &lt; maximum level provided and</span>
+            <span class="s0"># only dicts gets recurse-flattened</span>
+            <span class="s0"># only at level&gt;1 do we rename the rest of the keys</span>
+            <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">v</span><span class="s3">, </span><span class="s1">dict</span><span class="s3">) </span><span class="s2">or </span><span class="s3">(</span>
+                <span class="s1">max_level </span><span class="s2">is not None and </span><span class="s1">level </span><span class="s3">&gt;= </span><span class="s1">max_level</span>
+            <span class="s3">):</span>
+                <span class="s2">if </span><span class="s1">level </span><span class="s3">!= </span><span class="s5">0</span><span class="s3">:  </span><span class="s0"># so we skip copying for top level, common case</span>
+                    <span class="s1">v </span><span class="s3">= </span><span class="s1">new_d</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">(</span><span class="s1">k</span><span class="s3">)</span>
+                    <span class="s1">new_d</span><span class="s3">[</span><span class="s1">newkey</span><span class="s3">] = </span><span class="s1">v</span>
+                <span class="s2">continue</span>
+
+            <span class="s1">v </span><span class="s3">= </span><span class="s1">new_d</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">(</span><span class="s1">k</span><span class="s3">)</span>
+            <span class="s1">new_d</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">nested_to_record</span><span class="s3">(</span><span class="s1">v</span><span class="s3">, </span><span class="s1">newkey</span><span class="s3">, </span><span class="s1">sep</span><span class="s3">, </span><span class="s1">level </span><span class="s3">+ </span><span class="s5">1</span><span class="s3">, </span><span class="s1">max_level</span><span class="s3">))</span>
+        <span class="s1">new_ds</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">new_d</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">singleton</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">new_ds</span><span class="s3">[</span><span class="s5">0</span><span class="s3">]</span>
+    <span class="s2">return </span><span class="s1">new_ds</span>
+
+
+<span class="s2">def </span><span class="s1">_normalize_json</span><span class="s3">(</span>
+    <span class="s1">data</span><span class="s3">: </span><span class="s1">Any</span><span class="s3">,</span>
+    <span class="s1">key_string</span><span class="s3">: </span><span class="s1">str</span><span class="s3">,</span>
+    <span class="s1">normalized_dict</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">],</span>
+    <span class="s1">separator</span><span class="s3">: </span><span class="s1">str</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">]:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Main recursive function 
+    Designed for the most basic use case of pd.json_normalize(data) 
+    intended as a performance improvement, see #15621 
+ 
+    Parameters 
+    ---------- 
+    data : Any 
+        Type dependent on types contained within nested Json 
+    key_string : str 
+        New key (with separator(s) in) for data 
+    normalized_dict : dict 
+        The new normalized/flattened Json dict 
+    separator : str, default '.' 
+        Nested records will generate names separated by sep, 
+        e.g., for sep='.', { 'foo' : { 'bar' : 0 } } -&gt; foo.bar 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">dict</span><span class="s3">):</span>
+        <span class="s2">for </span><span class="s1">key</span><span class="s3">, </span><span class="s1">value </span><span class="s2">in </span><span class="s1">data</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+            <span class="s1">new_key </span><span class="s3">= </span><span class="s6">f&quot;</span><span class="s2">{</span><span class="s1">key_string</span><span class="s2">}{</span><span class="s1">separator</span><span class="s2">}{</span><span class="s1">key</span><span class="s2">}</span><span class="s6">&quot;</span>
+
+            <span class="s2">if not </span><span class="s1">key_string</span><span class="s3">:</span>
+                <span class="s1">new_key </span><span class="s3">= </span><span class="s1">new_key</span><span class="s3">.</span><span class="s1">removeprefix</span><span class="s3">(</span><span class="s1">separator</span><span class="s3">)</span>
+
+            <span class="s1">_normalize_json</span><span class="s3">(</span>
+                <span class="s1">data</span><span class="s3">=</span><span class="s1">value</span><span class="s3">,</span>
+                <span class="s1">key_string</span><span class="s3">=</span><span class="s1">new_key</span><span class="s3">,</span>
+                <span class="s1">normalized_dict</span><span class="s3">=</span><span class="s1">normalized_dict</span><span class="s3">,</span>
+                <span class="s1">separator</span><span class="s3">=</span><span class="s1">separator</span><span class="s3">,</span>
+            <span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">normalized_dict</span><span class="s3">[</span><span class="s1">key_string</span><span class="s3">] = </span><span class="s1">data</span>
+    <span class="s2">return </span><span class="s1">normalized_dict</span>
+
+
+<span class="s2">def </span><span class="s1">_normalize_json_ordered</span><span class="s3">(</span><span class="s1">data</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">], </span><span class="s1">separator</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">]:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Order the top level keys and then recursively go to depth 
+ 
+    Parameters 
+    ---------- 
+    data : dict or list of dicts 
+    separator : str, default '.' 
+        Nested records will generate names separated by sep, 
+        e.g., for sep='.', { 'foo' : { 'bar' : 0 } } -&gt; foo.bar 
+ 
+    Returns 
+    ------- 
+    dict or list of dicts, matching `normalized_json_object` 
+    &quot;&quot;&quot;</span>
+    <span class="s1">top_dict_ </span><span class="s3">= {</span><span class="s1">k</span><span class="s3">: </span><span class="s1">v </span><span class="s2">for </span><span class="s1">k</span><span class="s3">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">data</span><span class="s3">.</span><span class="s1">items</span><span class="s3">() </span><span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">v</span><span class="s3">, </span><span class="s1">dict</span><span class="s3">)}</span>
+    <span class="s1">nested_dict_ </span><span class="s3">= </span><span class="s1">_normalize_json</span><span class="s3">(</span>
+        <span class="s1">data</span><span class="s3">={</span><span class="s1">k</span><span class="s3">: </span><span class="s1">v </span><span class="s2">for </span><span class="s1">k</span><span class="s3">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">data</span><span class="s3">.</span><span class="s1">items</span><span class="s3">() </span><span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">v</span><span class="s3">, </span><span class="s1">dict</span><span class="s3">)},</span>
+        <span class="s1">key_string</span><span class="s3">=</span><span class="s6">&quot;&quot;</span><span class="s3">,</span>
+        <span class="s1">normalized_dict</span><span class="s3">={},</span>
+        <span class="s1">separator</span><span class="s3">=</span><span class="s1">separator</span><span class="s3">,</span>
+    <span class="s3">)</span>
+    <span class="s2">return </span><span class="s3">{**</span><span class="s1">top_dict_</span><span class="s3">, **</span><span class="s1">nested_dict_</span><span class="s3">}</span>
+
+
+<span class="s2">def </span><span class="s1">_simple_json_normalize</span><span class="s3">(</span>
+    <span class="s1">ds</span><span class="s3">: </span><span class="s1">dict </span><span class="s3">| </span><span class="s1">list</span><span class="s3">[</span><span class="s1">dict</span><span class="s3">],</span>
+    <span class="s1">sep</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s6">&quot;.&quot;</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; dict </span><span class="s3">| </span><span class="s1">list</span><span class="s3">[</span><span class="s1">dict</span><span class="s3">] | </span><span class="s1">Any</span><span class="s3">:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    An optimized basic json_normalize 
+ 
+    Converts a nested dict into a flat dict (&quot;record&quot;), unlike 
+    json_normalize and nested_to_record it doesn't do anything clever. 
+    But for the most basic use cases it enhances performance. 
+    E.g. pd.json_normalize(data) 
+ 
+    Parameters 
+    ---------- 
+    ds : dict or list of dicts 
+    sep : str, default '.' 
+        Nested records will generate names separated by sep, 
+        e.g., for sep='.', { 'foo' : { 'bar' : 0 } } -&gt; foo.bar 
+ 
+    Returns 
+    ------- 
+    frame : DataFrame 
+    d - dict or list of dicts, matching `normalized_json_object` 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; _simple_json_normalize( 
+    ...     { 
+    ...         &quot;flat1&quot;: 1, 
+    ...         &quot;dict1&quot;: {&quot;c&quot;: 1, &quot;d&quot;: 2}, 
+    ...         &quot;nested&quot;: {&quot;e&quot;: {&quot;c&quot;: 1, &quot;d&quot;: 2}, &quot;d&quot;: 2}, 
+    ...     } 
+    ... ) 
+    {\ 
+'flat1': 1, \ 
+'dict1.c': 1, \ 
+'dict1.d': 2, \ 
+'nested.e.c': 1, \ 
+'nested.e.d': 2, \ 
+'nested.d': 2\ 
+} 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">normalized_json_object </span><span class="s3">= {}</span>
+    <span class="s0"># expect a dictionary, as most jsons are. However, lists are perfectly valid</span>
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">ds</span><span class="s3">, </span><span class="s1">dict</span><span class="s3">):</span>
+        <span class="s1">normalized_json_object </span><span class="s3">= </span><span class="s1">_normalize_json_ordered</span><span class="s3">(</span><span class="s1">data</span><span class="s3">=</span><span class="s1">ds</span><span class="s3">, </span><span class="s1">separator</span><span class="s3">=</span><span class="s1">sep</span><span class="s3">)</span>
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">ds</span><span class="s3">, </span><span class="s1">list</span><span class="s3">):</span>
+        <span class="s1">normalized_json_list </span><span class="s3">= [</span><span class="s1">_simple_json_normalize</span><span class="s3">(</span><span class="s1">row</span><span class="s3">, </span><span class="s1">sep</span><span class="s3">=</span><span class="s1">sep</span><span class="s3">) </span><span class="s2">for </span><span class="s1">row </span><span class="s2">in </span><span class="s1">ds</span><span class="s3">]</span>
+        <span class="s2">return </span><span class="s1">normalized_json_list</span>
+    <span class="s2">return </span><span class="s1">normalized_json_object</span>
+
+
+<span class="s2">def </span><span class="s1">_validate_meta</span><span class="s3">(</span><span class="s1">meta</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str </span><span class="s3">| </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">]] | </span><span class="s2">None</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Validate that meta parameter contains only strings or lists of strings. 
+    Parameters 
+    ---------- 
+    meta : str or list of str or list of list of str or None 
+        The meta parameter to validate. 
+    Raises 
+    ------ 
+    TypeError 
+        If meta contains elements that are not strings or lists of strings. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">meta </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s2">return</span>
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">meta</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+        <span class="s2">return</span>
+    <span class="s2">for </span><span class="s1">item </span><span class="s2">in </span><span class="s1">meta</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">item</span><span class="s3">, </span><span class="s1">list</span><span class="s3">):</span>
+            <span class="s2">for </span><span class="s1">subitem </span><span class="s2">in </span><span class="s1">item</span><span class="s3">:</span>
+                <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">subitem</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+                    <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span>
+                        <span class="s6">&quot;All elements in nested meta paths must be strings. &quot;</span>
+                        <span class="s6">f&quot;Found </span><span class="s2">{</span><span class="s1">type</span><span class="s3">(</span><span class="s1">subitem</span><span class="s3">).</span><span class="s1">__name__</span><span class="s2">}</span><span class="s6">: </span><span class="s2">{</span><span class="s1">subitem</span><span class="s2">!r}</span><span class="s6">&quot;</span>
+                    <span class="s3">)</span>
+        <span class="s2">elif not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">item</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span>
+                <span class="s6">&quot;All elements in 'meta' must be strings or lists of strings. &quot;</span>
+                <span class="s6">f&quot;Found </span><span class="s2">{</span><span class="s1">type</span><span class="s3">(</span><span class="s1">item</span><span class="s3">).</span><span class="s1">__name__</span><span class="s2">}</span><span class="s6">: </span><span class="s2">{</span><span class="s1">item</span><span class="s2">!r}</span><span class="s6">&quot;</span>
+            <span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s6">&quot;pandas&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">json_normalize</span><span class="s3">(</span>
+    <span class="s1">data</span><span class="s3">: </span><span class="s1">dict </span><span class="s3">| </span><span class="s1">list</span><span class="s3">[</span><span class="s1">dict</span><span class="s3">] | </span><span class="s1">Series</span><span class="s3">,</span>
+    <span class="s1">record_path</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s1">list </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">meta</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str </span><span class="s3">| </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">]] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">meta_prefix</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">record_prefix</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">errors</span><span class="s3">: </span><span class="s1">IgnoreRaise </span><span class="s3">= </span><span class="s6">&quot;raise&quot;</span><span class="s3">,</span>
+    <span class="s1">sep</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s6">&quot;.&quot;</span><span class="s3">,</span>
+    <span class="s1">max_level</span><span class="s3">: </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; DataFrame</span><span class="s3">:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Normalize semi-structured JSON data into a flat table. 
+ 
+    This method is designed to transform semi-structured JSON data, such as nested 
+    dictionaries or lists, into a flat table. This is particularly useful when 
+    handling JSON-like data structures that contain deeply nested fields. 
+ 
+    Parameters 
+    ---------- 
+    data : dict, list of dicts, or Series of dicts 
+        Unserialized JSON objects. 
+    record_path : str or list of str, default None 
+        Path in each object to list of records. If not passed, data will be 
+        assumed to be an array of records. 
+    meta : list of paths (str or list of str), default None 
+        Fields to use as metadata for each record in resulting table. 
+    meta_prefix : str, default None 
+        String to prefix records with dotted path, e.g. foo.bar.field if 
+        meta is ['foo', 'bar']. 
+    record_prefix : str, default None 
+        String to prefix records with dotted path, e.g. foo.bar.field if 
+        path to records is ['foo', 'bar']. 
+    errors : {'raise', 'ignore'}, default 'raise' 
+        Configures error handling. 
+ 
+        * 'ignore' : will ignore KeyError if keys listed in meta are not 
+          always present. 
+        * 'raise' : will raise KeyError if keys listed in meta are not 
+          always present. 
+    sep : str, default '.' 
+        Nested records will generate names separated by sep. 
+        e.g., for sep='.', {'foo': {'bar': 0}} -&gt; foo.bar. 
+    max_level : int, default None 
+        Max number of levels(depth of dict) to normalize. 
+        if None, normalizes all levels. 
+ 
+    Returns 
+    ------- 
+    DataFrame 
+        The normalized data, represented as a pandas DataFrame. 
+ 
+    See Also 
+    -------- 
+    DataFrame : Two-dimensional, size-mutable, potentially heterogeneous tabular data. 
+    Series : One-dimensional ndarray with axis labels (including time series). 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; data = [ 
+    ...     {&quot;id&quot;: 1, &quot;name&quot;: {&quot;first&quot;: &quot;Coleen&quot;, &quot;last&quot;: &quot;Volk&quot;}}, 
+    ...     {&quot;name&quot;: {&quot;given&quot;: &quot;Mark&quot;, &quot;family&quot;: &quot;Regner&quot;}}, 
+    ...     {&quot;id&quot;: 2, &quot;name&quot;: &quot;Faye Raker&quot;}, 
+    ... ] 
+    &gt;&gt;&gt; pd.json_normalize(data) 
+        id name.first name.last name.given name.family        name 
+    0  1.0     Coleen      Volk        NaN         NaN         NaN 
+    1  NaN        NaN       NaN       Mark      Regner         NaN 
+    2  2.0        NaN       NaN        NaN         NaN  Faye Raker 
+ 
+    &gt;&gt;&gt; data = [ 
+    ...     { 
+    ...         &quot;id&quot;: 1, 
+    ...         &quot;name&quot;: &quot;Cole Volk&quot;, 
+    ...         &quot;fitness&quot;: {&quot;height&quot;: 130, &quot;weight&quot;: 60}, 
+    ...     }, 
+    ...     {&quot;name&quot;: &quot;Mark Reg&quot;, &quot;fitness&quot;: {&quot;height&quot;: 130, &quot;weight&quot;: 60}}, 
+    ...     { 
+    ...         &quot;id&quot;: 2, 
+    ...         &quot;name&quot;: &quot;Faye Raker&quot;, 
+    ...         &quot;fitness&quot;: {&quot;height&quot;: 130, &quot;weight&quot;: 60}, 
+    ...     }, 
+    ... ] 
+    &gt;&gt;&gt; pd.json_normalize(data, max_level=0) 
+        id        name                        fitness 
+    0  1.0   Cole Volk  {'height': 130, 'weight': 60} 
+    1  NaN    Mark Reg  {'height': 130, 'weight': 60} 
+    2  2.0  Faye Raker  {'height': 130, 'weight': 60} 
+ 
+    Normalizes nested data up to level 1. 
+ 
+    &gt;&gt;&gt; data = [ 
+    ...     { 
+    ...         &quot;id&quot;: 1, 
+    ...         &quot;name&quot;: &quot;Cole Volk&quot;, 
+    ...         &quot;fitness&quot;: {&quot;height&quot;: 130, &quot;weight&quot;: 60}, 
+    ...     }, 
+    ...     {&quot;name&quot;: &quot;Mark Reg&quot;, &quot;fitness&quot;: {&quot;height&quot;: 130, &quot;weight&quot;: 60}}, 
+    ...     { 
+    ...         &quot;id&quot;: 2, 
+    ...         &quot;name&quot;: &quot;Faye Raker&quot;, 
+    ...         &quot;fitness&quot;: {&quot;height&quot;: 130, &quot;weight&quot;: 60}, 
+    ...     }, 
+    ... ] 
+    &gt;&gt;&gt; pd.json_normalize(data, max_level=1) 
+        id        name  fitness.height  fitness.weight 
+    0  1.0   Cole Volk             130              60 
+    1  NaN    Mark Reg             130              60 
+    2  2.0  Faye Raker             130              60 
+ 
+    &gt;&gt;&gt; data = [ 
+    ...     { 
+    ...         &quot;id&quot;: 1, 
+    ...         &quot;name&quot;: &quot;Cole Volk&quot;, 
+    ...         &quot;fitness&quot;: {&quot;height&quot;: 130, &quot;weight&quot;: 60}, 
+    ...     }, 
+    ...     {&quot;name&quot;: &quot;Mark Reg&quot;, &quot;fitness&quot;: {&quot;height&quot;: 130, &quot;weight&quot;: 60}}, 
+    ...     { 
+    ...         &quot;id&quot;: 2, 
+    ...         &quot;name&quot;: &quot;Faye Raker&quot;, 
+    ...         &quot;fitness&quot;: {&quot;height&quot;: 130, &quot;weight&quot;: 60}, 
+    ...     }, 
+    ... ] 
+    &gt;&gt;&gt; series = pd.Series(data, index=pd.Index([&quot;a&quot;, &quot;b&quot;, &quot;c&quot;])) 
+    &gt;&gt;&gt; pd.json_normalize(series) 
+        id        name  fitness.height  fitness.weight 
+    a  1.0   Cole Volk             130              60 
+    b  NaN    Mark Reg             130              60 
+    c  2.0  Faye Raker             130              60 
+ 
+    &gt;&gt;&gt; data = [ 
+    ...     { 
+    ...         &quot;state&quot;: &quot;Florida&quot;, 
+    ...         &quot;shortname&quot;: &quot;FL&quot;, 
+    ...         &quot;info&quot;: {&quot;governor&quot;: &quot;Rick Scott&quot;}, 
+    ...         &quot;counties&quot;: [ 
+    ...             {&quot;name&quot;: &quot;Dade&quot;, &quot;population&quot;: 12345}, 
+    ...             {&quot;name&quot;: &quot;Broward&quot;, &quot;population&quot;: 40000}, 
+    ...             {&quot;name&quot;: &quot;Palm Beach&quot;, &quot;population&quot;: 60000}, 
+    ...         ], 
+    ...     }, 
+    ...     { 
+    ...         &quot;state&quot;: &quot;Ohio&quot;, 
+    ...         &quot;shortname&quot;: &quot;OH&quot;, 
+    ...         &quot;info&quot;: {&quot;governor&quot;: &quot;John Kasich&quot;}, 
+    ...         &quot;counties&quot;: [ 
+    ...             {&quot;name&quot;: &quot;Summit&quot;, &quot;population&quot;: 1234}, 
+    ...             {&quot;name&quot;: &quot;Cuyahoga&quot;, &quot;population&quot;: 1337}, 
+    ...         ], 
+    ...     }, 
+    ... ] 
+    &gt;&gt;&gt; result = pd.json_normalize( 
+    ...     data, &quot;counties&quot;, [&quot;state&quot;, &quot;shortname&quot;, [&quot;info&quot;, &quot;governor&quot;]] 
+    ... ) 
+    &gt;&gt;&gt; result 
+             name  population    state shortname info.governor 
+    0        Dade       12345   Florida    FL    Rick Scott 
+    1     Broward       40000   Florida    FL    Rick Scott 
+    2  Palm Beach       60000   Florida    FL    Rick Scott 
+    3      Summit        1234   Ohio       OH    John Kasich 
+    4    Cuyahoga        1337   Ohio       OH    John Kasich 
+ 
+    &gt;&gt;&gt; data = {&quot;A&quot;: [1, 2]} 
+    &gt;&gt;&gt; pd.json_normalize(data, &quot;A&quot;, record_prefix=&quot;Prefix.&quot;) 
+        Prefix.0 
+    0          1 
+    1          2 
+ 
+    Returns normalized data with columns prefixed with the given string. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">_validate_meta</span><span class="s3">(</span><span class="s1">meta</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_pull_field</span><span class="s3">(</span>
+        <span class="s1">js</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">], </span><span class="s1">spec</span><span class="s3">: </span><span class="s1">list </span><span class="s3">| </span><span class="s1">str</span><span class="s3">, </span><span class="s1">extract_record</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span>
+    <span class="s3">) </span><span class="s1">-&gt; Scalar </span><span class="s3">| </span><span class="s1">Iterable</span><span class="s3">:</span>
+        <span class="s4">&quot;&quot;&quot;Internal function to pull field&quot;&quot;&quot;</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">js</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">spec</span><span class="s3">, </span><span class="s1">list</span><span class="s3">):</span>
+                <span class="s2">for </span><span class="s1">field </span><span class="s2">in </span><span class="s1">spec</span><span class="s3">:</span>
+                    <span class="s2">if </span><span class="s1">result </span><span class="s2">is None</span><span class="s3">:</span>
+                        <span class="s2">raise </span><span class="s1">KeyError</span><span class="s3">(</span><span class="s1">field</span><span class="s3">)</span>
+                    <span class="s1">result </span><span class="s3">= </span><span class="s1">result</span><span class="s3">[</span><span class="s1">field</span><span class="s3">]</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">result </span><span class="s3">= </span><span class="s1">result</span><span class="s3">[</span><span class="s1">spec</span><span class="s3">]</span>
+        <span class="s2">except </span><span class="s1">KeyError </span><span class="s2">as </span><span class="s1">e</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">extract_record</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">KeyError</span><span class="s3">(</span>
+                    <span class="s6">f&quot;Key </span><span class="s2">{</span><span class="s1">e</span><span class="s2">} </span><span class="s6">not found. If specifying a record_path, all elements of &quot;</span>
+                    <span class="s6">f&quot;data should have the path.&quot;</span>
+                <span class="s3">) </span><span class="s2">from </span><span class="s1">e</span>
+            <span class="s2">if </span><span class="s1">errors </span><span class="s3">== </span><span class="s6">&quot;ignore&quot;</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">np</span><span class="s3">.</span><span class="s1">nan</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">KeyError</span><span class="s3">(</span>
+                    <span class="s6">f&quot;Key </span><span class="s2">{</span><span class="s1">e</span><span class="s2">} </span><span class="s6">not found. To replace missing values of </span><span class="s2">{</span><span class="s1">e</span><span class="s2">} </span><span class="s6">with &quot;</span>
+                    <span class="s6">f&quot;np.nan, pass in errors='ignore'&quot;</span>
+                <span class="s3">) </span><span class="s2">from </span><span class="s1">e</span>
+
+        <span class="s2">return </span><span class="s1">result</span>
+
+    <span class="s2">def </span><span class="s1">_pull_records</span><span class="s3">(</span><span class="s1">js</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">], </span><span class="s1">spec</span><span class="s3">: </span><span class="s1">list </span><span class="s3">| </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; list</span><span class="s3">:</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Internal function to pull field for records, and similar to 
+        _pull_field, but require to return list. And will raise error 
+        if has non iterable value. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">_pull_field</span><span class="s3">(</span><span class="s1">js</span><span class="s3">, </span><span class="s1">spec</span><span class="s3">, </span><span class="s1">extract_record</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+
+        <span class="s0"># GH 31507 GH 30145, GH 26284 if result is not list, raise TypeError if not</span>
+        <span class="s0"># null, otherwise return an empty list</span>
+        <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">list</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">isnull</span><span class="s3">(</span><span class="s1">result</span><span class="s3">):</span>
+                <span class="s1">result </span><span class="s3">= []</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span>
+                    <span class="s6">f&quot;Path must contain list or null, &quot;</span>
+                    <span class="s6">f&quot;but got </span><span class="s2">{</span><span class="s1">type</span><span class="s3">(</span><span class="s1">result</span><span class="s3">).</span><span class="s1">__name__</span><span class="s2">} </span><span class="s6">at </span><span class="s2">{</span><span class="s1">spec</span><span class="s2">!r}</span><span class="s6">&quot;</span>
+                <span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">result</span>
+
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">Series</span><span class="s3">):</span>
+        <span class="s1">index </span><span class="s3">= </span><span class="s1">data</span><span class="s3">.</span><span class="s1">index</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">index </span><span class="s3">= </span><span class="s2">None</span>
+
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">list</span><span class="s3">) </span><span class="s2">and not </span><span class="s1">data</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">DataFrame</span><span class="s3">()</span>
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">dict</span><span class="s3">):</span>
+        <span class="s0"># A bit of a hackjob</span>
+        <span class="s1">data </span><span class="s3">= [</span><span class="s1">data</span><span class="s3">]</span>
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">abc</span><span class="s3">.</span><span class="s1">Iterable</span><span class="s3">) </span><span class="s2">and not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+        <span class="s0"># GH35923 Fix pd.json_normalize to not skip the first element of a</span>
+        <span class="s0"># generator input</span>
+        <span class="s1">data </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)</span>
+        <span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">item </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">data</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">item</span><span class="s3">, </span><span class="s1">dict</span><span class="s3">):</span>
+                <span class="s2">continue</span>
+            <span class="s2">if </span><span class="s1">is_scalar</span><span class="s3">(</span><span class="s1">item</span><span class="s3">) </span><span class="s2">and </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">isna</span><span class="s3">(</span><span class="s1">item</span><span class="s3">):</span>
+                <span class="s1">data</span><span class="s3">[</span><span class="s1">i</span><span class="s3">] = {}</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">msg </span><span class="s3">= (</span>
+                    <span class="s6">&quot;All items in data must be of type dict or NA-like, &quot;</span>
+                    <span class="s6">f&quot;found </span><span class="s2">{</span><span class="s1">type</span><span class="s3">(</span><span class="s1">item</span><span class="s3">).</span><span class="s1">__name__</span><span class="s2">}</span><span class="s6">&quot;</span>
+                <span class="s3">)</span>
+                <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span><span class="s1">msg</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">NotImplementedError</span>
+
+    <span class="s0"># check to see if a simple recursive function is possible to</span>
+    <span class="s0"># improve performance (see #15621) but only for cases such</span>
+    <span class="s0"># as pd.Dataframe(data) or pd.Dataframe(data, sep)</span>
+    <span class="s2">if </span><span class="s3">(</span>
+        <span class="s1">record_path </span><span class="s2">is None</span>
+        <span class="s2">and </span><span class="s1">meta </span><span class="s2">is None</span>
+        <span class="s2">and </span><span class="s1">meta_prefix </span><span class="s2">is None</span>
+        <span class="s2">and </span><span class="s1">record_prefix </span><span class="s2">is None</span>
+        <span class="s2">and </span><span class="s1">max_level </span><span class="s2">is None</span>
+    <span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">DataFrame</span><span class="s3">(</span><span class="s1">_simple_json_normalize</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">sep</span><span class="s3">=</span><span class="s1">sep</span><span class="s3">), </span><span class="s1">index</span><span class="s3">=</span><span class="s1">index</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">record_path </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">any</span><span class="s3">([</span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">x</span><span class="s3">, </span><span class="s1">dict</span><span class="s3">) </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">y</span><span class="s3">.</span><span class="s1">values</span><span class="s3">()] </span><span class="s2">for </span><span class="s1">y </span><span class="s2">in </span><span class="s1">data</span><span class="s3">):</span>
+            <span class="s0"># naive normalization, this is idempotent for flat records</span>
+            <span class="s0"># and potentially will inflate the data considerably for</span>
+            <span class="s0"># deeply nested structures:</span>
+            <span class="s0">#  {VeryLong: { b: 1,c:2}} -&gt; {VeryLong.b:1 ,VeryLong.c:@}</span>
+            <span class="s0">#</span>
+            <span class="s0"># TODO: handle record value which are lists, at least error</span>
+            <span class="s0">#       reasonably</span>
+            <span class="s1">data </span><span class="s3">= </span><span class="s1">nested_to_record</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">sep</span><span class="s3">=</span><span class="s1">sep</span><span class="s3">, </span><span class="s1">max_level</span><span class="s3">=</span><span class="s1">max_level</span><span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">DataFrame</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">index</span><span class="s3">=</span><span class="s1">index</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">record_prefix </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">result </span><span class="s3">= </span><span class="s1">result</span><span class="s3">.</span><span class="s1">rename</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">=</span><span class="s2">lambda </span><span class="s1">x</span><span class="s3">: </span><span class="s6">f&quot;</span><span class="s2">{</span><span class="s1">record_prefix</span><span class="s2">}{</span><span class="s1">x</span><span class="s2">}</span><span class="s6">&quot;</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">result</span>
+    <span class="s2">elif not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">record_path</span><span class="s3">, </span><span class="s1">list</span><span class="s3">):</span>
+        <span class="s1">record_path </span><span class="s3">= [</span><span class="s1">record_path</span><span class="s3">]</span>
+
+    <span class="s2">if </span><span class="s1">meta </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">meta </span><span class="s3">= []</span>
+    <span class="s2">elif not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">meta</span><span class="s3">, </span><span class="s1">list</span><span class="s3">):</span>
+        <span class="s1">meta </span><span class="s3">= [</span><span class="s1">meta</span><span class="s3">]</span>
+
+    <span class="s1">_meta </span><span class="s3">= [</span><span class="s1">m </span><span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">m</span><span class="s3">, </span><span class="s1">list</span><span class="s3">) </span><span class="s2">else </span><span class="s3">[</span><span class="s1">m</span><span class="s3">] </span><span class="s2">for </span><span class="s1">m </span><span class="s2">in </span><span class="s1">meta</span><span class="s3">]</span>
+
+    <span class="s0"># Disastrously inefficient for now</span>
+    <span class="s1">records</span><span class="s3">: </span><span class="s1">list </span><span class="s3">= []</span>
+    <span class="s1">lengths </span><span class="s3">= []</span>
+
+    <span class="s1">meta_vals</span><span class="s3">: </span><span class="s1">DefaultDict </span><span class="s3">= </span><span class="s1">defaultdict</span><span class="s3">(</span><span class="s1">list</span><span class="s3">)</span>
+    <span class="s1">meta_keys </span><span class="s3">= [</span><span class="s1">sep</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">val</span><span class="s3">) </span><span class="s2">for </span><span class="s1">val </span><span class="s2">in </span><span class="s1">_meta</span><span class="s3">]</span>
+
+    <span class="s2">def </span><span class="s1">_recursive_extract</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">path</span><span class="s3">, </span><span class="s1">seen_meta</span><span class="s3">, </span><span class="s1">level</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s5">0</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">dict</span><span class="s3">):</span>
+            <span class="s1">data </span><span class="s3">= [</span><span class="s1">data</span><span class="s3">]</span>
+        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">path</span><span class="s3">) &gt; </span><span class="s5">1</span><span class="s3">:</span>
+            <span class="s2">for </span><span class="s1">obj </span><span class="s2">in </span><span class="s1">data</span><span class="s3">:</span>
+                <span class="s2">for </span><span class="s1">val</span><span class="s3">, </span><span class="s1">key </span><span class="s2">in </span><span class="s1">zip</span><span class="s3">(</span><span class="s1">_meta</span><span class="s3">, </span><span class="s1">meta_keys</span><span class="s3">, </span><span class="s1">strict</span><span class="s3">=</span><span class="s2">True</span><span class="s3">):</span>
+                    <span class="s2">if </span><span class="s1">level </span><span class="s3">+ </span><span class="s5">1 </span><span class="s3">== </span><span class="s1">len</span><span class="s3">(</span><span class="s1">val</span><span class="s3">):</span>
+                        <span class="s1">seen_meta</span><span class="s3">[</span><span class="s1">key</span><span class="s3">] = </span><span class="s1">_pull_field</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">, </span><span class="s1">val</span><span class="s3">[-</span><span class="s5">1</span><span class="s3">])</span>
+
+                <span class="s1">_recursive_extract</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">[</span><span class="s1">path</span><span class="s3">[</span><span class="s5">0</span><span class="s3">]], </span><span class="s1">path</span><span class="s3">[</span><span class="s5">1</span><span class="s3">:], </span><span class="s1">seen_meta</span><span class="s3">, </span><span class="s1">level</span><span class="s3">=</span><span class="s1">level </span><span class="s3">+ </span><span class="s5">1</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">for </span><span class="s1">obj </span><span class="s2">in </span><span class="s1">data</span><span class="s3">:</span>
+                <span class="s1">recs </span><span class="s3">= </span><span class="s1">_pull_records</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">, </span><span class="s1">path</span><span class="s3">[</span><span class="s5">0</span><span class="s3">])</span>
+                <span class="s1">recs </span><span class="s3">= [</span>
+                    <span class="s1">nested_to_record</span><span class="s3">(</span><span class="s1">r</span><span class="s3">, </span><span class="s1">sep</span><span class="s3">=</span><span class="s1">sep</span><span class="s3">, </span><span class="s1">max_level</span><span class="s3">=</span><span class="s1">max_level</span><span class="s3">)</span>
+                    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">r</span><span class="s3">, </span><span class="s1">dict</span><span class="s3">)</span>
+                    <span class="s2">else </span><span class="s1">r</span>
+                    <span class="s2">for </span><span class="s1">r </span><span class="s2">in </span><span class="s1">recs</span>
+                <span class="s3">]</span>
+
+                <span class="s0"># For repeating the metadata later</span>
+                <span class="s1">lengths</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">recs</span><span class="s3">))</span>
+                <span class="s2">for </span><span class="s1">val</span><span class="s3">, </span><span class="s1">key </span><span class="s2">in </span><span class="s1">zip</span><span class="s3">(</span><span class="s1">_meta</span><span class="s3">, </span><span class="s1">meta_keys</span><span class="s3">, </span><span class="s1">strict</span><span class="s3">=</span><span class="s2">True</span><span class="s3">):</span>
+                    <span class="s2">if </span><span class="s1">level </span><span class="s3">+ </span><span class="s5">1 </span><span class="s3">&gt; </span><span class="s1">len</span><span class="s3">(</span><span class="s1">val</span><span class="s3">):</span>
+                        <span class="s1">meta_val </span><span class="s3">= </span><span class="s1">seen_meta</span><span class="s3">[</span><span class="s1">key</span><span class="s3">]</span>
+                    <span class="s2">else</span><span class="s3">:</span>
+                        <span class="s1">meta_val </span><span class="s3">= </span><span class="s1">_pull_field</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">, </span><span class="s1">val</span><span class="s3">[</span><span class="s1">level</span><span class="s3">:])</span>
+                    <span class="s1">meta_vals</span><span class="s3">[</span><span class="s1">key</span><span class="s3">].</span><span class="s1">append</span><span class="s3">(</span><span class="s1">meta_val</span><span class="s3">)</span>
+                <span class="s1">records</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">(</span><span class="s1">recs</span><span class="s3">)</span>
+
+    <span class="s1">_recursive_extract</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">record_path</span><span class="s3">, {}, </span><span class="s1">level</span><span class="s3">=</span><span class="s5">0</span><span class="s3">)</span>
+
+    <span class="s1">result </span><span class="s3">= </span><span class="s1">DataFrame</span><span class="s3">(</span><span class="s1">records</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">record_prefix </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">result</span><span class="s3">.</span><span class="s1">rename</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">=</span><span class="s2">lambda </span><span class="s1">x</span><span class="s3">: </span><span class="s6">f&quot;</span><span class="s2">{</span><span class="s1">record_prefix</span><span class="s2">}{</span><span class="s1">x</span><span class="s2">}</span><span class="s6">&quot;</span><span class="s3">)</span>
+
+    <span class="s0"># Data types, a problem</span>
+    <span class="s2">for </span><span class="s1">k</span><span class="s3">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">meta_vals</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+        <span class="s2">if </span><span class="s1">meta_prefix </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">k </span><span class="s3">= </span><span class="s1">meta_prefix </span><span class="s3">+ </span><span class="s1">k</span>
+
+        <span class="s2">if </span><span class="s1">k </span><span class="s2">in </span><span class="s1">result</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                <span class="s6">f&quot;Conflicting metadata name </span><span class="s2">{</span><span class="s1">k</span><span class="s2">}</span><span class="s6">, need distinguishing prefix &quot;</span>
+            <span class="s3">)</span>
+        <span class="s0"># GH 37782</span>
+
+        <span class="s1">values </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">v</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">object</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">values</span><span class="s3">.</span><span class="s1">ndim </span><span class="s3">&gt; </span><span class="s5">1</span><span class="s3">:</span>
+            <span class="s0"># GH 37782</span>
+            <span class="s1">values </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty</span><span class="s3">((</span><span class="s1">len</span><span class="s3">(</span><span class="s1">v</span><span class="s3">),), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">object</span><span class="s3">)</span>
+            <span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">val </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">v</span><span class="s3">):</span>
+                <span class="s1">values</span><span class="s3">[</span><span class="s1">i</span><span class="s3">] = </span><span class="s1">val</span>
+
+        <span class="s1">result</span><span class="s3">[</span><span class="s1">k</span><span class="s3">] = </span><span class="s1">values</span><span class="s3">.</span><span class="s1">repeat</span><span class="s3">(</span><span class="s1">lengths</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">index </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s1">result</span><span class="s3">.</span><span class="s1">index </span><span class="s3">= </span><span class="s1">index</span><span class="s3">.</span><span class="s1">repeat</span><span class="s3">(</span><span class="s1">lengths</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">result</span>
+</pre>
+</body>
+</html>

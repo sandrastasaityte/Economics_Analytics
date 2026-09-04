@@ -1,0 +1,269 @@
+<html>
+<head>
+<title>executor.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+.s6 { color: #5f826b; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+executor.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">functools</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s2">,</span>
+    <span class="s1">Any</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s0">if </span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">collections</span><span class="s2">.</span><span class="s1">abc </span><span class="s0">import </span><span class="s1">Callable</span>
+    <span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_typing </span><span class="s0">import </span><span class="s1">Scalar</span>
+
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">compat</span><span class="s2">.</span><span class="s1">_optional </span><span class="s0">import </span><span class="s1">import_optional_dependency</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">util</span><span class="s2">.</span><span class="s1">numba_ </span><span class="s0">import </span><span class="s1">jit_user_function</span>
+
+
+<span class="s2">@</span><span class="s1">functools</span><span class="s2">.</span><span class="s1">cache</span>
+<span class="s0">def </span><span class="s1">generate_apply_looper</span><span class="s2">(</span><span class="s1">func</span><span class="s2">, </span><span class="s1">nopython</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">nogil</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">parallel</span><span class="s2">=</span><span class="s0">False</span><span class="s2">):</span>
+    <span class="s0">if </span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+        <span class="s0">import </span><span class="s1">numba</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">numba </span><span class="s2">= </span><span class="s1">import_optional_dependency</span><span class="s2">(</span><span class="s3">&quot;numba&quot;</span><span class="s2">)</span>
+    <span class="s1">nb_compat_func </span><span class="s2">= </span><span class="s1">jit_user_function</span><span class="s2">(</span><span class="s1">func</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">numba</span><span class="s2">.</span><span class="s1">jit</span><span class="s2">(</span><span class="s1">nopython</span><span class="s2">=</span><span class="s1">nopython</span><span class="s2">, </span><span class="s1">nogil</span><span class="s2">=</span><span class="s1">nogil</span><span class="s2">, </span><span class="s1">parallel</span><span class="s2">=</span><span class="s1">parallel</span><span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">nb_looper</span><span class="s2">(</span><span class="s1">values</span><span class="s2">, </span><span class="s1">axis</span><span class="s2">, *</span><span class="s1">args</span><span class="s2">):</span>
+        <span class="s4"># Operate on the first row/col in order to get</span>
+        <span class="s4"># the output shape</span>
+        <span class="s0">if </span><span class="s1">axis </span><span class="s2">== </span><span class="s5">0</span><span class="s2">:</span>
+            <span class="s1">first_elem </span><span class="s2">= </span><span class="s1">values</span><span class="s2">[:, </span><span class="s5">0</span><span class="s2">]</span>
+            <span class="s1">dim0 </span><span class="s2">= </span><span class="s1">values</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s5">1</span><span class="s2">]</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">first_elem </span><span class="s2">= </span><span class="s1">values</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]</span>
+            <span class="s1">dim0 </span><span class="s2">= </span><span class="s1">values</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]</span>
+        <span class="s1">res0 </span><span class="s2">= </span><span class="s1">nb_compat_func</span><span class="s2">(</span><span class="s1">first_elem</span><span class="s2">, *</span><span class="s1">args</span><span class="s2">)</span>
+        <span class="s4"># Use np.asarray to get shape for</span>
+        <span class="s4"># https://github.com/numba/numba/issues/4202#issuecomment-1185981507</span>
+        <span class="s4"># Use tuple concatenation; numba doesn't support tuple unpacking syntax</span>
+        <span class="s1">buf_shape </span><span class="s2">= (</span><span class="s1">dim0</span><span class="s2">,) + </span><span class="s1">np</span><span class="s2">.</span><span class="s1">atleast_1d</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">asarray</span><span class="s2">(</span><span class="s1">res0</span><span class="s2">)).</span><span class="s1">shape  </span><span class="s4"># noqa: RUF005</span>
+        <span class="s0">if </span><span class="s1">axis </span><span class="s2">== </span><span class="s5">0</span><span class="s2">:</span>
+            <span class="s1">buf_shape </span><span class="s2">= </span><span class="s1">buf_shape</span><span class="s2">[::-</span><span class="s5">1</span><span class="s2">]</span>
+        <span class="s1">buff </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">empty</span><span class="s2">(</span><span class="s1">buf_shape</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">axis </span><span class="s2">== </span><span class="s5">1</span><span class="s2">:</span>
+            <span class="s1">buff</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] = </span><span class="s1">res0</span>
+            <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">numba</span><span class="s2">.</span><span class="s1">prange</span><span class="s2">(</span><span class="s5">1</span><span class="s2">, </span><span class="s1">values</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]):</span>
+                <span class="s1">buff</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s1">nb_compat_func</span><span class="s2">(</span><span class="s1">values</span><span class="s2">[</span><span class="s1">i</span><span class="s2">], *</span><span class="s1">args</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">buff</span><span class="s2">[:, </span><span class="s5">0</span><span class="s2">] = </span><span class="s1">res0</span>
+            <span class="s0">for </span><span class="s1">j </span><span class="s0">in </span><span class="s1">numba</span><span class="s2">.</span><span class="s1">prange</span><span class="s2">(</span><span class="s5">1</span><span class="s2">, </span><span class="s1">values</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s5">1</span><span class="s2">]):</span>
+                <span class="s1">buff</span><span class="s2">[:, </span><span class="s1">j</span><span class="s2">] = </span><span class="s1">nb_compat_func</span><span class="s2">(</span><span class="s1">values</span><span class="s2">[:, </span><span class="s1">j</span><span class="s2">], *</span><span class="s1">args</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">buff</span>
+
+    <span class="s0">return </span><span class="s1">nb_looper</span>
+
+
+<span class="s2">@</span><span class="s1">functools</span><span class="s2">.</span><span class="s1">cache</span>
+<span class="s0">def </span><span class="s1">make_looper</span><span class="s2">(</span><span class="s1">func</span><span class="s2">, </span><span class="s1">result_dtype</span><span class="s2">, </span><span class="s1">is_grouped_kernel</span><span class="s2">, </span><span class="s1">nopython</span><span class="s2">, </span><span class="s1">nogil</span><span class="s2">, </span><span class="s1">parallel</span><span class="s2">):</span>
+    <span class="s0">if </span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+        <span class="s0">import </span><span class="s1">numba</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">numba </span><span class="s2">= </span><span class="s1">import_optional_dependency</span><span class="s2">(</span><span class="s3">&quot;numba&quot;</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">is_grouped_kernel</span><span class="s2">:</span>
+
+        <span class="s2">@</span><span class="s1">numba</span><span class="s2">.</span><span class="s1">jit</span><span class="s2">(</span><span class="s1">nopython</span><span class="s2">=</span><span class="s1">nopython</span><span class="s2">, </span><span class="s1">nogil</span><span class="s2">=</span><span class="s1">nogil</span><span class="s2">, </span><span class="s1">parallel</span><span class="s2">=</span><span class="s1">parallel</span><span class="s2">)</span>
+        <span class="s0">def </span><span class="s1">column_looper</span><span class="s2">(</span>
+            <span class="s1">values</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">,</span>
+            <span class="s1">labels</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">,</span>
+            <span class="s1">ngroups</span><span class="s2">: </span><span class="s1">int</span><span class="s2">,</span>
+            <span class="s1">min_periods</span><span class="s2">: </span><span class="s1">int</span><span class="s2">,</span>
+            <span class="s2">*</span><span class="s1">args</span><span class="s2">,</span>
+        <span class="s2">):</span>
+            <span class="s1">result </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">empty</span><span class="s2">((</span><span class="s1">values</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s5">0</span><span class="s2">], </span><span class="s1">ngroups</span><span class="s2">), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">result_dtype</span><span class="s2">)</span>
+            <span class="s1">na_positions </span><span class="s2">= {}</span>
+            <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">numba</span><span class="s2">.</span><span class="s1">prange</span><span class="s2">(</span><span class="s1">values</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]):</span>
+                <span class="s1">output</span><span class="s2">, </span><span class="s1">na_pos </span><span class="s2">= </span><span class="s1">func</span><span class="s2">(</span>
+                    <span class="s1">values</span><span class="s2">[</span><span class="s1">i</span><span class="s2">], </span><span class="s1">result_dtype</span><span class="s2">, </span><span class="s1">labels</span><span class="s2">, </span><span class="s1">ngroups</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">, *</span><span class="s1">args</span>
+                <span class="s2">)</span>
+                <span class="s1">result</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s1">output</span>
+                <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">na_pos</span><span class="s2">) &gt; </span><span class="s5">0</span><span class="s2">:</span>
+                    <span class="s1">na_positions</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">na_pos</span><span class="s2">)</span>
+            <span class="s0">return </span><span class="s1">result</span><span class="s2">, </span><span class="s1">na_positions</span>
+
+    <span class="s0">else</span><span class="s2">:</span>
+
+        <span class="s2">@</span><span class="s1">numba</span><span class="s2">.</span><span class="s1">jit</span><span class="s2">(</span><span class="s1">nopython</span><span class="s2">=</span><span class="s1">nopython</span><span class="s2">, </span><span class="s1">nogil</span><span class="s2">=</span><span class="s1">nogil</span><span class="s2">, </span><span class="s1">parallel</span><span class="s2">=</span><span class="s1">parallel</span><span class="s2">)</span>
+        <span class="s4"># error: Incompatible redefinition (redefinition with type</span>
+        <span class="s4"># &quot;Callable[[ndarray[Any, Any], ndarray[Any, Any], ndarray[Any, Any],</span>
+        <span class="s4"># int, VarArg(Any)], Any]&quot;, original type &quot;Callable[[ndarray[Any, Any],</span>
+        <span class="s4"># ndarray[Any, Any], int, int, VarArg(Any)], Any]&quot;)</span>
+        <span class="s0">def </span><span class="s1">column_looper</span><span class="s2">(  </span><span class="s4"># type: ignore[misc]</span>
+            <span class="s1">values</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">,</span>
+            <span class="s1">start</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">,</span>
+            <span class="s1">end</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">,</span>
+            <span class="s1">min_periods</span><span class="s2">: </span><span class="s1">int</span><span class="s2">,</span>
+            <span class="s2">*</span><span class="s1">args</span><span class="s2">,</span>
+        <span class="s2">):</span>
+            <span class="s1">result </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">empty</span><span class="s2">((</span><span class="s1">values</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s5">0</span><span class="s2">], </span><span class="s1">len</span><span class="s2">(</span><span class="s1">start</span><span class="s2">)), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">result_dtype</span><span class="s2">)</span>
+            <span class="s1">na_positions </span><span class="s2">= {}</span>
+            <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">numba</span><span class="s2">.</span><span class="s1">prange</span><span class="s2">(</span><span class="s1">values</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]):</span>
+                <span class="s1">output</span><span class="s2">, </span><span class="s1">na_pos </span><span class="s2">= </span><span class="s1">func</span><span class="s2">(</span>
+                    <span class="s1">values</span><span class="s2">[</span><span class="s1">i</span><span class="s2">], </span><span class="s1">result_dtype</span><span class="s2">, </span><span class="s1">start</span><span class="s2">, </span><span class="s1">end</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">, *</span><span class="s1">args</span>
+                <span class="s2">)</span>
+                <span class="s1">result</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s1">output</span>
+                <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">na_pos</span><span class="s2">) &gt; </span><span class="s5">0</span><span class="s2">:</span>
+                    <span class="s1">na_positions</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">na_pos</span><span class="s2">)</span>
+            <span class="s0">return </span><span class="s1">result</span><span class="s2">, </span><span class="s1">na_positions</span>
+
+    <span class="s0">return </span><span class="s1">column_looper</span>
+
+
+<span class="s1">default_dtype_mapping</span><span class="s2">: </span><span class="s1">dict</span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">] = {</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;int8&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;int16&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;int32&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;int64&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;uint8&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;uint16&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;uint32&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;uint64&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;float32&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;float64&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;complex64&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">complex128</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;complex128&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">complex128</span><span class="s2">,</span>
+<span class="s2">}</span>
+
+
+<span class="s4"># TODO: Preserve complex dtypes</span>
+
+<span class="s1">float_dtype_mapping</span><span class="s2">: </span><span class="s1">dict</span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">] = {</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;int8&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;int16&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;int32&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;int64&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;uint8&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;uint16&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;uint32&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;uint64&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;float32&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;float64&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;complex64&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;complex128&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+<span class="s2">}</span>
+
+<span class="s1">identity_dtype_mapping</span><span class="s2">: </span><span class="s1">dict</span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">] = {</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;int8&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int8</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;int16&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;int32&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int32</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;int64&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;uint8&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint8</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;uint16&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint16</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;uint32&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint32</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;uint64&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;float32&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float32</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;float64&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;complex64&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">complex64</span><span class="s2">,</span>
+    <span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s3">&quot;complex128&quot;</span><span class="s2">): </span><span class="s1">np</span><span class="s2">.</span><span class="s1">complex128</span><span class="s2">,</span>
+<span class="s2">}</span>
+
+
+<span class="s0">def </span><span class="s1">generate_shared_aggregator</span><span class="s2">(</span>
+    <span class="s1">func</span><span class="s2">: </span><span class="s1">Callable</span><span class="s2">[..., </span><span class="s1">Scalar</span><span class="s2">],</span>
+    <span class="s1">dtype_mapping</span><span class="s2">: </span><span class="s1">dict</span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">],</span>
+    <span class="s1">is_grouped_kernel</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+    <span class="s1">nopython</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+    <span class="s1">nogil</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+    <span class="s1">parallel</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+<span class="s2">):</span>
+    <span class="s6">&quot;&quot;&quot; 
+    Generate a Numba function that loops over the columns 2D object and applies 
+    a 1D numba kernel over each column. 
+ 
+    Parameters 
+    ---------- 
+    func : function 
+        aggregation function to be applied to each column 
+    dtype_mapping: dict or None 
+        If not None, maps a dtype to a result dtype. 
+        Otherwise, will fall back to default mapping. 
+    is_grouped_kernel: bool, default False 
+        Whether func operates using the group labels (True) 
+        or using starts/ends arrays 
+ 
+        If true, you also need to pass the number of groups to this function 
+    nopython : bool 
+        nopython to be passed into numba.jit 
+    nogil : bool 
+        nogil to be passed into numba.jit 
+    parallel : bool 
+        parallel to be passed into numba.jit 
+ 
+    Returns 
+    ------- 
+    Numba function 
+    &quot;&quot;&quot;</span>
+
+    <span class="s4"># A wrapper around the looper function,</span>
+    <span class="s4"># to dispatch based on dtype since numba is unable to do that in nopython mode</span>
+
+    <span class="s4"># It also post-processes the values by inserting nans where number of observations</span>
+    <span class="s4"># is less than min_periods</span>
+    <span class="s4"># Cannot do this in numba nopython mode</span>
+    <span class="s4"># (you'll run into type-unification error when you cast int -&gt; float)</span>
+    <span class="s0">def </span><span class="s1">looper_wrapper</span><span class="s2">(</span>
+        <span class="s1">values</span><span class="s2">,</span>
+        <span class="s1">start</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">end</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">labels</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">ngroups</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">min_periods</span><span class="s2">: </span><span class="s1">int </span><span class="s2">= </span><span class="s5">0</span><span class="s2">,</span>
+        <span class="s2">**</span><span class="s1">kwargs</span><span class="s2">,</span>
+    <span class="s2">):</span>
+        <span class="s1">result_dtype </span><span class="s2">= </span><span class="s1">dtype_mapping</span><span class="s2">[</span><span class="s1">values</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">]</span>
+        <span class="s1">column_looper </span><span class="s2">= </span><span class="s1">make_looper</span><span class="s2">(</span>
+            <span class="s1">func</span><span class="s2">, </span><span class="s1">result_dtype</span><span class="s2">, </span><span class="s1">is_grouped_kernel</span><span class="s2">, </span><span class="s1">nopython</span><span class="s2">, </span><span class="s1">nogil</span><span class="s2">, </span><span class="s1">parallel</span>
+        <span class="s2">)</span>
+        <span class="s4"># Need to unpack kwargs since numba only supports *args</span>
+        <span class="s0">if </span><span class="s1">is_grouped_kernel</span><span class="s2">:</span>
+            <span class="s1">result</span><span class="s2">, </span><span class="s1">na_positions </span><span class="s2">= </span><span class="s1">column_looper</span><span class="s2">(</span>
+                <span class="s1">values</span><span class="s2">, </span><span class="s1">labels</span><span class="s2">, </span><span class="s1">ngroups</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">, *</span><span class="s1">kwargs</span><span class="s2">.</span><span class="s1">values</span><span class="s2">()</span>
+            <span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">result</span><span class="s2">, </span><span class="s1">na_positions </span><span class="s2">= </span><span class="s1">column_looper</span><span class="s2">(</span>
+                <span class="s1">values</span><span class="s2">, </span><span class="s1">start</span><span class="s2">, </span><span class="s1">end</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">, *</span><span class="s1">kwargs</span><span class="s2">.</span><span class="s1">values</span><span class="s2">()</span>
+            <span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">result</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">kind </span><span class="s2">== </span><span class="s3">&quot;i&quot;</span><span class="s2">:</span>
+            <span class="s4"># Look if na_positions is not empty</span>
+            <span class="s4"># If so, convert the whole block</span>
+            <span class="s4"># This is OK since int dtype cannot hold nan,</span>
+            <span class="s4"># so if min_periods not satisfied for 1 col, it is not satisfied for</span>
+            <span class="s4"># all columns at that index</span>
+            <span class="s0">for </span><span class="s1">na_pos </span><span class="s0">in </span><span class="s1">na_positions</span><span class="s2">.</span><span class="s1">values</span><span class="s2">():</span>
+                <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">na_pos</span><span class="s2">) &gt; </span><span class="s5">0</span><span class="s2">:</span>
+                    <span class="s1">result </span><span class="s2">= </span><span class="s1">result</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s3">&quot;float64&quot;</span><span class="s2">)</span>
+                    <span class="s0">break</span>
+        <span class="s4"># TODO: Optimize this</span>
+        <span class="s0">for </span><span class="s1">i</span><span class="s2">, </span><span class="s1">na_pos </span><span class="s0">in </span><span class="s1">na_positions</span><span class="s2">.</span><span class="s1">items</span><span class="s2">():</span>
+            <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">na_pos</span><span class="s2">) &gt; </span><span class="s5">0</span><span class="s2">:</span>
+                <span class="s1">result</span><span class="s2">[</span><span class="s1">i</span><span class="s2">, </span><span class="s1">na_pos</span><span class="s2">] = </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span>
+        <span class="s0">return </span><span class="s1">result</span>
+
+    <span class="s0">return </span><span class="s1">looper_wrapper</span>
+</pre>
+</body>
+</html>

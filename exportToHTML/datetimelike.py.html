@@ -1,0 +1,1169 @@
+<html>
+<head>
+<title>datetimelike.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #2aacb8;}
+.s5 { color: #7a7e85;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+datetimelike.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Base and utility classes for tseries type pandas objects. 
+&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">from </span><span class="s1">abc </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">ABC</span><span class="s3">,</span>
+    <span class="s1">abstractmethod</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s3">,</span>
+    <span class="s1">Any</span><span class="s3">,</span>
+    <span class="s1">Literal</span><span class="s3">,</span>
+    <span class="s1">Self</span><span class="s3">,</span>
+    <span class="s1">cast</span><span class="s3">,</span>
+    <span class="s1">final</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">NaT</span><span class="s3">,</span>
+    <span class="s1">lib</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs</span><span class="s3">.</span><span class="s1">tslibs </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">BaseOffset</span><span class="s3">,</span>
+    <span class="s1">Resolution</span><span class="s3">,</span>
+    <span class="s1">Tick</span><span class="s3">,</span>
+    <span class="s1">Timedelta</span><span class="s3">,</span>
+    <span class="s1">Timestamp</span><span class="s3">,</span>
+    <span class="s1">parsing</span><span class="s3">,</span>
+    <span class="s1">to_offset</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs</span><span class="s3">.</span><span class="s1">tslibs</span><span class="s3">.</span><span class="s1">dtypes </span><span class="s2">import </span><span class="s1">abbrev_to_npy_unit</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">compat</span><span class="s3">.</span><span class="s1">numpy </span><span class="s2">import </span><span class="s1">function </span><span class="s2">as </span><span class="s1">nv</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">errors </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">InvalidIndexError</span><span class="s3">,</span>
+    <span class="s1">NullFrequencyError</span><span class="s3">,</span>
+    <span class="s1">OutOfBoundsDatetime</span><span class="s3">,</span>
+    <span class="s1">OutOfBoundsTimedelta</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">_decorators </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">cache_readonly</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">common </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">is_integer</span><span class="s3">,</span>
+    <span class="s1">is_list_like</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">concat </span><span class="s2">import </span><span class="s1">concat_compat</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">dtypes </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">CategoricalDtype</span><span class="s3">,</span>
+    <span class="s1">PeriodDtype</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">arrays </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">DatetimeArray</span><span class="s3">,</span>
+    <span class="s1">ExtensionArray</span><span class="s3">,</span>
+    <span class="s1">PeriodArray</span><span class="s3">,</span>
+    <span class="s1">TimedeltaArray</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">import </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">common </span><span class="s2">as </span><span class="s1">com</span>
+<span class="s2">import </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">indexes</span><span class="s3">.</span><span class="s1">base </span><span class="s2">as </span><span class="s1">ibase</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">indexes</span><span class="s3">.</span><span class="s1">base </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">Index</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">indexes</span><span class="s3">.</span><span class="s1">extension </span><span class="s2">import </span><span class="s1">NDArrayBackedExtensionIndex</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">indexes</span><span class="s3">.</span><span class="s1">range </span><span class="s2">import </span><span class="s1">RangeIndex</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">tools</span><span class="s3">.</span><span class="s1">timedeltas </span><span class="s2">import </span><span class="s1">to_timedelta</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">collections</span><span class="s3">.</span><span class="s1">abc </span><span class="s2">import </span><span class="s1">Sequence</span>
+    <span class="s2">from </span><span class="s1">datetime </span><span class="s2">import </span><span class="s1">datetime</span>
+
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_typing </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">Axis</span><span class="s3">,</span>
+        <span class="s1">JoinHow</span><span class="s3">,</span>
+        <span class="s1">TimeUnit</span><span class="s3">,</span>
+        <span class="s1">npt</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+    <span class="s2">from </span><span class="s1">pandas </span><span class="s2">import </span><span class="s1">CategoricalIndex</span>
+
+<span class="s1">_index_doc_kwargs </span><span class="s3">= </span><span class="s1">dict</span><span class="s3">(</span><span class="s1">ibase</span><span class="s3">.</span><span class="s1">_index_doc_kwargs</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">DatetimeIndexOpsMixin</span><span class="s3">(</span><span class="s1">NDArrayBackedExtensionIndex</span><span class="s3">, </span><span class="s1">ABC</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Common ops mixin to support a unified interface datetimelike Index. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">_can_hold_strings </span><span class="s3">= </span><span class="s2">False</span>
+    <span class="s1">_data</span><span class="s3">: </span><span class="s1">DatetimeArray </span><span class="s3">| </span><span class="s1">TimedeltaArray </span><span class="s3">| </span><span class="s1">PeriodArray</span>
+
+    <span class="s2">def </span><span class="s1">mean</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, *, </span><span class="s1">skipna</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">: </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s4">0</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return the mean value of the Array. 
+ 
+        Parameters 
+        ---------- 
+        skipna : bool, default True 
+            Whether to ignore any NaT elements. 
+        axis : int, optional, default 0 
+            Axis for the function to be applied on. 
+ 
+        Returns 
+        ------- 
+        scalar 
+            Timestamp or Timedelta. 
+ 
+        See Also 
+        -------- 
+        numpy.ndarray.mean : Returns the average of array elements along a given axis. 
+        Series.mean : Return the mean value in a Series. 
+ 
+        Notes 
+        ----- 
+        mean is only defined for Datetime and Timedelta dtypes, not for Period. 
+ 
+        Examples 
+        -------- 
+        For :class:`pandas.DatetimeIndex`: 
+ 
+        &gt;&gt;&gt; idx = pd.date_range(&quot;2001-01-01 00:00&quot;, periods=3) 
+        &gt;&gt;&gt; idx 
+        DatetimeIndex(['2001-01-01', '2001-01-02', '2001-01-03'], 
+                      dtype='datetime64[us]', freq='D') 
+        &gt;&gt;&gt; idx.mean() 
+        Timestamp('2001-01-02 00:00:00') 
+ 
+        For :class:`pandas.TimedeltaIndex`: 
+ 
+        &gt;&gt;&gt; tdelta_idx = pd.to_timedelta([1, 2, 3], unit=&quot;D&quot;) 
+        &gt;&gt;&gt; tdelta_idx 
+        TimedeltaIndex(['1 days', '2 days', '3 days'], 
+                        dtype='timedelta64[s]', freq=None) 
+        &gt;&gt;&gt; tdelta_idx.mean() 
+        Timedelta('2 days 00:00:00') 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">mean</span><span class="s3">(</span><span class="s1">skipna</span><span class="s3">=</span><span class="s1">skipna</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">=</span><span class="s1">axis</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">freq</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; BaseOffset </span><span class="s3">| </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return the frequency object if it is set, otherwise None. 
+ 
+        To learn more about the frequency strings, please see 
+        :ref:`this link&lt;timeseries.offset_aliases&gt;`. 
+ 
+        See Also 
+        -------- 
+        DatetimeIndex.freq : Return the frequency object if it is set, otherwise None. 
+        PeriodIndex.freq : Return the frequency object if it is set, otherwise None. 
+ 
+        Examples 
+        -------- 
+        &gt;&gt;&gt; datetimeindex = pd.date_range( 
+        ...     &quot;2022-02-22 02:22:22&quot;, periods=10, tz=&quot;America/Chicago&quot;, freq=&quot;h&quot; 
+        ... ) 
+        &gt;&gt;&gt; datetimeindex 
+        DatetimeIndex(['2022-02-22 02:22:22-06:00', '2022-02-22 03:22:22-06:00', 
+                       '2022-02-22 04:22:22-06:00', '2022-02-22 05:22:22-06:00', 
+                       '2022-02-22 06:22:22-06:00', '2022-02-22 07:22:22-06:00', 
+                       '2022-02-22 08:22:22-06:00', '2022-02-22 09:22:22-06:00', 
+                       '2022-02-22 10:22:22-06:00', '2022-02-22 11:22:22-06:00'], 
+                      dtype='datetime64[us, America/Chicago]', freq='h') 
+        &gt;&gt;&gt; datetimeindex.freq 
+        &lt;Hour&gt; 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">freq</span>
+
+    <span class="s3">@</span><span class="s1">freq</span><span class="s3">.</span><span class="s1">setter</span>
+    <span class="s2">def </span><span class="s1">freq</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">value</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s5"># error: Property &quot;freq&quot; defined in &quot;PeriodArray&quot; is read-only  [misc]</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">freq </span><span class="s3">= </span><span class="s1">value  </span><span class="s5"># type: ignore[misc]</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">asi8</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">]:</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">asi8</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">freqstr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return the frequency object as a string if it's set, otherwise None. 
+ 
+        See Also 
+        -------- 
+        DatetimeIndex.inferred_freq : Returns a string representing a frequency 
+            generated by infer_freq. 
+ 
+        Examples 
+        -------- 
+        For DatetimeIndex: 
+ 
+        &gt;&gt;&gt; idx = pd.DatetimeIndex([&quot;1/1/2020 10:00:00+00:00&quot;], freq=&quot;D&quot;) 
+        &gt;&gt;&gt; idx.freqstr 
+        'D' 
+ 
+        The frequency can be inferred if there are more than 2 points: 
+ 
+        &gt;&gt;&gt; idx = pd.DatetimeIndex( 
+        ...     [&quot;2018-01-01&quot;, &quot;2018-01-03&quot;, &quot;2018-01-05&quot;], freq=&quot;infer&quot; 
+        ... ) 
+        &gt;&gt;&gt; idx.freqstr 
+        '2D' 
+ 
+        For PeriodIndex: 
+ 
+        &gt;&gt;&gt; idx = pd.PeriodIndex([&quot;2023-1&quot;, &quot;2023-2&quot;, &quot;2023-3&quot;], freq=&quot;M&quot;) 
+        &gt;&gt;&gt; idx.freqstr 
+        'M' 
+        &quot;&quot;&quot;</span>
+        <span class="s2">from </span><span class="s1">pandas </span><span class="s2">import </span><span class="s1">PeriodIndex</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">freqstr </span><span class="s2">is not None and </span><span class="s1">isinstance</span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">, (</span><span class="s1">PeriodArray</span><span class="s3">, </span><span class="s1">PeriodIndex</span><span class="s3">)</span>
+        <span class="s3">):</span>
+            <span class="s1">freq </span><span class="s3">= </span><span class="s1">PeriodDtype</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">freq</span><span class="s3">).</span><span class="s1">_freqstr</span>
+            <span class="s2">return </span><span class="s1">freq</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">freqstr  </span><span class="s5"># type: ignore[return-value]</span>
+
+    <span class="s3">@</span><span class="s1">cache_readonly</span>
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">_resolution_obj</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; Resolution</span><span class="s3">: ...</span>
+
+    <span class="s3">@</span><span class="s1">cache_readonly</span>
+    <span class="s2">def </span><span class="s1">resolution</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Returns day, hour, minute, second, millisecond or microsecond 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">resolution</span>
+
+    <span class="s5"># ------------------------------------------------------------------------</span>
+
+    <span class="s3">@</span><span class="s1">cache_readonly</span>
+    <span class="s2">def </span><span class="s1">hasnans</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_hasna</span>
+
+    <span class="s2">def </span><span class="s1">equals</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">: </span><span class="s1">Any</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Determines if two Index objects contain the same elements. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">is_</span><span class="s3">(</span><span class="s1">other</span><span class="s3">):</span>
+            <span class="s2">return True</span>
+
+        <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">other</span><span class="s3">, </span><span class="s1">Index</span><span class="s3">):</span>
+            <span class="s2">return False</span>
+        <span class="s2">elif </span><span class="s1">other</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s2">in </span><span class="s6">&quot;iufc&quot;</span><span class="s3">:</span>
+            <span class="s2">return False</span>
+        <span class="s2">elif not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">other</span><span class="s3">, </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)):</span>
+            <span class="s1">should_try </span><span class="s3">= </span><span class="s2">False</span>
+            <span class="s1">inferable </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_infer_matches</span>
+            <span class="s2">if </span><span class="s1">other</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">object</span><span class="s3">:</span>
+                <span class="s1">should_try </span><span class="s3">= </span><span class="s1">other</span><span class="s3">.</span><span class="s1">inferred_type </span><span class="s2">in </span><span class="s1">inferable</span>
+            <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">other</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">CategoricalDtype</span><span class="s3">):</span>
+                <span class="s1">other </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s6">&quot;CategoricalIndex&quot;</span><span class="s3">, </span><span class="s1">other</span><span class="s3">)</span>
+                <span class="s1">should_try </span><span class="s3">= </span><span class="s1">other</span><span class="s3">.</span><span class="s1">categories</span><span class="s3">.</span><span class="s1">inferred_type </span><span class="s2">in </span><span class="s1">inferable</span>
+
+            <span class="s2">if </span><span class="s1">should_try</span><span class="s3">:</span>
+                <span class="s2">try</span><span class="s3">:</span>
+                    <span class="s1">other </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)(</span><span class="s1">other</span><span class="s3">)</span>
+                <span class="s2">except </span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">, </span><span class="s1">TypeError</span><span class="s3">, </span><span class="s1">OverflowError</span><span class="s3">):</span>
+                    <span class="s5"># e.g.</span>
+                    <span class="s5">#  ValueError -&gt; cannot parse str entry, or OutOfBoundsDatetime</span>
+                    <span class="s5">#  TypeError  -&gt; trying to convert IntervalIndex to DatetimeIndex</span>
+                    <span class="s5">#  OverflowError -&gt; Index([very_large_timedeltas])</span>
+                    <span class="s2">return False</span>
+
+        <span class="s2">if </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) != </span><span class="s1">type</span><span class="s3">(</span><span class="s1">other</span><span class="s3">):</span>
+            <span class="s2">return False</span>
+        <span class="s2">elif </span><span class="s1">self</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">other</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array_equal</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">asi8</span><span class="s3">, </span><span class="s1">other</span><span class="s3">.</span><span class="s1">asi8</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">== </span><span class="s6">&quot;M&quot; </span><span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tz </span><span class="s3">== </span><span class="s1">other</span><span class="s3">.</span><span class="s1">tz</span><span class="s3">) </span><span class="s2">or </span><span class="s1">self</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">== </span><span class="s6">&quot;m&quot;</span><span class="s3">:  </span><span class="s5"># type: ignore[attr-defined]</span>
+            <span class="s5"># different units, otherwise matching</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s5"># TODO: do this at the EA level?</span>
+                <span class="s1">left</span><span class="s3">, </span><span class="s1">right </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_ensure_matching_resos</span><span class="s3">(</span><span class="s1">other</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">)  </span><span class="s5"># type: ignore[union-attr]</span>
+            <span class="s2">except </span><span class="s3">(</span><span class="s1">OutOfBoundsDatetime</span><span class="s3">, </span><span class="s1">OutOfBoundsTimedelta</span><span class="s3">):</span>
+                <span class="s2">return False</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array_equal</span><span class="s3">(</span><span class="s1">left</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s6">&quot;i8&quot;</span><span class="s3">), </span><span class="s1">right</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s6">&quot;i8&quot;</span><span class="s3">))</span>
+        <span class="s2">return False</span>
+
+    <span class="s2">def </span><span class="s1">__contains__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">key</span><span class="s3">: </span><span class="s1">Any</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return a boolean indicating whether the provided key is in the index. 
+ 
+        Parameters 
+        ---------- 
+        key : label 
+            The key to check if it is present in the index. 
+ 
+        Returns 
+        ------- 
+        bool 
+            Whether the key search is in the index. 
+ 
+        Raises 
+        ------ 
+        TypeError 
+            If the key is not hashable. 
+ 
+        See Also 
+        -------- 
+        Index.isin : Returns an ndarray of boolean dtype indicating whether the 
+            list-like key is in the index. 
+ 
+        Examples 
+        -------- 
+        &gt;&gt;&gt; idx = pd.Index([1, 2, 3, 4]) 
+        &gt;&gt;&gt; idx 
+        Index([1, 2, 3, 4], dtype='int64') 
+        &gt;&gt;&gt; 2 in idx 
+        True 
+        &gt;&gt;&gt; 6 in idx 
+        False 
+        &quot;&quot;&quot;</span>
+        <span class="s1">hash</span><span class="s3">(</span><span class="s1">key</span><span class="s3">)</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">get_loc</span><span class="s3">(</span><span class="s1">key</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s3">(</span><span class="s1">KeyError</span><span class="s3">, </span><span class="s1">TypeError</span><span class="s3">, </span><span class="s1">ValueError</span><span class="s3">, </span><span class="s1">InvalidIndexError</span><span class="s3">):</span>
+            <span class="s2">return False</span>
+        <span class="s2">return True</span>
+
+    <span class="s2">def </span><span class="s1">_convert_tolerance</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">tolerance</span><span class="s3">, </span><span class="s1">target</span><span class="s3">):</span>
+        <span class="s1">tolerance </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">to_timedelta</span><span class="s3">(</span><span class="s1">tolerance</span><span class="s3">).</span><span class="s1">to_numpy</span><span class="s3">())</span>
+        <span class="s2">return </span><span class="s1">super</span><span class="s3">().</span><span class="s1">_convert_tolerance</span><span class="s3">(</span><span class="s1">tolerance</span><span class="s3">, </span><span class="s1">target</span><span class="s3">)</span>
+
+    <span class="s5"># --------------------------------------------------------------------</span>
+    <span class="s5"># Rendering Methods</span>
+    <span class="s1">_default_na_rep </span><span class="s3">= </span><span class="s6">&quot;NaT&quot;</span>
+
+    <span class="s2">def </span><span class="s1">_format_with_header</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, *, </span><span class="s1">header</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">], </span><span class="s1">na_rep</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">date_format</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span>
+    <span class="s3">) </span><span class="s1">-&gt; list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">]:</span>
+        <span class="s5"># TODO: not reached in tests 2023-10-11</span>
+        <span class="s5"># matches base class except for whitespace padding and date_format</span>
+        <span class="s2">return </span><span class="s1">header </span><span class="s3">+ </span><span class="s1">list</span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_get_values_for_csv</span><span class="s3">(</span><span class="s1">na_rep</span><span class="s3">=</span><span class="s1">na_rep</span><span class="s3">, </span><span class="s1">date_format</span><span class="s3">=</span><span class="s1">date_format</span><span class="s3">)</span>
+        <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">_formatter_func</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_formatter</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">_format_attrs</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return a list of tuples of the (attr,formatted_value). 
+        &quot;&quot;&quot;</span>
+        <span class="s1">attrs </span><span class="s3">= </span><span class="s1">super</span><span class="s3">().</span><span class="s1">_format_attrs</span><span class="s3">()</span>
+        <span class="s2">for </span><span class="s1">attrib </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_attributes</span><span class="s3">:</span>
+            <span class="s5"># iterating over _attributes prevents us from doing this for PeriodIndex</span>
+            <span class="s2">if </span><span class="s1">attrib </span><span class="s3">== </span><span class="s6">&quot;freq&quot;</span><span class="s3">:</span>
+                <span class="s1">freq </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freqstr</span>
+                <span class="s2">if </span><span class="s1">freq </span><span class="s2">is not None</span><span class="s3">:</span>
+                    <span class="s1">freq </span><span class="s3">= </span><span class="s1">repr</span><span class="s3">(</span><span class="s1">freq</span><span class="s3">)  </span><span class="s5"># e.g. D -&gt; 'D'</span>
+                <span class="s1">attrs</span><span class="s3">.</span><span class="s1">append</span><span class="s3">((</span><span class="s6">&quot;freq&quot;</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">))</span>
+        <span class="s2">return </span><span class="s1">attrs</span>
+
+    <span class="s2">def </span><span class="s1">_summary</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s2">None</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return a summarized representation. 
+ 
+        Parameters 
+        ---------- 
+        name : str 
+            name to use in the summary representation 
+ 
+        Returns 
+        ------- 
+        String with a summarized representation of the index 
+        &quot;&quot;&quot;</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">super</span><span class="s3">().</span><span class="s1">_summary</span><span class="s3">(</span><span class="s1">name</span><span class="s3">=</span><span class="s1">name</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span><span class="s3">:</span>
+            <span class="s1">result </span><span class="s3">+= </span><span class="s6">f&quot;</span><span class="s2">\n</span><span class="s6">Freq: </span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">freqstr</span><span class="s2">}</span><span class="s6">&quot;</span>
+
+        <span class="s2">return </span><span class="s1">result</span>
+
+    <span class="s5"># --------------------------------------------------------------------</span>
+    <span class="s5"># Indexing Methods</span>
+
+    <span class="s3">@</span><span class="s1">final</span>
+    <span class="s2">def </span><span class="s1">_can_partial_date_slice</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">reso</span><span class="s3">: </span><span class="s1">Resolution</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s5"># e.g. test_getitem_setitem_periodindex</span>
+        <span class="s5"># History of conversation GH#3452, GH#3931, GH#2369, GH#14826</span>
+        <span class="s2">return </span><span class="s1">reso </span><span class="s3">&gt; </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_resolution_obj</span>
+        <span class="s5"># NB: for DTI/PI, not TDI</span>
+
+    <span class="s2">def </span><span class="s1">_parsed_string_to_bounds</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">reso</span><span class="s3">: </span><span class="s1">Resolution</span><span class="s3">, </span><span class="s1">parsed</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">NotImplementedError</span>
+
+    <span class="s2">def </span><span class="s1">_parse_with_reso</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">label</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">datetime</span><span class="s3">, </span><span class="s1">Resolution</span><span class="s3">]:</span>
+        <span class="s5"># overridden by TimedeltaIndex</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq </span><span class="s2">is None or </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span><span class="s3">, </span><span class="s6">&quot;rule_code&quot;</span><span class="s3">):</span>
+                <span class="s1">freq </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span>
+        <span class="s2">except </span><span class="s1">NotImplementedError</span><span class="s3">:</span>
+            <span class="s1">freq </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s6">&quot;freqstr&quot;</span><span class="s3">, </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s6">&quot;inferred_freq&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">))</span>
+
+        <span class="s1">freqstr</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None</span>
+        <span class="s2">if </span><span class="s1">freq </span><span class="s2">is not None and not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">freq</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+            <span class="s1">freqstr </span><span class="s3">= </span><span class="s1">freq</span><span class="s3">.</span><span class="s1">rule_code</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">freqstr </span><span class="s3">= </span><span class="s1">freq</span>
+
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">label</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">str_</span><span class="s3">):</span>
+            <span class="s5"># GH#45580</span>
+            <span class="s1">label </span><span class="s3">= </span><span class="s1">str</span><span class="s3">(</span><span class="s1">label</span><span class="s3">)</span>
+
+        <span class="s1">parsed</span><span class="s3">, </span><span class="s1">reso_str </span><span class="s3">= </span><span class="s1">parsing</span><span class="s3">.</span><span class="s1">parse_datetime_string_with_reso</span><span class="s3">(</span><span class="s1">label</span><span class="s3">, </span><span class="s1">freqstr</span><span class="s3">)</span>
+        <span class="s1">reso </span><span class="s3">= </span><span class="s1">Resolution</span><span class="s3">.</span><span class="s1">from_attrname</span><span class="s3">(</span><span class="s1">reso_str</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">parsed</span><span class="s3">, </span><span class="s1">reso</span>
+
+    <span class="s2">def </span><span class="s1">_get_string_slice</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">key</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; slice </span><span class="s3">| </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">]:</span>
+        <span class="s5"># overridden by TimedeltaIndex</span>
+        <span class="s1">parsed</span><span class="s3">, </span><span class="s1">reso </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_parse_with_reso</span><span class="s3">(</span><span class="s1">key</span><span class="s3">)</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_partial_date_slice</span><span class="s3">(</span><span class="s1">reso</span><span class="s3">, </span><span class="s1">parsed</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s1">KeyError </span><span class="s2">as </span><span class="s1">err</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">KeyError</span><span class="s3">(</span><span class="s1">key</span><span class="s3">) </span><span class="s2">from </span><span class="s1">err</span>
+
+    <span class="s3">@</span><span class="s1">final</span>
+    <span class="s2">def </span><span class="s1">_partial_date_slice</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">reso</span><span class="s3">: </span><span class="s1">Resolution</span><span class="s3">,</span>
+        <span class="s1">parsed</span><span class="s3">: </span><span class="s1">datetime</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; slice </span><span class="s3">| </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">]:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Parameters 
+        ---------- 
+        reso : Resolution 
+        parsed : datetime 
+ 
+        Returns 
+        ------- 
+        slice or ndarray[intp] 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_can_partial_date_slice</span><span class="s3">(</span><span class="s1">reso</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span>
+
+        <span class="s1">t1</span><span class="s3">, </span><span class="s1">t2 </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_parsed_string_to_bounds</span><span class="s3">(</span><span class="s1">reso</span><span class="s3">, </span><span class="s1">parsed</span><span class="s3">)</span>
+        <span class="s1">vals </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_ndarray</span>
+        <span class="s1">unbox </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_unbox</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">is_monotonic_increasing</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s2">and </span><span class="s3">(</span>
+                <span class="s3">(</span><span class="s1">t1 </span><span class="s3">&lt; </span><span class="s1">self</span><span class="s3">[</span><span class="s4">0</span><span class="s3">] </span><span class="s2">and </span><span class="s1">t2 </span><span class="s3">&lt; </span><span class="s1">self</span><span class="s3">[</span><span class="s4">0</span><span class="s3">]) </span><span class="s2">or </span><span class="s3">(</span><span class="s1">t1 </span><span class="s3">&gt; </span><span class="s1">self</span><span class="s3">[-</span><span class="s4">1</span><span class="s3">] </span><span class="s2">and </span><span class="s1">t2 </span><span class="s3">&gt; </span><span class="s1">self</span><span class="s3">[-</span><span class="s4">1</span><span class="s3">])</span>
+            <span class="s3">):</span>
+                <span class="s5"># we are out of range</span>
+                <span class="s2">raise </span><span class="s1">KeyError</span>
+
+            <span class="s5"># TODO: does this depend on being monotonic _increasing_?</span>
+
+            <span class="s5"># a monotonic (sorted) series can be sliced</span>
+            <span class="s1">left </span><span class="s3">= </span><span class="s1">vals</span><span class="s3">.</span><span class="s1">searchsorted</span><span class="s3">(</span><span class="s1">unbox</span><span class="s3">(</span><span class="s1">t1</span><span class="s3">), </span><span class="s1">side</span><span class="s3">=</span><span class="s6">&quot;left&quot;</span><span class="s3">)</span>
+            <span class="s1">right </span><span class="s3">= </span><span class="s1">vals</span><span class="s3">.</span><span class="s1">searchsorted</span><span class="s3">(</span><span class="s1">unbox</span><span class="s3">(</span><span class="s1">t2</span><span class="s3">), </span><span class="s1">side</span><span class="s3">=</span><span class="s6">&quot;right&quot;</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">slice</span><span class="s3">(</span><span class="s1">left</span><span class="s3">, </span><span class="s1">right</span><span class="s3">)</span>
+
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">lhs_mask </span><span class="s3">= </span><span class="s1">vals </span><span class="s3">&gt;= </span><span class="s1">unbox</span><span class="s3">(</span><span class="s1">t1</span><span class="s3">)</span>
+            <span class="s1">rhs_mask </span><span class="s3">= </span><span class="s1">vals </span><span class="s3">&lt;= </span><span class="s1">unbox</span><span class="s3">(</span><span class="s1">t2</span><span class="s3">)</span>
+
+            <span class="s5"># try to find the dates</span>
+            <span class="s2">return </span><span class="s3">(</span><span class="s1">lhs_mask </span><span class="s3">&amp; </span><span class="s1">rhs_mask</span><span class="s3">).</span><span class="s1">nonzero</span><span class="s3">()[</span><span class="s4">0</span><span class="s3">]</span>
+
+    <span class="s2">def </span><span class="s1">_maybe_cast_slice_bound</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">label</span><span class="s3">, </span><span class="s1">side</span><span class="s3">: </span><span class="s1">str</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        If label is a string, cast it to scalar type according to resolution. 
+ 
+        Parameters 
+        ---------- 
+        label : object 
+        side : {'left', 'right'} 
+ 
+        Returns 
+        ------- 
+        label : object 
+ 
+        Notes 
+        ----- 
+        Value of `side` parameter should be validated in caller. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">label</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">parsed</span><span class="s3">, </span><span class="s1">reso </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_parse_with_reso</span><span class="s3">(</span><span class="s1">label</span><span class="s3">)</span>
+            <span class="s2">except </span><span class="s1">ValueError </span><span class="s2">as </span><span class="s1">err</span><span class="s3">:</span>
+                <span class="s5"># DTI -&gt; parsing.DateParseError</span>
+                <span class="s5"># TDI -&gt; 'unit abbreviation w/o a number'</span>
+                <span class="s5"># PI -&gt; string cannot be parsed as datetime-like</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_raise_invalid_indexer</span><span class="s3">(</span><span class="s6">&quot;slice&quot;</span><span class="s3">, </span><span class="s1">label</span><span class="s3">, </span><span class="s1">err</span><span class="s3">)</span>
+
+            <span class="s1">lower</span><span class="s3">, </span><span class="s1">upper </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_parsed_string_to_bounds</span><span class="s3">(</span><span class="s1">reso</span><span class="s3">, </span><span class="s1">parsed</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">lower </span><span class="s2">if </span><span class="s1">side </span><span class="s3">== </span><span class="s6">&quot;left&quot; </span><span class="s2">else </span><span class="s1">upper</span>
+        <span class="s2">elif not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">label</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_recognized_scalars</span><span class="s3">):</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_raise_invalid_indexer</span><span class="s3">(</span><span class="s6">&quot;slice&quot;</span><span class="s3">, </span><span class="s1">label</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">label</span>
+
+    <span class="s5"># --------------------------------------------------------------------</span>
+    <span class="s5"># Arithmetic Methods</span>
+
+    <span class="s2">def </span><span class="s1">shift</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s4">1</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s2">None</span><span class="s3">) </span><span class="s1">-&gt; Self</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Shift index by desired number of time frequency increments. 
+ 
+        This method is for shifting the values of datetime-like indexes 
+        by a specified time increment a given number of times. 
+ 
+        Parameters 
+        ---------- 
+        periods : int, default 1 
+            Number of periods (or increments) to shift by, 
+            can be positive or negative. 
+        freq : pandas.DateOffset, pandas.Timedelta or string, optional 
+            Frequency increment to shift by. 
+            If None, the index is shifted by its own `freq` attribute. 
+            Offset aliases are valid strings, e.g., 'D', 'W', 'M' etc. 
+ 
+        Returns 
+        ------- 
+        pandas.DatetimeIndex 
+            Shifted index. 
+ 
+        See Also 
+        -------- 
+        Index.shift : Shift values of Index. 
+        PeriodIndex.shift : Shift values of PeriodIndex. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">raise </span><span class="s1">NotImplementedError</span>
+
+    <span class="s5"># --------------------------------------------------------------------</span>
+
+    <span class="s2">def </span><span class="s1">_maybe_cast_listlike_indexer</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">keyarr</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Analogue to maybe_cast_indexer for get_indexer instead of get_loc. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">res </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_validate_listlike</span><span class="s3">(</span><span class="s1">keyarr</span><span class="s3">, </span><span class="s1">allow_object</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">, </span><span class="s1">TypeError</span><span class="s3">):</span>
+            <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">keyarr</span><span class="s3">, </span><span class="s1">ExtensionArray</span><span class="s3">):</span>
+                <span class="s5"># e.g. we don't want to cast DTA to ndarray[object]</span>
+                <span class="s1">res </span><span class="s3">= </span><span class="s1">com</span><span class="s3">.</span><span class="s1">asarray_tuplesafe</span><span class="s3">(</span><span class="s1">keyarr</span><span class="s3">)</span>
+                <span class="s5"># TODO: com.asarray_tuplesafe shouldn't cast e.g. DatetimeArray</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">res </span><span class="s3">= </span><span class="s1">keyarr</span>
+        <span class="s2">return </span><span class="s1">Index</span><span class="s3">(</span><span class="s1">res</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">res</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">DatetimeTimedeltaMixin</span><span class="s3">(</span><span class="s1">DatetimeIndexOpsMixin</span><span class="s3">, </span><span class="s1">ABC</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Mixin class for methods shared by DatetimeIndex and TimedeltaIndex, 
+    but not PeriodIndex 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">_data</span><span class="s3">: </span><span class="s1">DatetimeArray </span><span class="s3">| </span><span class="s1">TimedeltaArray</span>
+    <span class="s1">_comparables </span><span class="s3">= [</span><span class="s6">&quot;name&quot;</span><span class="s3">, </span><span class="s6">&quot;freq&quot;</span><span class="s3">]</span>
+    <span class="s1">_attributes </span><span class="s3">= [</span><span class="s6">&quot;name&quot;</span><span class="s3">, </span><span class="s6">&quot;freq&quot;</span><span class="s3">]</span>
+
+    <span class="s5"># Compat for frequency inference, see GH#23789</span>
+    <span class="s1">_is_monotonic_increasing </span><span class="s3">= </span><span class="s1">Index</span><span class="s3">.</span><span class="s1">is_monotonic_increasing</span>
+    <span class="s1">_is_monotonic_decreasing </span><span class="s3">= </span><span class="s1">Index</span><span class="s3">.</span><span class="s1">is_monotonic_decreasing</span>
+    <span class="s1">_is_unique </span><span class="s3">= </span><span class="s1">Index</span><span class="s3">.</span><span class="s1">is_unique</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">unit</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; TimeUnit</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">unit</span>
+
+    <span class="s2">def </span><span class="s1">as_unit</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">: </span><span class="s1">TimeUnit</span><span class="s3">) </span><span class="s1">-&gt; Self</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Convert to a dtype with the given unit resolution. 
+ 
+        This method is for converting the dtype of a ``DatetimeIndex`` or 
+        ``TimedeltaIndex`` to a new dtype with the given unit 
+        resolution/precision. 
+ 
+        Parameters 
+        ---------- 
+        unit : {'s', 'ms', 'us', 'ns'} 
+ 
+        Returns 
+        ------- 
+        same type as self 
+            Converted to the specified unit. 
+ 
+        See Also 
+        -------- 
+        Timestamp.as_unit : Convert to the given unit. 
+        Timedelta.as_unit : Convert to the given unit. 
+        DatetimeIndex.as_unit : Convert to the given unit. 
+        TimedeltaIndex.as_unit : Convert to the given unit. 
+ 
+        Examples 
+        -------- 
+        For :class:`pandas.DatetimeIndex`: 
+ 
+        &gt;&gt;&gt; idx = pd.DatetimeIndex([&quot;2020-01-02 01:02:03.004005006&quot;]) 
+        &gt;&gt;&gt; idx 
+        DatetimeIndex(['2020-01-02 01:02:03.004005006'], 
+                      dtype='datetime64[ns]', freq=None) 
+        &gt;&gt;&gt; idx.as_unit(&quot;s&quot;) 
+        DatetimeIndex(['2020-01-02 01:02:03'], dtype='datetime64[s]', freq=None) 
+ 
+        For :class:`pandas.TimedeltaIndex`: 
+ 
+        &gt;&gt;&gt; tdelta_idx = pd.to_timedelta([&quot;1 day 3 min 2 us 42 ns&quot;]) 
+        &gt;&gt;&gt; tdelta_idx 
+        TimedeltaIndex(['1 days 00:03:00.000002042'], 
+                        dtype='timedelta64[ns]', freq=None) 
+        &gt;&gt;&gt; tdelta_idx.as_unit(&quot;s&quot;) 
+        TimedeltaIndex(['1 days 00:03:00'], dtype='timedelta64[s]', freq=None) 
+        &quot;&quot;&quot;</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">as_unit</span><span class="s3">(</span><span class="s1">unit</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">).</span><span class="s1">_simple_new</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">name</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_with_freq</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">):</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_with_freq</span><span class="s3">(</span><span class="s1">freq</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">).</span><span class="s1">_simple_new</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_name</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">values</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">:</span>
+        <span class="s5"># NB: For Datetime64TZ this is lossy</span>
+        <span class="s1">data </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_ndarray</span>
+        <span class="s1">data </span><span class="s3">= </span><span class="s1">data</span><span class="s3">.</span><span class="s1">view</span><span class="s3">()</span>
+        <span class="s1">data</span><span class="s3">.</span><span class="s1">flags</span><span class="s3">.</span><span class="s1">writeable </span><span class="s3">= </span><span class="s2">False</span>
+        <span class="s2">return </span><span class="s1">data</span>
+
+    <span class="s2">def </span><span class="s1">shift</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s4">1</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s2">None</span><span class="s3">) </span><span class="s1">-&gt; Self</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Shift index by desired number of time frequency increments. 
+        This method is for shifting the values of datetime-like indexes 
+        by a specified time increment a given number of times. 
+ 
+        Parameters 
+        ---------- 
+        periods : int, default 1 
+            Number of periods (or increments) to shift by, 
+            can be positive or negative. 
+        freq : pandas.DateOffset, pandas.Timedelta or string, optional 
+            Frequency increment to shift by. 
+            If None, the index is shifted by its own `freq` attribute. 
+            Offset aliases are valid strings, e.g., 'D', 'W', 'M' etc. 
+ 
+        Returns 
+        ------- 
+        pandas.DatetimeIndex 
+            Shifted index. 
+ 
+        See Also 
+        -------- 
+        Index.shift : Shift values of Index. 
+        PeriodIndex.shift : Shift values of PeriodIndex. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">freq </span><span class="s2">is not None and </span><span class="s1">freq </span><span class="s3">!= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">freq</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+                <span class="s1">freq </span><span class="s3">= </span><span class="s1">to_offset</span><span class="s3">(</span><span class="s1">freq</span><span class="s3">)</span>
+            <span class="s1">offset </span><span class="s3">= </span><span class="s1">periods </span><span class="s3">* </span><span class="s1">freq</span>
+            <span class="s2">return </span><span class="s1">self </span><span class="s3">+ </span><span class="s1">offset</span>
+
+        <span class="s2">if </span><span class="s1">periods </span><span class="s3">== </span><span class="s4">0 </span><span class="s2">or </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) == </span><span class="s4">0</span><span class="s3">:</span>
+            <span class="s5"># GH#14811 empty case</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">NullFrequencyError</span><span class="s3">(</span><span class="s6">&quot;Cannot shift with no freq&quot;</span><span class="s3">)</span>
+
+        <span class="s1">start </span><span class="s3">= </span><span class="s1">self</span><span class="s3">[</span><span class="s4">0</span><span class="s3">] + </span><span class="s1">periods </span><span class="s3">* </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span>
+        <span class="s1">end </span><span class="s3">= </span><span class="s1">self</span><span class="s3">[-</span><span class="s4">1</span><span class="s3">] + </span><span class="s1">periods </span><span class="s3">* </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span>
+
+        <span class="s5"># Note: in the DatetimeTZ case, _generate_range will infer the</span>
+        <span class="s5">#  appropriate timezone from `start` and `end`, so tz does not need</span>
+        <span class="s5">#  to be passed explicitly.</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_generate_range</span><span class="s3">(</span>
+            <span class="s1">start</span><span class="s3">=</span><span class="s1">start</span><span class="s3">, </span><span class="s1">end</span><span class="s3">=</span><span class="s1">end</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">unit</span>
+        <span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">).</span><span class="s1">_simple_new</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">name</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">cache_readonly</span>
+    <span class="s2">def </span><span class="s1">inferred_freq</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; str </span><span class="s3">| </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return the inferred frequency of the index. 
+ 
+        Returns 
+        ------- 
+        str or None 
+            A string representing a frequency generated by ``infer_freq``. 
+            Returns ``None`` if the frequency cannot be inferred. 
+ 
+        See Also 
+        -------- 
+        DatetimeIndex.freqstr : Return the frequency object as a string if it's set, 
+            otherwise ``None``. 
+ 
+        Examples 
+        -------- 
+        For ``DatetimeIndex``: 
+ 
+        &gt;&gt;&gt; idx = pd.DatetimeIndex([&quot;2018-01-01&quot;, &quot;2018-01-03&quot;, &quot;2018-01-05&quot;]) 
+        &gt;&gt;&gt; idx.inferred_freq 
+        '2D' 
+ 
+        For ``TimedeltaIndex``: 
+ 
+        &gt;&gt;&gt; tdelta_idx = pd.to_timedelta([&quot;0 days&quot;, &quot;10 days&quot;, &quot;20 days&quot;]) 
+        &gt;&gt;&gt; tdelta_idx 
+        TimedeltaIndex(['0 days', '10 days', '20 days'], 
+                       dtype='timedelta64[us]', freq=None) 
+        &gt;&gt;&gt; tdelta_idx.inferred_freq 
+        '10D' 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">inferred_freq</span>
+
+    <span class="s5"># --------------------------------------------------------------------</span>
+    <span class="s5"># Set Operation Methods</span>
+
+    <span class="s3">@</span><span class="s1">cache_readonly</span>
+    <span class="s2">def </span><span class="s1">_as_range_index</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; RangeIndex</span><span class="s3">:</span>
+        <span class="s5"># Convert our i8 representations to RangeIndex</span>
+        <span class="s5"># Caller is responsible for checking isinstance(self.freq, Tick)</span>
+        <span class="s1">freq </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s1">Tick</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span><span class="s3">)</span>
+        <span class="s1">tick </span><span class="s3">= </span><span class="s1">Timedelta</span><span class="s3">(</span><span class="s1">freq</span><span class="s3">).</span><span class="s1">as_unit</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">unit</span><span class="s3">).</span><span class="s1">_value</span>
+        <span class="s1">rng </span><span class="s3">= </span><span class="s1">range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">[</span><span class="s4">0</span><span class="s3">].</span><span class="s1">_value</span><span class="s3">, </span><span class="s1">self</span><span class="s3">[-</span><span class="s4">1</span><span class="s3">].</span><span class="s1">_value </span><span class="s3">+ </span><span class="s1">tick</span><span class="s3">, </span><span class="s1">tick</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">RangeIndex</span><span class="s3">(</span><span class="s1">rng</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_can_range_setop</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span><span class="s3">, </span><span class="s1">Tick</span><span class="s3">) </span><span class="s2">and </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">other</span><span class="s3">.</span><span class="s1">freq</span><span class="s3">, </span><span class="s1">Tick</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_wrap_range_setop</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">, </span><span class="s1">res_i8</span><span class="s3">) </span><span class="s1">-&gt; Self</span><span class="s3">:</span>
+        <span class="s1">new_freq </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">if not </span><span class="s1">len</span><span class="s3">(</span><span class="s1">res_i8</span><span class="s3">):</span>
+            <span class="s5"># RangeIndex defaults to step=1, which we don't want.</span>
+            <span class="s1">new_freq </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span>
+        <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">res_i8</span><span class="s3">, </span><span class="s1">RangeIndex</span><span class="s3">):</span>
+            <span class="s1">new_freq </span><span class="s3">= </span><span class="s1">to_offset</span><span class="s3">(</span>
+                <span class="s1">Timedelta</span><span class="s3">(</span><span class="s1">res_i8</span><span class="s3">.</span><span class="s1">step</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">unit</span><span class="s3">).</span><span class="s1">as_unit</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">unit</span><span class="s3">)</span>
+            <span class="s3">)</span>
+
+        <span class="s5"># TODO(GH#41493): we cannot just do</span>
+        <span class="s5">#  type(self._data)(res_i8.values, dtype=self.dtype, freq=new_freq)</span>
+        <span class="s5"># because test_setops_preserve_freq fails with _validate_frequency raising.</span>
+        <span class="s5"># This raising is incorrect, as 'on_freq' is incorrect. This will</span>
+        <span class="s5"># be fixed by GH#41493</span>
+        <span class="s1">res_values </span><span class="s3">= </span><span class="s1">res_i8</span><span class="s3">.</span><span class="s1">values</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_ndarray</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">).</span><span class="s1">_simple_new</span><span class="s3">(</span>
+            <span class="s5"># error: Argument &quot;dtype&quot; to &quot;_simple_new&quot; of &quot;DatetimeArray&quot; has</span>
+            <span class="s5"># incompatible type &quot;Union[dtype[Any], ExtensionDtype]&quot;; expected</span>
+            <span class="s5"># &quot;Union[dtype[datetime64], DatetimeTZDtype]&quot;</span>
+            <span class="s1">res_values</span><span class="s3">,</span>
+            <span class="s1">dtype</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">,  </span><span class="s5"># type: ignore[arg-type]</span>
+            <span class="s1">freq</span><span class="s3">=</span><span class="s1">new_freq</span><span class="s3">,  </span><span class="s5"># type: ignore[arg-type]</span>
+        <span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">cast</span><span class="s3">(</span><span class="s6">&quot;Self&quot;</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_wrap_setop_result</span><span class="s3">(</span><span class="s1">other</span><span class="s3">, </span><span class="s1">result</span><span class="s3">))</span>
+
+    <span class="s2">def </span><span class="s1">_range_intersect</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">) </span><span class="s1">-&gt; Self</span><span class="s3">:</span>
+        <span class="s5"># Dispatch to RangeIndex intersection logic.</span>
+        <span class="s1">left </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_as_range_index</span>
+        <span class="s1">right </span><span class="s3">= </span><span class="s1">other</span><span class="s3">.</span><span class="s1">_as_range_index</span>
+        <span class="s1">res_i8 </span><span class="s3">= </span><span class="s1">left</span><span class="s3">.</span><span class="s1">intersection</span><span class="s3">(</span><span class="s1">right</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">=</span><span class="s1">sort</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_wrap_range_setop</span><span class="s3">(</span><span class="s1">other</span><span class="s3">, </span><span class="s1">res_i8</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_range_union</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">) </span><span class="s1">-&gt; Self</span><span class="s3">:</span>
+        <span class="s5"># Dispatch to RangeIndex union logic.</span>
+        <span class="s1">left </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_as_range_index</span>
+        <span class="s1">right </span><span class="s3">= </span><span class="s1">other</span><span class="s3">.</span><span class="s1">_as_range_index</span>
+        <span class="s1">res_i8 </span><span class="s3">= </span><span class="s1">left</span><span class="s3">.</span><span class="s1">union</span><span class="s3">(</span><span class="s1">right</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">=</span><span class="s1">sort</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_wrap_range_setop</span><span class="s3">(</span><span class="s1">other</span><span class="s3">, </span><span class="s1">res_i8</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_intersection</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">: </span><span class="s1">Index</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span><span class="s3">) </span><span class="s1">-&gt; Index</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        intersection specialized to the case with matching dtypes and both non-empty. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">other </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s6">&quot;DatetimeTimedeltaMixin&quot;</span><span class="s3">, </span><span class="s1">other</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_can_range_setop</span><span class="s3">(</span><span class="s1">other</span><span class="s3">):</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_range_intersect</span><span class="s3">(</span><span class="s1">other</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">=</span><span class="s1">sort</span><span class="s3">)</span>
+
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_can_fast_intersect</span><span class="s3">(</span><span class="s1">other</span><span class="s3">):</span>
+            <span class="s1">result </span><span class="s3">= </span><span class="s1">Index</span><span class="s3">.</span><span class="s1">_intersection</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">=</span><span class="s1">sort</span><span class="s3">)</span>
+            <span class="s5"># We need to invalidate the freq because Index._intersection</span>
+            <span class="s5">#  uses _shallow_copy on a view of self._data, which will preserve</span>
+            <span class="s5">#  self.freq if we're not careful.</span>
+            <span class="s5"># At this point we should have result.dtype == self.dtype</span>
+            <span class="s5">#  and type(result) is type(self._data)</span>
+            <span class="s1">result </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_wrap_setop_result</span><span class="s3">(</span><span class="s1">other</span><span class="s3">, </span><span class="s1">result</span><span class="s3">)</span>
+            <span class="s5"># error: &quot;Index&quot; has no attribute &quot;_with_freq&quot;; maybe &quot;_with_infer&quot;?</span>
+            <span class="s2">return </span><span class="s1">result</span><span class="s3">.</span><span class="s1">_with_freq</span><span class="s3">(</span><span class="s2">None</span><span class="s3">).</span><span class="s1">_with_freq</span><span class="s3">(</span><span class="s6">&quot;infer&quot;</span><span class="s3">)  </span><span class="s5"># type: ignore[attr-defined]</span>
+
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_fast_intersect</span><span class="s3">(</span><span class="s1">other</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_fast_intersect</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">):</span>
+        <span class="s5"># to make our life easier, &quot;sort&quot; the two ranges</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">[</span><span class="s4">0</span><span class="s3">] &lt;= </span><span class="s1">other</span><span class="s3">[</span><span class="s4">0</span><span class="s3">]:</span>
+            <span class="s1">left</span><span class="s3">, </span><span class="s1">right </span><span class="s3">= </span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">left</span><span class="s3">, </span><span class="s1">right </span><span class="s3">= </span><span class="s1">other</span><span class="s3">, </span><span class="s1">self</span>
+
+        <span class="s5"># after sorting, the intersection always starts with the right index</span>
+        <span class="s5"># and ends with the index of which the last elements is smallest</span>
+        <span class="s1">end </span><span class="s3">= </span><span class="s1">min</span><span class="s3">(</span><span class="s1">left</span><span class="s3">[-</span><span class="s4">1</span><span class="s3">], </span><span class="s1">right</span><span class="s3">[-</span><span class="s4">1</span><span class="s3">])</span>
+        <span class="s1">start </span><span class="s3">= </span><span class="s1">right</span><span class="s3">[</span><span class="s4">0</span><span class="s3">]</span>
+
+        <span class="s2">if </span><span class="s1">end </span><span class="s3">&lt; </span><span class="s1">start</span><span class="s3">:</span>
+            <span class="s1">result </span><span class="s3">= </span><span class="s1">self</span><span class="s3">[:</span><span class="s4">0</span><span class="s3">]</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">lslice </span><span class="s3">= </span><span class="s1">slice</span><span class="s3">(*</span><span class="s1">left</span><span class="s3">.</span><span class="s1">slice_locs</span><span class="s3">(</span><span class="s1">start</span><span class="s3">, </span><span class="s1">end</span><span class="s3">))</span>
+            <span class="s1">result </span><span class="s3">= </span><span class="s1">left</span><span class="s3">.</span><span class="s1">_values</span><span class="s3">[</span><span class="s1">lslice</span><span class="s3">]</span>
+
+        <span class="s2">return </span><span class="s1">result</span>
+
+    <span class="s2">def </span><span class="s1">_can_fast_intersect</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">: </span><span class="s1">Self</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s5"># Note: we only get here with len(self) &gt; 0 and len(other) &gt; 0</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s2">return False</span>
+
+        <span class="s2">elif </span><span class="s1">other</span><span class="s3">.</span><span class="s1">freq </span><span class="s3">!= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span><span class="s3">:</span>
+            <span class="s2">return False</span>
+
+        <span class="s2">elif not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">is_monotonic_increasing</span><span class="s3">:</span>
+            <span class="s5"># Because freq is not None, we must then be monotonic decreasing</span>
+            <span class="s2">return False</span>
+
+        <span class="s5"># this along with matching freqs ensure that we &quot;line up&quot;,</span>
+        <span class="s5">#  so intersection will preserve freq</span>
+        <span class="s5"># Note we are assuming away Ticks, as those go through _range_intersect</span>
+        <span class="s5"># GH#42104</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span><span class="s3">.</span><span class="s1">n </span><span class="s3">== </span><span class="s4">1</span>
+
+    <span class="s2">def </span><span class="s1">_can_fast_union</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">: </span><span class="s1">Self</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s5"># Assumes that type(self) == type(other), as per the annotation</span>
+        <span class="s5"># The ability to fast_union also implies that `freq` should be</span>
+        <span class="s5">#  retained on union.</span>
+        <span class="s1">freq </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span>
+
+        <span class="s2">if </span><span class="s1">freq </span><span class="s2">is None or </span><span class="s1">freq </span><span class="s3">!= </span><span class="s1">other</span><span class="s3">.</span><span class="s1">freq</span><span class="s3">:</span>
+            <span class="s2">return False</span>
+
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">is_monotonic_increasing</span><span class="s3">:</span>
+            <span class="s5"># Because freq is not None, we must then be monotonic decreasing</span>
+            <span class="s5"># TODO: do union on the reversed indexes?</span>
+            <span class="s2">return False</span>
+
+        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) == </span><span class="s4">0 </span><span class="s2">or </span><span class="s1">len</span><span class="s3">(</span><span class="s1">other</span><span class="s3">) == </span><span class="s4">0</span><span class="s3">:</span>
+            <span class="s5"># only reached via union_many</span>
+            <span class="s2">return True</span>
+
+        <span class="s5"># to make our life easier, &quot;sort&quot; the two ranges</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">[</span><span class="s4">0</span><span class="s3">] &lt;= </span><span class="s1">other</span><span class="s3">[</span><span class="s4">0</span><span class="s3">]:</span>
+            <span class="s1">left</span><span class="s3">, </span><span class="s1">right </span><span class="s3">= </span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">left</span><span class="s3">, </span><span class="s1">right </span><span class="s3">= </span><span class="s1">other</span><span class="s3">, </span><span class="s1">self</span>
+
+        <span class="s1">right_start </span><span class="s3">= </span><span class="s1">right</span><span class="s3">[</span><span class="s4">0</span><span class="s3">]</span>
+        <span class="s1">left_end </span><span class="s3">= </span><span class="s1">left</span><span class="s3">[-</span><span class="s4">1</span><span class="s3">]</span>
+
+        <span class="s5"># Only need to &quot;adjoin&quot;, not overlap</span>
+        <span class="s2">return </span><span class="s3">(</span><span class="s1">right_start </span><span class="s3">== </span><span class="s1">left_end </span><span class="s3">+ </span><span class="s1">freq</span><span class="s3">) </span><span class="s2">or </span><span class="s1">right_start </span><span class="s2">in </span><span class="s1">left</span>
+
+    <span class="s2">def </span><span class="s1">_fast_union</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">: </span><span class="s1">Self</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">=</span><span class="s2">None</span><span class="s3">) </span><span class="s1">-&gt; Self</span><span class="s3">:</span>
+        <span class="s5"># Caller is responsible for ensuring self and other are non-empty</span>
+
+        <span class="s5"># to make our life easier, &quot;sort&quot; the two ranges</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">[</span><span class="s4">0</span><span class="s3">] &lt;= </span><span class="s1">other</span><span class="s3">[</span><span class="s4">0</span><span class="s3">]:</span>
+            <span class="s1">left</span><span class="s3">, </span><span class="s1">right </span><span class="s3">= </span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span>
+        <span class="s2">elif </span><span class="s1">sort </span><span class="s2">is False</span><span class="s3">:</span>
+            <span class="s5"># TDIs are not in the &quot;correct&quot; order and we don't want</span>
+            <span class="s5">#  to sort but want to remove overlaps</span>
+            <span class="s1">left</span><span class="s3">, </span><span class="s1">right </span><span class="s3">= </span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span>
+            <span class="s1">left_start </span><span class="s3">= </span><span class="s1">left</span><span class="s3">[</span><span class="s4">0</span><span class="s3">]</span>
+            <span class="s1">loc </span><span class="s3">= </span><span class="s1">right</span><span class="s3">.</span><span class="s1">searchsorted</span><span class="s3">(</span><span class="s1">left_start</span><span class="s3">, </span><span class="s1">side</span><span class="s3">=</span><span class="s6">&quot;left&quot;</span><span class="s3">)</span>
+            <span class="s1">right_chunk </span><span class="s3">= </span><span class="s1">right</span><span class="s3">.</span><span class="s1">_values</span><span class="s3">[:</span><span class="s1">loc</span><span class="s3">]</span>
+            <span class="s1">dates </span><span class="s3">= </span><span class="s1">concat_compat</span><span class="s3">((</span><span class="s1">left</span><span class="s3">.</span><span class="s1">_values</span><span class="s3">, </span><span class="s1">right_chunk</span><span class="s3">))</span>
+            <span class="s1">result </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">).</span><span class="s1">_simple_new</span><span class="s3">(</span><span class="s1">dates</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">name</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">result</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">left</span><span class="s3">, </span><span class="s1">right </span><span class="s3">= </span><span class="s1">other</span><span class="s3">, </span><span class="s1">self</span>
+
+        <span class="s1">left_end </span><span class="s3">= </span><span class="s1">left</span><span class="s3">[-</span><span class="s4">1</span><span class="s3">]</span>
+        <span class="s1">right_end </span><span class="s3">= </span><span class="s1">right</span><span class="s3">[-</span><span class="s4">1</span><span class="s3">]</span>
+
+        <span class="s5"># concatenate</span>
+        <span class="s2">if </span><span class="s1">left_end </span><span class="s3">&lt; </span><span class="s1">right_end</span><span class="s3">:</span>
+            <span class="s1">loc </span><span class="s3">= </span><span class="s1">right</span><span class="s3">.</span><span class="s1">searchsorted</span><span class="s3">(</span><span class="s1">left_end</span><span class="s3">, </span><span class="s1">side</span><span class="s3">=</span><span class="s6">&quot;right&quot;</span><span class="s3">)</span>
+            <span class="s1">right_chunk </span><span class="s3">= </span><span class="s1">right</span><span class="s3">.</span><span class="s1">_values</span><span class="s3">[</span><span class="s1">loc</span><span class="s3">:]</span>
+            <span class="s1">dates </span><span class="s3">= </span><span class="s1">concat_compat</span><span class="s3">([</span><span class="s1">left</span><span class="s3">.</span><span class="s1">_values</span><span class="s3">, </span><span class="s1">right_chunk</span><span class="s3">])</span>
+            <span class="s5"># The can_fast_union check ensures that the result.freq</span>
+            <span class="s5">#  should match self.freq</span>
+            <span class="s2">assert </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">dates</span><span class="s3">, </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">))</span>
+            <span class="s5"># error: Item &quot;ExtensionArray&quot; of &quot;ExtensionArray |</span>
+            <span class="s5"># ndarray[Any, Any]&quot; has no attribute &quot;_freq&quot;</span>
+            <span class="s2">assert </span><span class="s1">dates</span><span class="s3">.</span><span class="s1">_freq </span><span class="s3">== </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq  </span><span class="s5"># type: ignore[union-attr]</span>
+            <span class="s1">result </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">).</span><span class="s1">_simple_new</span><span class="s3">(</span><span class="s1">dates</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">result</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">left</span>
+
+    <span class="s2">def </span><span class="s1">_union</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">):</span>
+        <span class="s5"># We are called by `union`, which is responsible for this validation</span>
+        <span class="s2">assert </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">other</span><span class="s3">, </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">))</span>
+        <span class="s2">assert </span><span class="s1">self</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">other</span><span class="s3">.</span><span class="s1">dtype</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_can_range_setop</span><span class="s3">(</span><span class="s1">other</span><span class="s3">):</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_range_union</span><span class="s3">(</span><span class="s1">other</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">=</span><span class="s1">sort</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_can_fast_union</span><span class="s3">(</span><span class="s1">other</span><span class="s3">):</span>
+            <span class="s1">result </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_fast_union</span><span class="s3">(</span><span class="s1">other</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">=</span><span class="s1">sort</span><span class="s3">)</span>
+            <span class="s5"># in the case with sort=None, the _can_fast_union check ensures</span>
+            <span class="s5">#  that result.freq == self.freq</span>
+            <span class="s2">return </span><span class="s1">result</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">super</span><span class="s3">().</span><span class="s1">_union</span><span class="s3">(</span><span class="s1">other</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">).</span><span class="s1">_with_freq</span><span class="s3">(</span><span class="s6">&quot;infer&quot;</span><span class="s3">)</span>
+
+    <span class="s5"># --------------------------------------------------------------------</span>
+    <span class="s5"># Join Methods</span>
+
+    <span class="s2">def </span><span class="s1">_get_join_freq</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Get the freq to attach to the result of a join operation. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">freq </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_can_fast_union</span><span class="s3">(</span><span class="s1">other</span><span class="s3">):</span>
+            <span class="s1">freq </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span>
+        <span class="s2">return </span><span class="s1">freq</span>
+
+    <span class="s2">def </span><span class="s1">_wrap_join_result</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">joined</span><span class="s3">,</span>
+        <span class="s1">other</span><span class="s3">,</span>
+        <span class="s1">lidx</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">] | </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">ridx</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">] | </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">how</span><span class="s3">: </span><span class="s1">JoinHow</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">Self</span><span class="s3">, </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">] | </span><span class="s2">None</span><span class="s3">, </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">] | </span><span class="s2">None</span><span class="s3">]:</span>
+        <span class="s2">assert </span><span class="s1">other</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">self</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">, (</span><span class="s1">other</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s1">join_index</span><span class="s3">, </span><span class="s1">lidx</span><span class="s3">, </span><span class="s1">ridx </span><span class="s3">= </span><span class="s1">super</span><span class="s3">().</span><span class="s1">_wrap_join_result</span><span class="s3">(</span>
+            <span class="s1">joined</span><span class="s3">, </span><span class="s1">other</span><span class="s3">, </span><span class="s1">lidx</span><span class="s3">, </span><span class="s1">ridx</span><span class="s3">, </span><span class="s1">how</span>
+        <span class="s3">)</span>
+        <span class="s1">join_index</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_freq </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_join_freq</span><span class="s3">(</span><span class="s1">other</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">join_index</span><span class="s3">, </span><span class="s1">lidx</span><span class="s3">, </span><span class="s1">ridx</span>
+
+    <span class="s2">def </span><span class="s1">_get_engine_target</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">:</span>
+        <span class="s5"># engine methods and libjoin methods need dt64/td64 values cast to i8</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_ndarray</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s6">&quot;i8&quot;</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_from_join_target</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">result</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">):</span>
+        <span class="s5"># view e.g. i8 back to M8[ns]</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">result</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_ndarray</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_from_backing_data</span><span class="s3">(</span><span class="s1">result</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_searchsorted_monotonic</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">label</span><span class="s3">, </span><span class="s1">side</span><span class="s3">: </span><span class="s1">Literal</span><span class="s3">[</span><span class="s6">&quot;left&quot;</span><span class="s3">, </span><span class="s6">&quot;right&quot;</span><span class="s3">] = </span><span class="s6">&quot;left&quot;</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">is_monotonic_increasing</span>
+            <span class="s2">and </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">label</span><span class="s3">, (</span><span class="s1">Timestamp</span><span class="s3">, </span><span class="s1">Timedelta</span><span class="s3">))</span>
+            <span class="s2">and </span><span class="s1">abbrev_to_npy_unit</span><span class="s3">(</span><span class="s1">label</span><span class="s3">.</span><span class="s1">unit</span><span class="s3">) &gt; </span><span class="s1">abbrev_to_npy_unit</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">unit</span><span class="s3">)</span>
+        <span class="s3">):</span>
+            <span class="s5"># For non-matching units we can safely round down (with side=right)</span>
+            <span class="s5"># This is needed for GH#63262</span>
+            <span class="s2">if </span><span class="s1">side </span><span class="s3">== </span><span class="s6">&quot;right&quot;</span><span class="s3">:</span>
+                <span class="s1">label </span><span class="s3">= </span><span class="s1">label</span><span class="s3">.</span><span class="s1">as_unit</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">unit</span><span class="s3">)  </span><span class="s5"># this should always be a round-down</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s5"># round up</span>
+                <span class="s1">label </span><span class="s3">= </span><span class="s1">label</span><span class="s3">.</span><span class="s1">ceil</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">unit</span><span class="s3">).</span><span class="s1">as_unit</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">unit</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">super</span><span class="s3">().</span><span class="s1">_searchsorted_monotonic</span><span class="s3">(</span><span class="s1">label</span><span class="s3">, </span><span class="s1">side</span><span class="s3">)</span>
+
+    <span class="s5"># --------------------------------------------------------------------</span>
+    <span class="s5"># List-like Methods</span>
+
+    <span class="s2">def </span><span class="s1">_get_delete_freq</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">loc</span><span class="s3">: </span><span class="s1">int </span><span class="s3">| </span><span class="s1">slice </span><span class="s3">| </span><span class="s1">Sequence</span><span class="s3">[</span><span class="s1">int</span><span class="s3">]):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Find the `freq` for self.delete(loc). 
+        &quot;&quot;&quot;</span>
+        <span class="s1">freq </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">is_integer</span><span class="s3">(</span><span class="s1">loc</span><span class="s3">):</span>
+                <span class="s2">if </span><span class="s1">loc </span><span class="s2">in </span><span class="s3">(</span><span class="s4">0</span><span class="s3">, -</span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">), -</span><span class="s4">1</span><span class="s3">, </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) - </span><span class="s4">1</span><span class="s3">):</span>
+                    <span class="s1">freq </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">is_list_like</span><span class="s3">(</span><span class="s1">loc</span><span class="s3">):</span>
+                    <span class="s5"># error: Incompatible types in assignment (expression has</span>
+                    <span class="s5"># type &quot;Union[slice, ndarray]&quot;, variable has type</span>
+                    <span class="s5"># &quot;Union[int, slice, Sequence[int]]&quot;)</span>
+                    <span class="s1">loc </span><span class="s3">= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">maybe_indices_to_slice</span><span class="s3">(  </span><span class="s5"># type: ignore[assignment]</span>
+                        <span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">loc</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">), </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+                    <span class="s3">)</span>
+                <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">loc</span><span class="s3">, </span><span class="s1">slice</span><span class="s3">) </span><span class="s2">and </span><span class="s1">loc</span><span class="s3">.</span><span class="s1">step </span><span class="s2">in </span><span class="s3">(</span><span class="s4">1</span><span class="s3">, </span><span class="s2">None</span><span class="s3">):</span>
+                    <span class="s2">if </span><span class="s1">loc</span><span class="s3">.</span><span class="s1">start </span><span class="s2">in </span><span class="s3">(</span><span class="s4">0</span><span class="s3">, </span><span class="s2">None</span><span class="s3">) </span><span class="s2">or </span><span class="s1">loc</span><span class="s3">.</span><span class="s1">stop </span><span class="s2">in </span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">), </span><span class="s2">None</span><span class="s3">):</span>
+                        <span class="s1">freq </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span>
+        <span class="s2">return </span><span class="s1">freq</span>
+
+    <span class="s2">def </span><span class="s1">_get_insert_freq</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">loc</span><span class="s3">: </span><span class="s1">int</span><span class="s3">, </span><span class="s1">item</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Find the `freq` for self.insert(loc, item). 
+        &quot;&quot;&quot;</span>
+        <span class="s1">value </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_validate_scalar</span><span class="s3">(</span><span class="s1">item</span><span class="s3">)</span>
+        <span class="s1">item </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_box_func</span><span class="s3">(</span><span class="s1">value</span><span class="s3">)</span>
+
+        <span class="s1">freq </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s5"># freq can be preserved on edge cases</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">size</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">item </span><span class="s2">is </span><span class="s1">NaT</span><span class="s3">:</span>
+                    <span class="s2">pass</span>
+                <span class="s2">elif </span><span class="s1">loc </span><span class="s2">in </span><span class="s3">(</span><span class="s4">0</span><span class="s3">, -</span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)) </span><span class="s2">and </span><span class="s1">item </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq </span><span class="s3">== </span><span class="s1">self</span><span class="s3">[</span><span class="s4">0</span><span class="s3">]:</span>
+                    <span class="s1">freq </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span>
+                <span class="s2">elif </span><span class="s3">(</span><span class="s1">loc </span><span class="s3">== </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)) </span><span class="s2">and </span><span class="s1">item </span><span class="s3">- </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq </span><span class="s3">== </span><span class="s1">self</span><span class="s3">[-</span><span class="s4">1</span><span class="s3">]:</span>
+                    <span class="s1">freq </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span>
+            <span class="s5"># Adding a single item to an empty index may preserve freq</span>
+            <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span><span class="s3">, </span><span class="s1">Tick</span><span class="s3">):</span>
+                <span class="s5"># all TimedeltaIndex cases go through here; is_on_offset</span>
+                <span class="s5">#  would raise TypeError</span>
+                <span class="s1">freq </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span>
+            <span class="s2">elif </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span><span class="s3">.</span><span class="s1">is_on_offset</span><span class="s3">(</span><span class="s1">item</span><span class="s3">):</span>
+                <span class="s1">freq </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">freq</span>
+        <span class="s2">return </span><span class="s1">freq</span>
+
+    <span class="s2">def </span><span class="s1">delete</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">loc</span><span class="s3">) </span><span class="s1">-&gt; Self</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Make new Index with passed location(-s) deleted. 
+ 
+        Parameters 
+        ---------- 
+        loc : int or list of int 
+            Location of item(-s) which will be deleted. 
+            Use a list of locations to delete more than one value at the same time. 
+ 
+        Returns 
+        ------- 
+        Index 
+            Will be same type as self, except for RangeIndex. 
+ 
+        See Also 
+        -------- 
+        numpy.delete : Delete any rows and column from NumPy array (ndarray). 
+ 
+        Examples 
+        -------- 
+        &gt;&gt;&gt; idx = pd.Index([&quot;a&quot;, &quot;b&quot;, &quot;c&quot;]) 
+        &gt;&gt;&gt; idx.delete(1) 
+        Index(['a', 'c'], dtype='str') 
+        &gt;&gt;&gt; idx = pd.Index([&quot;a&quot;, &quot;b&quot;, &quot;c&quot;]) 
+        &gt;&gt;&gt; idx.delete([0, 2]) 
+        Index(['b'], dtype='str') 
+        &quot;&quot;&quot;</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">super</span><span class="s3">().</span><span class="s1">delete</span><span class="s3">(</span><span class="s1">loc</span><span class="s3">)</span>
+        <span class="s1">result</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_freq </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_delete_freq</span><span class="s3">(</span><span class="s1">loc</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">result</span>
+
+    <span class="s2">def </span><span class="s1">insert</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">loc</span><span class="s3">: </span><span class="s1">int</span><span class="s3">, </span><span class="s1">item</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Make new Index inserting new item at location. 
+        Follows Python numpy.insert semantics for negative values. 
+ 
+        Parameters 
+        ---------- 
+        loc : int 
+            The integer location where the new item will be inserted. 
+        item : object 
+            The new item to be inserted into the Index. 
+ 
+        Returns 
+        ------- 
+        Index 
+            Returns a new Index object resulting from inserting the specified item at 
+            the specified location within the original Index. 
+ 
+        See Also 
+        -------- 
+        Index.append : Append a collection of Indexes together. 
+ 
+        Examples 
+        -------- 
+        &gt;&gt;&gt; idx = pd.Index([&quot;a&quot;, &quot;b&quot;, &quot;c&quot;]) 
+        &gt;&gt;&gt; idx.insert(1, &quot;x&quot;) 
+        Index(['a', 'x', 'b', 'c'], dtype='str') 
+        &quot;&quot;&quot;</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">super</span><span class="s3">().</span><span class="s1">insert</span><span class="s3">(</span><span class="s1">loc</span><span class="s3">, </span><span class="s1">item</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)):</span>
+            <span class="s5"># i.e. parent class method did not cast</span>
+            <span class="s1">result</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_freq </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_insert_freq</span><span class="s3">(</span><span class="s1">loc</span><span class="s3">, </span><span class="s1">item</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">result</span>
+
+    <span class="s5"># --------------------------------------------------------------------</span>
+    <span class="s5"># NDArray-Like Methods</span>
+
+    <span class="s2">def </span><span class="s1">take</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">indices</span><span class="s3">,</span>
+        <span class="s1">axis</span><span class="s3">: </span><span class="s1">Axis </span><span class="s3">= </span><span class="s4">0</span><span class="s3">,</span>
+        <span class="s1">allow_fill</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+        <span class="s1">fill_value</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s3">**</span><span class="s1">kwargs</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; Self</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return a new Index of the values selected by the indices. 
+        For internal compatibility with numpy arrays. 
+ 
+        Parameters 
+        ---------- 
+        indices : array-like 
+            Indices to be taken. 
+        axis : {0 or 'index'}, optional 
+            The axis over which to select values, always 0 or 'index'. 
+        allow_fill : bool, default True 
+            How to handle negative values in `indices`. 
+            * False: negative values in `indices` indicate positional indices 
+                from the right (the default). This is similar to 
+                :func:`numpy.take`. 
+            * True: negative values in `indices` indicate 
+                missing values. These values are set to `fill_value`. Any other 
+                other negative values raise a ``ValueError``. 
+        fill_value : scalar, default None 
+            If allow_fill=True and fill_value is not None, indices specified by 
+            -1 are regarded as NA. If Index doesn't hold NA, raise ValueError. 
+        **kwargs 
+            Required for compatibility with numpy. 
+ 
+        Returns 
+        ------- 
+        Index 
+            An index formed of elements at the given indices. Will be the same 
+            type as self, except for RangeIndex. 
+ 
+        See Also 
+        -------- 
+        numpy.ndarray.take: Return an array formed from the 
+            elements of a at the given indices. 
+ 
+        Examples 
+        -------- 
+        &gt;&gt;&gt; idx = pd.Index([&quot;a&quot;, &quot;b&quot;, &quot;c&quot;]) 
+        &gt;&gt;&gt; idx.take([2, 2, 1, 2]) 
+        Index(['c', 'c', 'b', 'c'], dtype='str') 
+        &quot;&quot;&quot;</span>
+        <span class="s1">nv</span><span class="s3">.</span><span class="s1">validate_take</span><span class="s3">((), </span><span class="s1">kwargs</span><span class="s3">)</span>
+        <span class="s1">indices </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">indices</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">)</span>
+
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">NDArrayBackedExtensionIndex</span><span class="s3">.</span><span class="s1">take</span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">, </span><span class="s1">indices</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">, </span><span class="s1">allow_fill</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, **</span><span class="s1">kwargs</span>
+        <span class="s3">)</span>
+
+        <span class="s1">maybe_slice </span><span class="s3">= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">maybe_indices_to_slice</span><span class="s3">(</span><span class="s1">indices</span><span class="s3">, </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">))</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">maybe_slice</span><span class="s3">, </span><span class="s1">slice</span><span class="s3">):</span>
+            <span class="s1">freq </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_get_getitem_freq</span><span class="s3">(</span><span class="s1">maybe_slice</span><span class="s3">)</span>
+            <span class="s1">result</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_freq </span><span class="s3">= </span><span class="s1">freq</span>
+        <span class="s2">return </span><span class="s1">result</span>
+</pre>
+</body>
+</html>

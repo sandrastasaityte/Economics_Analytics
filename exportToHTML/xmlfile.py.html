@@ -1,0 +1,181 @@
+<html>
+<head>
+<title>xmlfile.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #7a7e85;}
+.s3 { color: #6aab73;}
+.s4 { color: #bcbec4;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+xmlfile.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">absolute_import</span>
+<span class="s2"># Copyright (c) 2010-2015 openpyxl</span>
+
+<span class="s3">&quot;&quot;&quot;Implements the lxml.etree.xmlfile API using the standard library xml.etree&quot;&quot;&quot;</span>
+
+
+<span class="s0">from </span><span class="s1">contextlib </span><span class="s0">import </span><span class="s1">contextmanager</span>
+
+<span class="s0">from </span><span class="s1">xml</span><span class="s4">.</span><span class="s1">etree</span><span class="s4">.</span><span class="s1">ElementTree </span><span class="s0">import </span><span class="s4">(</span>
+    <span class="s1">Element</span><span class="s4">,</span>
+    <span class="s1">_escape_cdata</span><span class="s4">,</span>
+<span class="s4">)</span>
+
+<span class="s0">from </span><span class="s4">. </span><span class="s0">import </span><span class="s1">incremental_tree</span>
+
+
+<span class="s0">class </span><span class="s1">LxmlSyntaxError</span><span class="s4">(</span><span class="s1">Exception</span><span class="s4">):</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">class </span><span class="s1">_IncrementalFileWriter</span><span class="s4">(</span><span class="s1">object</span><span class="s4">):</span>
+    <span class="s5">&quot;&quot;&quot;Replacement for _IncrementalFileWriter of lxml&quot;&quot;&quot;</span>
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">output_file</span><span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_element_stack </span><span class="s4">= []</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_file </span><span class="s4">= </span><span class="s1">output_file</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_have_root </span><span class="s4">= </span><span class="s0">False</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">global_nsmap </span><span class="s4">= </span><span class="s1">incremental_tree</span><span class="s4">.</span><span class="s1">current_global_nsmap</span><span class="s4">()</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">is_html </span><span class="s4">= </span><span class="s0">False</span>
+
+    <span class="s4">@</span><span class="s1">contextmanager</span>
+    <span class="s0">def </span><span class="s1">element</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">tag</span><span class="s4">, </span><span class="s1">attrib</span><span class="s4">=</span><span class="s0">None</span><span class="s4">, </span><span class="s1">nsmap</span><span class="s4">=</span><span class="s0">None</span><span class="s4">, **</span><span class="s1">_extra</span><span class="s4">):</span>
+        <span class="s5">&quot;&quot;&quot;Create a new xml element using a context manager.&quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">nsmap </span><span class="s0">and None in </span><span class="s1">nsmap</span><span class="s4">:</span>
+            <span class="s2"># Normalise None prefix (lxml's default namespace prefix) -&gt; &quot;&quot;, as</span>
+            <span class="s2"># required for incremental_tree</span>
+            <span class="s0">if </span><span class="s3">&quot;&quot; </span><span class="s0">in </span><span class="s1">nsmap </span><span class="s0">and </span><span class="s1">nsmap</span><span class="s4">[</span><span class="s3">&quot;&quot;</span><span class="s4">] != </span><span class="s1">nsmap</span><span class="s4">[</span><span class="s0">None</span><span class="s4">]:</span>
+                <span class="s0">raise </span><span class="s1">ValueError</span><span class="s4">(</span>
+                    <span class="s3">'Found None and &quot;&quot; as default nsmap prefixes with different URIs'</span>
+                <span class="s4">)</span>
+            <span class="s1">nsmap </span><span class="s4">= </span><span class="s1">nsmap</span><span class="s4">.</span><span class="s1">copy</span><span class="s4">()</span>
+            <span class="s1">nsmap</span><span class="s4">[</span><span class="s3">&quot;&quot;</span><span class="s4">] = </span><span class="s1">nsmap</span><span class="s4">.</span><span class="s1">pop</span><span class="s4">(</span><span class="s0">None</span><span class="s4">)</span>
+
+        <span class="s2"># __enter__ part</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_have_root </span><span class="s4">= </span><span class="s0">True</span>
+        <span class="s0">if </span><span class="s1">attrib </span><span class="s0">is None</span><span class="s4">:</span>
+            <span class="s1">attrib </span><span class="s4">= {}</span>
+        <span class="s1">elem </span><span class="s4">= </span><span class="s1">Element</span><span class="s4">(</span><span class="s1">tag</span><span class="s4">, </span><span class="s1">attrib</span><span class="s4">=</span><span class="s1">attrib</span><span class="s4">, **</span><span class="s1">_extra</span><span class="s4">)</span>
+        <span class="s1">elem</span><span class="s4">.</span><span class="s1">text </span><span class="s4">= </span><span class="s3">''</span>
+        <span class="s1">elem</span><span class="s4">.</span><span class="s1">tail </span><span class="s4">= </span><span class="s3">''</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_element_stack</span><span class="s4">:</span>
+            <span class="s1">is_root </span><span class="s4">= </span><span class="s0">False</span>
+            <span class="s4">(</span>
+                <span class="s1">nsmap_scope</span><span class="s4">,</span>
+                <span class="s1">default_ns_attr_prefix</span><span class="s4">,</span>
+                <span class="s1">uri_to_prefix</span><span class="s4">,</span>
+            <span class="s4">) = </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_element_stack</span><span class="s4">[-</span><span class="s6">1</span><span class="s4">]</span>
+        <span class="s0">else</span><span class="s4">:</span>
+            <span class="s1">is_root </span><span class="s4">= </span><span class="s0">True</span>
+            <span class="s1">nsmap_scope </span><span class="s4">= {}</span>
+            <span class="s1">default_ns_attr_prefix </span><span class="s4">= </span><span class="s0">None</span>
+            <span class="s1">uri_to_prefix </span><span class="s4">= {}</span>
+        <span class="s4">(</span>
+            <span class="s1">tag</span><span class="s4">,</span>
+            <span class="s1">nsmap_scope</span><span class="s4">,</span>
+            <span class="s1">default_ns_attr_prefix</span><span class="s4">,</span>
+            <span class="s1">uri_to_prefix</span><span class="s4">,</span>
+            <span class="s1">next_remains_root</span><span class="s4">,</span>
+        <span class="s4">) = </span><span class="s1">incremental_tree</span><span class="s4">.</span><span class="s1">write_elem_start</span><span class="s4">(</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_file</span><span class="s4">,</span>
+            <span class="s1">elem</span><span class="s4">,</span>
+            <span class="s1">nsmap_scope</span><span class="s4">=</span><span class="s1">nsmap_scope</span><span class="s4">,</span>
+            <span class="s1">global_nsmap</span><span class="s4">=</span><span class="s1">self</span><span class="s4">.</span><span class="s1">global_nsmap</span><span class="s4">,</span>
+            <span class="s1">short_empty_elements</span><span class="s4">=</span><span class="s0">False</span><span class="s4">,</span>
+            <span class="s1">is_html</span><span class="s4">=</span><span class="s1">self</span><span class="s4">.</span><span class="s1">is_html</span><span class="s4">,</span>
+            <span class="s1">is_root</span><span class="s4">=</span><span class="s1">is_root</span><span class="s4">,</span>
+            <span class="s1">uri_to_prefix</span><span class="s4">=</span><span class="s1">uri_to_prefix</span><span class="s4">,</span>
+            <span class="s1">default_ns_attr_prefix</span><span class="s4">=</span><span class="s1">default_ns_attr_prefix</span><span class="s4">,</span>
+            <span class="s1">new_nsmap</span><span class="s4">=</span><span class="s1">nsmap</span><span class="s4">,</span>
+        <span class="s4">)</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_element_stack</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span>
+            <span class="s4">(</span>
+                <span class="s1">nsmap_scope</span><span class="s4">,</span>
+                <span class="s1">default_ns_attr_prefix</span><span class="s4">,</span>
+                <span class="s1">uri_to_prefix</span><span class="s4">,</span>
+            <span class="s4">)</span>
+        <span class="s4">)</span>
+        <span class="s0">yield</span>
+
+        <span class="s2"># __exit__ part</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_element_stack</span><span class="s4">.</span><span class="s1">pop</span><span class="s4">()</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_file</span><span class="s4">(</span><span class="s3">f&quot;&lt;/</span><span class="s0">{</span><span class="s1">tag</span><span class="s0">}</span><span class="s3">&gt;&quot;</span><span class="s4">)</span>
+        <span class="s0">if </span><span class="s1">elem</span><span class="s4">.</span><span class="s1">tail</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_file</span><span class="s4">(</span><span class="s1">_escape_cdata</span><span class="s4">(</span><span class="s1">elem</span><span class="s4">.</span><span class="s1">tail</span><span class="s4">))</span>
+
+    <span class="s0">def </span><span class="s1">write</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">arg</span><span class="s4">):</span>
+        <span class="s5">&quot;&quot;&quot;Write a string or subelement.&quot;&quot;&quot;</span>
+
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">, </span><span class="s1">str</span><span class="s4">):</span>
+            <span class="s2"># it is not allowed to write a string outside of an element</span>
+            <span class="s0">if not </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_element_stack</span><span class="s4">:</span>
+                <span class="s0">raise </span><span class="s1">LxmlSyntaxError</span><span class="s4">()</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_file</span><span class="s4">(</span><span class="s1">_escape_cdata</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">))</span>
+
+        <span class="s0">else</span><span class="s4">:</span>
+            <span class="s0">if not </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_element_stack </span><span class="s0">and </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_have_root</span><span class="s4">:</span>
+                <span class="s0">raise </span><span class="s1">LxmlSyntaxError</span><span class="s4">()</span>
+
+            <span class="s0">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_element_stack</span><span class="s4">:</span>
+                <span class="s1">is_root </span><span class="s4">= </span><span class="s0">False</span>
+                <span class="s4">(</span>
+                    <span class="s1">nsmap_scope</span><span class="s4">,</span>
+                    <span class="s1">default_ns_attr_prefix</span><span class="s4">,</span>
+                    <span class="s1">uri_to_prefix</span><span class="s4">,</span>
+                <span class="s4">) = </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_element_stack</span><span class="s4">[-</span><span class="s6">1</span><span class="s4">]</span>
+            <span class="s0">else</span><span class="s4">:</span>
+                <span class="s1">is_root </span><span class="s4">= </span><span class="s0">True</span>
+                <span class="s1">nsmap_scope </span><span class="s4">= {}</span>
+                <span class="s1">default_ns_attr_prefix </span><span class="s4">= </span><span class="s0">None</span>
+                <span class="s1">uri_to_prefix </span><span class="s4">= {}</span>
+            <span class="s1">incremental_tree</span><span class="s4">.</span><span class="s1">_serialize_ns_xml</span><span class="s4">(</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_file</span><span class="s4">,</span>
+                <span class="s1">arg</span><span class="s4">,</span>
+                <span class="s1">nsmap_scope</span><span class="s4">=</span><span class="s1">nsmap_scope</span><span class="s4">,</span>
+                <span class="s1">global_nsmap</span><span class="s4">=</span><span class="s1">self</span><span class="s4">.</span><span class="s1">global_nsmap</span><span class="s4">,</span>
+                <span class="s1">short_empty_elements</span><span class="s4">=</span><span class="s0">True</span><span class="s4">,</span>
+                <span class="s1">is_html</span><span class="s4">=</span><span class="s1">self</span><span class="s4">.</span><span class="s1">is_html</span><span class="s4">,</span>
+                <span class="s1">is_root</span><span class="s4">=</span><span class="s1">is_root</span><span class="s4">,</span>
+                <span class="s1">uri_to_prefix</span><span class="s4">=</span><span class="s1">uri_to_prefix</span><span class="s4">,</span>
+                <span class="s1">default_ns_attr_prefix</span><span class="s4">=</span><span class="s1">default_ns_attr_prefix</span><span class="s4">,</span>
+            <span class="s4">)</span>
+
+    <span class="s0">def </span><span class="s1">__enter__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s0">pass</span>
+
+    <span class="s0">def </span><span class="s1">__exit__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">type</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">traceback</span><span class="s4">):</span>
+        <span class="s2"># without root the xml document is incomplete</span>
+        <span class="s0">if not </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_have_root</span><span class="s4">:</span>
+            <span class="s0">raise </span><span class="s1">LxmlSyntaxError</span><span class="s4">()</span>
+
+
+<span class="s0">class </span><span class="s1">xmlfile</span><span class="s4">(</span><span class="s1">object</span><span class="s4">):</span>
+    <span class="s5">&quot;&quot;&quot;Context manager that can replace lxml.etree.xmlfile.&quot;&quot;&quot;</span>
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">output_file</span><span class="s4">, </span><span class="s1">buffered</span><span class="s4">=</span><span class="s0">False</span><span class="s4">, </span><span class="s1">encoding</span><span class="s4">=</span><span class="s3">&quot;utf-8&quot;</span><span class="s4">, </span><span class="s1">close</span><span class="s4">=</span><span class="s0">False</span><span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_file </span><span class="s4">= </span><span class="s1">output_file</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_close </span><span class="s4">= </span><span class="s1">close</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">encoding </span><span class="s4">= </span><span class="s1">encoding</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">writer_cm </span><span class="s4">= </span><span class="s0">None</span>
+
+    <span class="s0">def </span><span class="s1">__enter__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">writer_cm </span><span class="s4">= </span><span class="s1">incremental_tree</span><span class="s4">.</span><span class="s1">_get_writer</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_file</span><span class="s4">, </span><span class="s1">encoding</span><span class="s4">=</span><span class="s1">self</span><span class="s4">.</span><span class="s1">encoding</span><span class="s4">)</span>
+        <span class="s1">writer</span><span class="s4">, </span><span class="s1">declared_encoding </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">writer_cm</span><span class="s4">.</span><span class="s1">__enter__</span><span class="s4">()</span>
+        <span class="s0">return </span><span class="s1">_IncrementalFileWriter</span><span class="s4">(</span><span class="s1">writer</span><span class="s4">)</span>
+
+    <span class="s0">def </span><span class="s1">__exit__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">type</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">traceback</span><span class="s4">):</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">writer_cm</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">writer_cm</span><span class="s4">.</span><span class="s1">__exit__</span><span class="s4">(</span><span class="s1">type</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">traceback</span><span class="s4">)</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_close</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_file</span><span class="s4">.</span><span class="s1">close</span><span class="s4">()</span>
+</pre>
+</body>
+</html>

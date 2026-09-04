@@ -1,0 +1,230 @@
+<html>
+<head>
+<title>test_typing.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_typing.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">importlib</span><span class="s2">.</span><span class="s1">util</span>
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">re</span>
+<span class="s0">import </span><span class="s1">shutil</span>
+<span class="s0">import </span><span class="s1">textwrap</span>
+<span class="s0">from </span><span class="s1">collections </span><span class="s0">import </span><span class="s1">defaultdict</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">TYPE_CHECKING</span>
+
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s3"># Only trigger a full `mypy` run if this environment variable is set</span>
+<span class="s3"># Note that these tests tend to take over a minute even on a macOS M1 CPU,</span>
+<span class="s3"># and more than that in CI.</span>
+<span class="s1">RUN_MYPY </span><span class="s2">= </span><span class="s4">&quot;NPY_RUN_MYPY_IN_TESTSUITE&quot; </span><span class="s0">in </span><span class="s1">os</span><span class="s2">.</span><span class="s1">environ</span>
+<span class="s0">if </span><span class="s1">RUN_MYPY </span><span class="s0">and </span><span class="s1">RUN_MYPY </span><span class="s0">not in </span><span class="s2">(</span><span class="s4">'0'</span><span class="s2">, </span><span class="s4">''</span><span class="s2">, </span><span class="s4">'false'</span><span class="s2">):</span>
+    <span class="s1">RUN_MYPY </span><span class="s2">= </span><span class="s0">True</span>
+
+<span class="s3"># Skips all functions in this file</span>
+<span class="s1">pytestmark </span><span class="s2">= </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span>
+    <span class="s0">not </span><span class="s1">RUN_MYPY</span><span class="s2">,</span>
+    <span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;`NPY_RUN_MYPY_IN_TESTSUITE` not set&quot;</span>
+<span class="s2">)</span>
+
+
+<span class="s0">try</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">mypy </span><span class="s0">import </span><span class="s1">api</span>
+<span class="s0">except </span><span class="s1">ImportError</span><span class="s2">:</span>
+    <span class="s1">NO_MYPY </span><span class="s2">= </span><span class="s0">True</span>
+<span class="s0">else</span><span class="s2">:</span>
+    <span class="s1">NO_MYPY </span><span class="s2">= </span><span class="s0">False</span>
+
+<span class="s0">if </span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+    <span class="s3"># We need this as annotation, but it's located in a private namespace.</span>
+    <span class="s3"># As a compromise, do *not* import it during runtime</span>
+    <span class="s0">from </span><span class="s1">_pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">structures </span><span class="s0">import </span><span class="s1">ParameterSet</span>
+
+<span class="s1">DATA_DIR </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">dirname</span><span class="s2">(</span><span class="s1">__file__</span><span class="s2">), </span><span class="s4">&quot;data&quot;</span><span class="s2">)</span>
+<span class="s1">PASS_DIR </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">DATA_DIR</span><span class="s2">, </span><span class="s4">&quot;pass&quot;</span><span class="s2">)</span>
+<span class="s1">FAIL_DIR </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">DATA_DIR</span><span class="s2">, </span><span class="s4">&quot;fail&quot;</span><span class="s2">)</span>
+<span class="s1">REVEAL_DIR </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">DATA_DIR</span><span class="s2">, </span><span class="s4">&quot;reveal&quot;</span><span class="s2">)</span>
+<span class="s1">MISC_DIR </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">DATA_DIR</span><span class="s2">, </span><span class="s4">&quot;misc&quot;</span><span class="s2">)</span>
+<span class="s1">MYPY_INI </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">DATA_DIR</span><span class="s2">, </span><span class="s4">&quot;mypy.ini&quot;</span><span class="s2">)</span>
+<span class="s1">CACHE_DIR </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">DATA_DIR</span><span class="s2">, </span><span class="s4">&quot;.mypy_cache&quot;</span><span class="s2">)</span>
+
+<span class="s3">#: A dictionary with file names as keys and lists of the mypy stdout as values.</span>
+<span class="s3">#: To-be populated by `run_mypy`.</span>
+<span class="s1">OUTPUT_MYPY</span><span class="s2">: </span><span class="s1">defaultdict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">list</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]] = </span><span class="s1">defaultdict</span><span class="s2">(</span><span class="s1">list</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_key_func</span><span class="s2">(</span><span class="s1">key</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot;Split at the first occurrence of the ``:`` character. 
+ 
+    Windows drive-letters (*e.g.* ``C:``) are ignored herein. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">drive</span><span class="s2">, </span><span class="s1">tail </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">splitdrive</span><span class="s2">(</span><span class="s1">key</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">drive</span><span class="s2">, </span><span class="s1">tail</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s4">&quot;:&quot;</span><span class="s2">, </span><span class="s6">1</span><span class="s2">)[</span><span class="s6">0</span><span class="s2">])</span>
+
+
+<span class="s0">def </span><span class="s1">_strip_filename</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">int</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]:</span>
+    <span class="s5">&quot;&quot;&quot;Strip the filename and line number from a mypy message.&quot;&quot;&quot;</span>
+    <span class="s1">_</span><span class="s2">, </span><span class="s1">tail </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">splitdrive</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">)</span>
+    <span class="s1">_</span><span class="s2">, </span><span class="s1">lineno</span><span class="s2">, </span><span class="s1">msg </span><span class="s2">= </span><span class="s1">tail</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s4">&quot;:&quot;</span><span class="s2">, </span><span class="s6">2</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">int</span><span class="s2">(</span><span class="s1">lineno</span><span class="s2">), </span><span class="s1">msg</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">()</span>
+
+
+<span class="s0">def </span><span class="s1">strip_func</span><span class="s2">(</span><span class="s1">match</span><span class="s2">: </span><span class="s1">re</span><span class="s2">.</span><span class="s1">Match</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot;`re.sub` helper function for stripping module names.&quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">match</span><span class="s2">.</span><span class="s1">groups</span><span class="s2">()[</span><span class="s6">1</span><span class="s2">]</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">fixture</span><span class="s2">(</span><span class="s1">scope</span><span class="s2">=</span><span class="s4">&quot;module&quot;</span><span class="s2">, </span><span class="s1">autouse</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">run_mypy</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot;Clears the cache and run mypy before running any of the typing tests. 
+ 
+    The mypy results are cached in `OUTPUT_MYPY` for further use. 
+ 
+    The cache refresh can be skipped using 
+ 
+    NUMPY_TYPING_TEST_CLEAR_CACHE=0 pytest numpy/typing/tests 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s2">(</span>
+        <span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">isdir</span><span class="s2">(</span><span class="s1">CACHE_DIR</span><span class="s2">)</span>
+        <span class="s0">and </span><span class="s1">bool</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">environ</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s4">&quot;NUMPY_TYPING_TEST_CLEAR_CACHE&quot;</span><span class="s2">, </span><span class="s0">True</span><span class="s2">))</span>
+    <span class="s2">):</span>
+        <span class="s1">shutil</span><span class="s2">.</span><span class="s1">rmtree</span><span class="s2">(</span><span class="s1">CACHE_DIR</span><span class="s2">)</span>
+
+    <span class="s1">split_pattern </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">compile</span><span class="s2">(</span><span class="s4">r&quot;(\s+)?\^(\~+)?&quot;</span><span class="s2">)</span>
+    <span class="s0">for </span><span class="s1">directory </span><span class="s0">in </span><span class="s2">(</span><span class="s1">PASS_DIR</span><span class="s2">, </span><span class="s1">REVEAL_DIR</span><span class="s2">, </span><span class="s1">FAIL_DIR</span><span class="s2">, </span><span class="s1">MISC_DIR</span><span class="s2">):</span>
+        <span class="s3"># Run mypy</span>
+        <span class="s1">stdout</span><span class="s2">, </span><span class="s1">stderr</span><span class="s2">, </span><span class="s1">exit_code </span><span class="s2">= </span><span class="s1">api</span><span class="s2">.</span><span class="s1">run</span><span class="s2">([</span>
+            <span class="s4">&quot;--config-file&quot;</span><span class="s2">,</span>
+            <span class="s1">MYPY_INI</span><span class="s2">,</span>
+            <span class="s4">&quot;--cache-dir&quot;</span><span class="s2">,</span>
+            <span class="s1">CACHE_DIR</span><span class="s2">,</span>
+            <span class="s1">directory</span><span class="s2">,</span>
+        <span class="s2">])</span>
+        <span class="s0">if </span><span class="s1">stderr</span><span class="s2">:</span>
+            <span class="s1">pytest</span><span class="s2">.</span><span class="s1">fail</span><span class="s2">(</span><span class="s4">f&quot;Unexpected mypy standard error</span><span class="s0">\n\n{</span><span class="s1">stderr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">exit_code </span><span class="s0">not in </span><span class="s2">{</span><span class="s6">0</span><span class="s2">, </span><span class="s6">1</span><span class="s2">}:</span>
+            <span class="s1">pytest</span><span class="s2">.</span><span class="s1">fail</span><span class="s2">(</span><span class="s4">f&quot;Unexpected mypy exit code: </span><span class="s0">{</span><span class="s1">exit_code</span><span class="s0">}\n\n{</span><span class="s1">stdout</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)</span>
+
+        <span class="s1">str_concat </span><span class="s2">= </span><span class="s4">&quot;&quot;</span>
+        <span class="s1">filename</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span>
+        <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">stdout</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s4">&quot;</span><span class="s0">\n</span><span class="s4">&quot;</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s4">&quot;note:&quot; </span><span class="s0">in </span><span class="s1">i</span><span class="s2">:</span>
+                <span class="s0">continue</span>
+            <span class="s0">if </span><span class="s1">filename </span><span class="s0">is None</span><span class="s2">:</span>
+                <span class="s1">filename </span><span class="s2">= </span><span class="s1">_key_func</span><span class="s2">(</span><span class="s1">i</span><span class="s2">)</span>
+
+            <span class="s1">str_concat </span><span class="s2">+= </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">i</span><span class="s0">}\n</span><span class="s4">&quot;</span>
+            <span class="s0">if </span><span class="s1">split_pattern</span><span class="s2">.</span><span class="s1">match</span><span class="s2">(</span><span class="s1">i</span><span class="s2">) </span><span class="s0">is not None</span><span class="s2">:</span>
+                <span class="s1">OUTPUT_MYPY</span><span class="s2">[</span><span class="s1">filename</span><span class="s2">].</span><span class="s1">append</span><span class="s2">(</span><span class="s1">str_concat</span><span class="s2">)</span>
+                <span class="s1">str_concat </span><span class="s2">= </span><span class="s4">&quot;&quot;</span>
+                <span class="s1">filename </span><span class="s2">= </span><span class="s0">None</span>
+
+
+<span class="s0">def </span><span class="s1">get_test_cases</span><span class="s2">(*</span><span class="s1">directories</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; list</span><span class="s2">[</span><span class="s4">&quot;ParameterSet&quot;</span><span class="s2">]:</span>
+    <span class="s1">test_cases </span><span class="s2">= []</span>
+    <span class="s0">for </span><span class="s1">directory </span><span class="s0">in </span><span class="s1">directories</span><span class="s2">:</span>
+        <span class="s0">for </span><span class="s1">root</span><span class="s2">, </span><span class="s1">_</span><span class="s2">, </span><span class="s1">files </span><span class="s0">in </span><span class="s1">os</span><span class="s2">.</span><span class="s1">walk</span><span class="s2">(</span><span class="s1">directory</span><span class="s2">):</span>
+            <span class="s0">for </span><span class="s1">fname </span><span class="s0">in </span><span class="s1">files</span><span class="s2">:</span>
+                <span class="s1">short_fname</span><span class="s2">, </span><span class="s1">ext </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">splitext</span><span class="s2">(</span><span class="s1">fname</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s1">ext </span><span class="s0">not in </span><span class="s2">(</span><span class="s4">&quot;.pyi&quot;</span><span class="s2">, </span><span class="s4">&quot;.py&quot;</span><span class="s2">):</span>
+                    <span class="s0">continue</span>
+
+                <span class="s1">fullpath </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">root</span><span class="s2">, </span><span class="s1">fname</span><span class="s2">)</span>
+                <span class="s1">test_cases</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">param</span><span class="s2">(</span><span class="s1">fullpath</span><span class="s2">, </span><span class="s1">id</span><span class="s2">=</span><span class="s1">short_fname</span><span class="s2">))</span>
+    <span class="s0">return </span><span class="s1">test_cases</span>
+
+
+<span class="s1">_FAIL_INDENT </span><span class="s2">= </span><span class="s4">&quot; &quot; </span><span class="s2">* </span><span class="s6">4</span>
+<span class="s1">_FAIL_SEP </span><span class="s2">= </span><span class="s4">&quot;</span><span class="s0">\n</span><span class="s4">&quot; </span><span class="s2">+ </span><span class="s4">&quot;_&quot; </span><span class="s2">* </span><span class="s6">79 </span><span class="s2">+ </span><span class="s4">&quot;</span><span class="s0">\n\n</span><span class="s4">&quot;</span>
+
+<span class="s1">_FAIL_MSG_REVEAL </span><span class="s2">= </span><span class="s4">&quot;&quot;&quot;{}:{} - reveal mismatch: 
+ 
+{}&quot;&quot;&quot;</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">slow</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span><span class="s1">NO_MYPY</span><span class="s2">, </span><span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;Mypy is not installed&quot;</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;path&quot;</span><span class="s2">, </span><span class="s1">get_test_cases</span><span class="s2">(</span><span class="s1">PASS_DIR</span><span class="s2">, </span><span class="s1">FAIL_DIR</span><span class="s2">))</span>
+<span class="s0">def </span><span class="s1">test_pass</span><span class="s2">(</span><span class="s1">path</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s3"># Alias `OUTPUT_MYPY` so that it appears in the local namespace</span>
+    <span class="s1">output_mypy </span><span class="s2">= </span><span class="s1">OUTPUT_MYPY</span>
+
+    <span class="s0">if </span><span class="s1">path </span><span class="s0">not in </span><span class="s1">output_mypy</span><span class="s2">:</span>
+        <span class="s0">return</span>
+
+    <span class="s1">relpath </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">relpath</span><span class="s2">(</span><span class="s1">path</span><span class="s2">)</span>
+
+    <span class="s3"># collect any reported errors, and clean up the output</span>
+    <span class="s1">messages </span><span class="s2">= []</span>
+    <span class="s0">for </span><span class="s1">message </span><span class="s0">in </span><span class="s1">output_mypy</span><span class="s2">[</span><span class="s1">path</span><span class="s2">]:</span>
+        <span class="s1">lineno</span><span class="s2">, </span><span class="s1">content </span><span class="s2">= </span><span class="s1">_strip_filename</span><span class="s2">(</span><span class="s1">message</span><span class="s2">)</span>
+        <span class="s1">content </span><span class="s2">= </span><span class="s1">content</span><span class="s2">.</span><span class="s1">removeprefix</span><span class="s2">(</span><span class="s4">&quot;error:&quot;</span><span class="s2">).</span><span class="s1">lstrip</span><span class="s2">()</span>
+        <span class="s1">messages</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">relpath</span><span class="s0">}</span><span class="s4">:</span><span class="s0">{</span><span class="s1">lineno</span><span class="s0">} </span><span class="s4">- </span><span class="s0">{</span><span class="s1">content</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">messages</span><span class="s2">:</span>
+        <span class="s1">pytest</span><span class="s2">.</span><span class="s1">fail</span><span class="s2">(</span><span class="s4">&quot;</span><span class="s0">\n</span><span class="s4">&quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">messages</span><span class="s2">), </span><span class="s1">pytrace</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">slow</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span><span class="s1">NO_MYPY</span><span class="s2">, </span><span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;Mypy is not installed&quot;</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;path&quot;</span><span class="s2">, </span><span class="s1">get_test_cases</span><span class="s2">(</span><span class="s1">REVEAL_DIR</span><span class="s2">))</span>
+<span class="s0">def </span><span class="s1">test_reveal</span><span class="s2">(</span><span class="s1">path</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot;Validate that mypy correctly infers the return-types of 
+    the expressions in `path`. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">__tracebackhide__ </span><span class="s2">= </span><span class="s0">True</span>
+
+    <span class="s1">output_mypy </span><span class="s2">= </span><span class="s1">OUTPUT_MYPY</span>
+    <span class="s0">if </span><span class="s1">path </span><span class="s0">not in </span><span class="s1">output_mypy</span><span class="s2">:</span>
+        <span class="s0">return</span>
+
+    <span class="s1">relpath </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">relpath</span><span class="s2">(</span><span class="s1">path</span><span class="s2">)</span>
+
+    <span class="s3"># collect any reported errors, and clean up the output</span>
+    <span class="s1">failures </span><span class="s2">= []</span>
+    <span class="s0">for </span><span class="s1">error_line </span><span class="s0">in </span><span class="s1">output_mypy</span><span class="s2">[</span><span class="s1">path</span><span class="s2">]:</span>
+        <span class="s1">lineno</span><span class="s2">, </span><span class="s1">error_msg </span><span class="s2">= </span><span class="s1">_strip_filename</span><span class="s2">(</span><span class="s1">error_line</span><span class="s2">)</span>
+        <span class="s1">error_msg </span><span class="s2">= </span><span class="s1">textwrap</span><span class="s2">.</span><span class="s1">indent</span><span class="s2">(</span><span class="s1">error_msg</span><span class="s2">, </span><span class="s1">_FAIL_INDENT</span><span class="s2">)</span>
+        <span class="s1">reason </span><span class="s2">= </span><span class="s1">_FAIL_MSG_REVEAL</span><span class="s2">.</span><span class="s1">format</span><span class="s2">(</span><span class="s1">relpath</span><span class="s2">, </span><span class="s1">lineno</span><span class="s2">, </span><span class="s1">error_msg</span><span class="s2">)</span>
+        <span class="s1">failures</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">reason</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">failures</span><span class="s2">:</span>
+        <span class="s1">reasons </span><span class="s2">= </span><span class="s1">_FAIL_SEP</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">failures</span><span class="s2">)</span>
+        <span class="s1">pytest</span><span class="s2">.</span><span class="s1">fail</span><span class="s2">(</span><span class="s1">reasons</span><span class="s2">, </span><span class="s1">pytrace</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">filterwarnings</span><span class="s2">(</span><span class="s4">&quot;ignore::DeprecationWarning&quot;</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">slow</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span><span class="s1">NO_MYPY</span><span class="s2">, </span><span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;Mypy is not installed&quot;</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">filterwarnings</span><span class="s2">(</span><span class="s4">&quot;ignore:numpy.fix is deprecated:DeprecationWarning&quot;</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;path&quot;</span><span class="s2">, </span><span class="s1">get_test_cases</span><span class="s2">(</span><span class="s1">PASS_DIR</span><span class="s2">))</span>
+<span class="s0">def </span><span class="s1">test_code_runs</span><span class="s2">(</span><span class="s1">path</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot;Validate that the code in `path` properly during runtime.&quot;&quot;&quot;</span>
+    <span class="s1">path_without_extension</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">splitext</span><span class="s2">(</span><span class="s1">path</span><span class="s2">)</span>
+    <span class="s1">dirname</span><span class="s2">, </span><span class="s1">filename </span><span class="s2">= </span><span class="s1">path</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">sep</span><span class="s2">)[-</span><span class="s6">2</span><span class="s2">:]</span>
+
+    <span class="s1">spec </span><span class="s2">= </span><span class="s1">importlib</span><span class="s2">.</span><span class="s1">util</span><span class="s2">.</span><span class="s1">spec_from_file_location</span><span class="s2">(</span>
+        <span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">dirname</span><span class="s0">}</span><span class="s4">.</span><span class="s0">{</span><span class="s1">filename</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">, </span><span class="s1">path</span>
+    <span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">spec </span><span class="s0">is not None</span>
+    <span class="s0">assert </span><span class="s1">spec</span><span class="s2">.</span><span class="s1">loader </span><span class="s0">is not None</span>
+
+    <span class="s1">test_module </span><span class="s2">= </span><span class="s1">importlib</span><span class="s2">.</span><span class="s1">util</span><span class="s2">.</span><span class="s1">module_from_spec</span><span class="s2">(</span><span class="s1">spec</span><span class="s2">)</span>
+    <span class="s1">spec</span><span class="s2">.</span><span class="s1">loader</span><span class="s2">.</span><span class="s1">exec_module</span><span class="s2">(</span><span class="s1">test_module</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

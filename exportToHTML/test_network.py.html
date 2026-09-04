@@ -1,0 +1,267 @@
+<html>
+<head>
+<title>test_network.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_network.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Tests parsers ability to read and parse non-local files 
+and hence require a network connection to be read. 
+&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">io </span><span class="s2">import </span><span class="s1">BytesIO</span>
+<span class="s2">import </span><span class="s1">logging</span>
+<span class="s2">import </span><span class="s1">re</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+<span class="s2">import </span><span class="s1">pytest</span>
+
+<span class="s2">import </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">_test_decorators </span><span class="s2">as </span><span class="s1">td</span>
+
+<span class="s2">from </span><span class="s1">pandas </span><span class="s2">import </span><span class="s1">DataFrame</span>
+<span class="s2">import </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_testing </span><span class="s2">as </span><span class="s1">tm</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">feather_format </span><span class="s2">import </span><span class="s1">read_feather</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">parsers </span><span class="s2">import </span><span class="s1">read_csv</span>
+
+<span class="s1">pytestmark </span><span class="s3">= </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">filterwarnings</span><span class="s3">(</span>
+    <span class="s4">&quot;ignore:Passing a BlockManager to DataFrame:DeprecationWarning&quot;</span>
+<span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">network</span>
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">single_cpu</span>
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;mode&quot;</span><span class="s3">, [</span><span class="s4">&quot;explicit&quot;</span><span class="s3">, </span><span class="s4">&quot;infer&quot;</span><span class="s3">])</span>
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;engine&quot;</span><span class="s3">, [</span><span class="s4">&quot;python&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">])</span>
+<span class="s2">def </span><span class="s1">test_compressed_urls</span><span class="s3">(</span>
+    <span class="s1">httpserver</span><span class="s3">,</span>
+    <span class="s1">datapath</span><span class="s3">,</span>
+    <span class="s1">salaries_table</span><span class="s3">,</span>
+    <span class="s1">mode</span><span class="s3">,</span>
+    <span class="s1">engine</span><span class="s3">,</span>
+    <span class="s1">compression_only</span><span class="s3">,</span>
+    <span class="s1">compression_to_extension</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s5"># test reading compressed urls with various engines and</span>
+    <span class="s5"># extension inference</span>
+    <span class="s2">if </span><span class="s1">compression_only </span><span class="s3">== </span><span class="s4">&quot;tar&quot;</span><span class="s3">:</span>
+        <span class="s1">pytest</span><span class="s3">.</span><span class="s1">skip</span><span class="s3">(</span><span class="s4">&quot;TODO: Add tar salaries.csv to pandas/io/parsers/data&quot;</span><span class="s3">)</span>
+
+    <span class="s1">extension </span><span class="s3">= </span><span class="s1">compression_to_extension</span><span class="s3">[</span><span class="s1">compression_only</span><span class="s3">]</span>
+    <span class="s2">with </span><span class="s1">open</span><span class="s3">(</span><span class="s1">datapath</span><span class="s3">(</span><span class="s4">&quot;io&quot;</span><span class="s3">, </span><span class="s4">&quot;parser&quot;</span><span class="s3">, </span><span class="s4">&quot;data&quot;</span><span class="s3">, </span><span class="s4">&quot;salaries.csv&quot; </span><span class="s3">+ </span><span class="s1">extension</span><span class="s3">), </span><span class="s4">&quot;rb&quot;</span><span class="s3">) </span><span class="s2">as </span><span class="s1">f</span><span class="s3">:</span>
+        <span class="s1">httpserver</span><span class="s3">.</span><span class="s1">serve_content</span><span class="s3">(</span><span class="s1">content</span><span class="s3">=</span><span class="s1">f</span><span class="s3">.</span><span class="s1">read</span><span class="s3">())</span>
+
+    <span class="s1">url </span><span class="s3">= </span><span class="s1">httpserver</span><span class="s3">.</span><span class="s1">url </span><span class="s3">+ </span><span class="s4">&quot;/salaries.csv&quot; </span><span class="s3">+ </span><span class="s1">extension</span>
+
+    <span class="s2">if </span><span class="s1">mode </span><span class="s3">!= </span><span class="s4">&quot;explicit&quot;</span><span class="s3">:</span>
+        <span class="s1">compression_only </span><span class="s3">= </span><span class="s1">mode</span>
+
+    <span class="s1">url_table </span><span class="s3">= </span><span class="s1">read_csv</span><span class="s3">(</span><span class="s1">url</span><span class="s3">, </span><span class="s1">sep</span><span class="s3">=</span><span class="s4">&quot;</span><span class="s2">\t</span><span class="s4">&quot;</span><span class="s3">, </span><span class="s1">compression</span><span class="s3">=</span><span class="s1">compression_only</span><span class="s3">, </span><span class="s1">engine</span><span class="s3">=</span><span class="s1">engine</span><span class="s3">)</span>
+    <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">url_table</span><span class="s3">, </span><span class="s1">salaries_table</span><span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">network</span>
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">single_cpu</span>
+<span class="s2">def </span><span class="s1">test_url_encoding_csv</span><span class="s3">(</span><span class="s1">httpserver</span><span class="s3">, </span><span class="s1">datapath</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    read_csv should honor the requested encoding for URLs. 
+ 
+    GH 10424 
+    &quot;&quot;&quot;</span>
+    <span class="s2">with </span><span class="s1">open</span><span class="s3">(</span><span class="s1">datapath</span><span class="s3">(</span><span class="s4">&quot;io&quot;</span><span class="s3">, </span><span class="s4">&quot;parser&quot;</span><span class="s3">, </span><span class="s4">&quot;data&quot;</span><span class="s3">, </span><span class="s4">&quot;unicode_series.csv&quot;</span><span class="s3">), </span><span class="s4">&quot;rb&quot;</span><span class="s3">) </span><span class="s2">as </span><span class="s1">f</span><span class="s3">:</span>
+        <span class="s1">httpserver</span><span class="s3">.</span><span class="s1">serve_content</span><span class="s3">(</span><span class="s1">content</span><span class="s3">=</span><span class="s1">f</span><span class="s3">.</span><span class="s1">read</span><span class="s3">())</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">read_csv</span><span class="s3">(</span><span class="s1">httpserver</span><span class="s3">.</span><span class="s1">url</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">=</span><span class="s4">&quot;latin-1&quot;</span><span class="s3">, </span><span class="s1">header</span><span class="s3">=</span><span class="s2">None</span><span class="s3">)</span>
+    <span class="s2">assert </span><span class="s1">df</span><span class="s3">.</span><span class="s1">loc</span><span class="s3">[</span><span class="s6">15</span><span class="s3">, </span><span class="s6">1</span><span class="s3">] == </span><span class="s4">&quot;Á köldum klaka (Cold Fever) (1994)&quot;</span>
+
+
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">fixture</span>
+<span class="s2">def </span><span class="s1">tips_df</span><span class="s3">(</span><span class="s1">datapath</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;DataFrame with the tips dataset.&quot;&quot;&quot;</span>
+    <span class="s2">return </span><span class="s1">read_csv</span><span class="s3">(</span><span class="s1">datapath</span><span class="s3">(</span><span class="s4">&quot;io&quot;</span><span class="s3">, </span><span class="s4">&quot;data&quot;</span><span class="s3">, </span><span class="s4">&quot;csv&quot;</span><span class="s3">, </span><span class="s4">&quot;tips.csv&quot;</span><span class="s3">))</span>
+
+
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">single_cpu</span>
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">network</span>
+<span class="s3">@</span><span class="s1">td</span><span class="s3">.</span><span class="s1">skip_if_not_us_locale</span><span class="s3">()</span>
+<span class="s2">class </span><span class="s1">TestS3</span><span class="s3">:</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+        <span class="s4">&quot;suffix, compression&quot;</span><span class="s3">,</span>
+        <span class="s3">[</span>
+            <span class="s3">(</span><span class="s4">&quot;&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">),</span>
+            <span class="s3">(</span><span class="s4">&quot;.gz&quot;</span><span class="s3">, </span><span class="s4">&quot;gzip&quot;</span><span class="s3">),</span>
+            <span class="s3">(</span><span class="s4">&quot;.bz2&quot;</span><span class="s3">, </span><span class="s4">&quot;bz2&quot;</span><span class="s3">),</span>
+        <span class="s3">],</span>
+    <span class="s3">)</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;nrows&quot;</span><span class="s3">, [</span><span class="s2">None</span><span class="s3">, </span><span class="s6">10</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;engine&quot;</span><span class="s3">, [</span><span class="s4">&quot;c&quot;</span><span class="s3">, </span><span class="s4">&quot;python&quot;</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_parse_public_s3_bucket</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">s3_bucket_public_with_data</span><span class="s3">,</span>
+        <span class="s1">s3so</span><span class="s3">,</span>
+        <span class="s1">tips_df</span><span class="s3">,</span>
+        <span class="s1">suffix</span><span class="s3">,</span>
+        <span class="s1">compression</span><span class="s3">,</span>
+        <span class="s1">nrows</span><span class="s3">,</span>
+        <span class="s1">engine</span><span class="s3">,</span>
+    <span class="s3">):</span>
+        <span class="s5"># more of an integration test due to the not-public contents portion</span>
+        <span class="s5"># can probably mock this though.</span>
+        <span class="s1">pytest</span><span class="s3">.</span><span class="s1">importorskip</span><span class="s3">(</span><span class="s4">&quot;s3fs&quot;</span><span class="s3">)</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">read_csv</span><span class="s3">(</span>
+            <span class="s4">f&quot;s3://</span><span class="s2">{</span><span class="s1">s3_bucket_public_with_data</span><span class="s3">.</span><span class="s1">name</span><span class="s2">}</span><span class="s4">/tips.csv</span><span class="s2">{</span><span class="s1">suffix</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">,</span>
+            <span class="s1">nrows</span><span class="s3">=</span><span class="s1">nrows</span><span class="s3">,</span>
+            <span class="s1">compression</span><span class="s3">=</span><span class="s1">compression</span><span class="s3">,</span>
+            <span class="s1">storage_options</span><span class="s3">=</span><span class="s1">s3so</span><span class="s3">,</span>
+            <span class="s1">engine</span><span class="s3">=</span><span class="s1">engine</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">df</span><span class="s3">, </span><span class="s1">tips_df</span><span class="s3">.</span><span class="s1">iloc</span><span class="s3">[:</span><span class="s1">nrows</span><span class="s3">])</span>
+
+    <span class="s2">def </span><span class="s1">test_parse_private_s3_bucket</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">s3_bucket_private_with_data</span><span class="s3">, </span><span class="s1">s3so</span><span class="s3">, </span><span class="s1">tips_df</span><span class="s3">):</span>
+        <span class="s5"># Read public file from bucket with not-public contents</span>
+        <span class="s1">pytest</span><span class="s3">.</span><span class="s1">importorskip</span><span class="s3">(</span><span class="s4">&quot;s3fs&quot;</span><span class="s3">)</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">read_csv</span><span class="s3">(</span>
+            <span class="s4">f&quot;s3://</span><span class="s2">{</span><span class="s1">s3_bucket_private_with_data</span><span class="s3">.</span><span class="s1">name</span><span class="s2">}</span><span class="s4">/tips.csv&quot;</span><span class="s3">, </span><span class="s1">storage_options</span><span class="s3">=</span><span class="s1">s3so</span>
+        <span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">df</span><span class="s3">, </span><span class="s1">tips_df</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;scheme&quot;</span><span class="s3">, [</span><span class="s4">&quot;s3n&quot;</span><span class="s3">, </span><span class="s4">&quot;s3a&quot;</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_parse_public_bucket_s3n_s3a</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">s3_bucket_public_with_data</span><span class="s3">, </span><span class="s1">s3so</span><span class="s3">, </span><span class="s1">tips_df</span><span class="s3">, </span><span class="s1">scheme</span>
+    <span class="s3">):</span>
+        <span class="s1">nrows </span><span class="s3">= </span><span class="s6">10</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">read_csv</span><span class="s3">(</span>
+            <span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">scheme</span><span class="s2">}</span><span class="s4">://</span><span class="s2">{</span><span class="s1">s3_bucket_public_with_data</span><span class="s3">.</span><span class="s1">name</span><span class="s2">}</span><span class="s4">/tips.csv&quot;</span><span class="s3">,</span>
+            <span class="s1">nrows</span><span class="s3">=</span><span class="s1">nrows</span><span class="s3">,</span>
+            <span class="s1">storage_options</span><span class="s3">=</span><span class="s1">s3so</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">df</span><span class="s3">, </span><span class="s1">tips_df</span><span class="s3">.</span><span class="s1">iloc</span><span class="s3">[:</span><span class="s1">nrows</span><span class="s3">])</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+        <span class="s4">&quot;suffix, compression&quot;</span><span class="s3">,</span>
+        <span class="s3">[</span>
+            <span class="s3">(</span><span class="s4">&quot;&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">),</span>
+            <span class="s3">(</span><span class="s4">&quot;.gz&quot;</span><span class="s3">, </span><span class="s4">&quot;gzip&quot;</span><span class="s3">),</span>
+            <span class="s3">(</span><span class="s4">&quot;.bz2&quot;</span><span class="s3">, </span><span class="s4">&quot;bz2&quot;</span><span class="s3">),</span>
+        <span class="s3">],</span>
+    <span class="s3">)</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;engine&quot;</span><span class="s3">, [</span><span class="s4">&quot;c&quot;</span><span class="s3">, </span><span class="s4">&quot;python&quot;</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_parse_public_s3_bucket_chunked</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">s3_bucket_public_with_data</span><span class="s3">, </span><span class="s1">s3so</span><span class="s3">, </span><span class="s1">tips_df</span><span class="s3">, </span><span class="s1">suffix</span><span class="s3">, </span><span class="s1">compression</span><span class="s3">, </span><span class="s1">engine</span>
+    <span class="s3">):</span>
+        <span class="s5"># Read with a chunksize</span>
+        <span class="s1">chunksize </span><span class="s3">= </span><span class="s6">5</span>
+        <span class="s2">with </span><span class="s1">read_csv</span><span class="s3">(</span>
+            <span class="s4">f&quot;s3://</span><span class="s2">{</span><span class="s1">s3_bucket_public_with_data</span><span class="s3">.</span><span class="s1">name</span><span class="s2">}</span><span class="s4">/tips.csv</span><span class="s2">{</span><span class="s1">suffix</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">,</span>
+            <span class="s1">chunksize</span><span class="s3">=</span><span class="s1">chunksize</span><span class="s3">,</span>
+            <span class="s1">compression</span><span class="s3">=</span><span class="s1">compression</span><span class="s3">,</span>
+            <span class="s1">storage_options</span><span class="s3">=</span><span class="s1">s3so</span><span class="s3">,</span>
+            <span class="s1">engine</span><span class="s3">=</span><span class="s1">engine</span><span class="s3">,</span>
+        <span class="s3">) </span><span class="s2">as </span><span class="s1">df_reader</span><span class="s3">:</span>
+            <span class="s2">assert </span><span class="s1">df_reader</span><span class="s3">.</span><span class="s1">chunksize </span><span class="s3">== </span><span class="s1">chunksize</span>
+            <span class="s2">for </span><span class="s1">i_chunk </span><span class="s2">in </span><span class="s3">[</span><span class="s6">0</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">]:</span>
+                <span class="s5"># Read a couple of chunks and make sure we see them</span>
+                <span class="s5"># properly.</span>
+                <span class="s1">df </span><span class="s3">= </span><span class="s1">df_reader</span><span class="s3">.</span><span class="s1">get_chunk</span><span class="s3">()</span>
+                <span class="s2">assert </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">df</span><span class="s3">, </span><span class="s1">DataFrame</span><span class="s3">)</span>
+                <span class="s2">assert not </span><span class="s1">df</span><span class="s3">.</span><span class="s1">empty</span>
+                <span class="s1">true_df </span><span class="s3">= </span><span class="s1">tips_df</span><span class="s3">.</span><span class="s1">iloc</span><span class="s3">[</span><span class="s1">chunksize </span><span class="s3">* </span><span class="s1">i_chunk </span><span class="s3">: </span><span class="s1">chunksize </span><span class="s3">* (</span><span class="s1">i_chunk </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">)]</span>
+                <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">true_df</span><span class="s3">, </span><span class="s1">df</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;suffix&quot;</span><span class="s3">, [</span><span class="s4">&quot;&quot;</span><span class="s3">, </span><span class="s4">&quot;.gz&quot;</span><span class="s3">, </span><span class="s4">&quot;.bz2&quot;</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_infer_s3_compression</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">s3_bucket_public_with_data</span><span class="s3">, </span><span class="s1">s3so</span><span class="s3">, </span><span class="s1">tips_df</span><span class="s3">, </span><span class="s1">suffix</span>
+    <span class="s3">):</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">read_csv</span><span class="s3">(</span>
+            <span class="s4">f&quot;s3://</span><span class="s2">{</span><span class="s1">s3_bucket_public_with_data</span><span class="s3">.</span><span class="s1">name</span><span class="s2">}</span><span class="s4">/tips.csv</span><span class="s2">{</span><span class="s1">suffix</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">,</span>
+            <span class="s1">engine</span><span class="s3">=</span><span class="s4">&quot;python&quot;</span><span class="s3">,</span>
+            <span class="s1">compression</span><span class="s3">=</span><span class="s4">&quot;infer&quot;</span><span class="s3">,</span>
+            <span class="s1">storage_options</span><span class="s3">=</span><span class="s1">s3so</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">df</span><span class="s3">, </span><span class="s1">tips_df</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_read_s3_fails</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">s3_bucket_public_with_data</span><span class="s3">, </span><span class="s1">s3so</span><span class="s3">):</span>
+        <span class="s1">msg </span><span class="s3">= </span><span class="s4">&quot;The specified bucket does not exist&quot;</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">OSError</span><span class="s3">, </span><span class="s1">match</span><span class="s3">=</span><span class="s1">msg</span><span class="s3">):</span>
+            <span class="s1">read_csv</span><span class="s3">(</span><span class="s4">&quot;s3://nyqpug/asdf.csv&quot;</span><span class="s3">, </span><span class="s1">storage_options</span><span class="s3">=</span><span class="s1">s3so</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_read_s3_fails_private</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">s3_bucket_private_with_data</span><span class="s3">, </span><span class="s1">s3so</span><span class="s3">):</span>
+        <span class="s1">s3_url </span><span class="s3">= </span><span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">s3_bucket_private_with_data</span><span class="s3">.</span><span class="s1">name</span><span class="s2">}</span><span class="s4">/file.csv&quot;</span>
+        <span class="s1">msg </span><span class="s3">= </span><span class="s4">rf&quot;</span><span class="s2">{</span><span class="s1">s3_url</span><span class="s2">}</span><span class="s4">&quot;</span>
+        <span class="s5"># Receive a permission error when trying to read a private bucket.</span>
+        <span class="s5"># It's irrelevant here that this isn't actually a table.</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">FileNotFoundError</span><span class="s3">, </span><span class="s1">match</span><span class="s3">=</span><span class="s1">msg</span><span class="s3">):</span>
+            <span class="s1">read_csv</span><span class="s3">(</span>
+                <span class="s4">f&quot;s3://</span><span class="s2">{</span><span class="s1">s3_url</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">,</span>
+                <span class="s1">storage_options</span><span class="s3">=</span><span class="s1">s3so</span><span class="s3">,</span>
+            <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">single_cpu</span>
+    <span class="s2">def </span><span class="s1">test_read_csv_handles_boto_s3_object</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">s3_bucket_public_with_data</span><span class="s3">, </span><span class="s1">tips_file</span>
+    <span class="s3">):</span>
+        <span class="s5"># see gh-16135</span>
+
+        <span class="s1">s3_object </span><span class="s3">= </span><span class="s1">s3_bucket_public_with_data</span><span class="s3">.</span><span class="s1">Object</span><span class="s3">(</span><span class="s4">&quot;tips.csv&quot;</span><span class="s3">)</span>
+
+        <span class="s2">with </span><span class="s1">BytesIO</span><span class="s3">(</span><span class="s1">s3_object</span><span class="s3">.</span><span class="s1">get</span><span class="s3">()[</span><span class="s4">&quot;Body&quot;</span><span class="s3">].</span><span class="s1">read</span><span class="s3">()) </span><span class="s2">as </span><span class="s1">buffer</span><span class="s3">:</span>
+            <span class="s1">result </span><span class="s3">= </span><span class="s1">read_csv</span><span class="s3">(</span><span class="s1">buffer</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">=</span><span class="s4">&quot;utf8&quot;</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">DataFrame</span><span class="s3">)</span>
+        <span class="s2">assert not </span><span class="s1">result</span><span class="s3">.</span><span class="s1">empty</span>
+
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">read_csv</span><span class="s3">(</span><span class="s1">tips_file</span><span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">expected</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">single_cpu</span>
+    <span class="s2">def </span><span class="s1">test_read_csv_chunked_download</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">s3_bucket_public</span><span class="s3">, </span><span class="s1">s3so</span><span class="s3">, </span><span class="s1">caplog</span><span class="s3">):</span>
+        <span class="s5"># 8 MB, S3FS uses 5MB chunks</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">DataFrame</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">zeros</span><span class="s3">((</span><span class="s6">100000</span><span class="s3">, </span><span class="s6">4</span><span class="s3">)), </span><span class="s1">columns</span><span class="s3">=</span><span class="s1">list</span><span class="s3">(</span><span class="s4">&quot;abcd&quot;</span><span class="s3">))</span>
+        <span class="s2">with </span><span class="s1">BytesIO</span><span class="s3">(</span><span class="s1">df</span><span class="s3">.</span><span class="s1">to_csv</span><span class="s3">().</span><span class="s1">encode</span><span class="s3">(</span><span class="s4">&quot;utf-8&quot;</span><span class="s3">)) </span><span class="s2">as </span><span class="s1">buf</span><span class="s3">:</span>
+            <span class="s1">s3_bucket_public</span><span class="s3">.</span><span class="s1">put_object</span><span class="s3">(</span><span class="s1">Key</span><span class="s3">=</span><span class="s4">&quot;large-file.csv&quot;</span><span class="s3">, </span><span class="s1">Body</span><span class="s3">=</span><span class="s1">buf</span><span class="s3">)</span>
+            <span class="s1">uri </span><span class="s3">= </span><span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">s3_bucket_public</span><span class="s3">.</span><span class="s1">name</span><span class="s2">}</span><span class="s4">/large-file.csv&quot;</span>
+            <span class="s1">match_re </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">rf&quot;^Fetch: </span><span class="s2">{</span><span class="s1">uri</span><span class="s2">}</span><span class="s4">, 0-(?P&lt;stop&gt;\d+)$&quot;</span><span class="s3">)</span>
+            <span class="s2">with </span><span class="s1">caplog</span><span class="s3">.</span><span class="s1">at_level</span><span class="s3">(</span><span class="s1">logging</span><span class="s3">.</span><span class="s1">DEBUG</span><span class="s3">, </span><span class="s1">logger</span><span class="s3">=</span><span class="s4">&quot;s3fs&quot;</span><span class="s3">):</span>
+                <span class="s1">read_csv</span><span class="s3">(</span>
+                    <span class="s4">f&quot;s3://</span><span class="s2">{</span><span class="s1">uri</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">,</span>
+                    <span class="s1">nrows</span><span class="s3">=</span><span class="s6">5</span><span class="s3">,</span>
+                    <span class="s1">storage_options</span><span class="s3">=</span><span class="s1">s3so</span><span class="s3">,</span>
+                <span class="s3">)</span>
+                <span class="s2">for </span><span class="s1">log </span><span class="s2">in </span><span class="s1">caplog</span><span class="s3">.</span><span class="s1">messages</span><span class="s3">:</span>
+                    <span class="s2">if </span><span class="s1">match </span><span class="s3">:= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s1">match_re</span><span class="s3">, </span><span class="s1">log</span><span class="s3">):</span>
+                        <span class="s5"># Less than 8 MB</span>
+                        <span class="s2">assert </span><span class="s1">int</span><span class="s3">(</span><span class="s1">match</span><span class="s3">.</span><span class="s1">group</span><span class="s3">(</span><span class="s4">&quot;stop&quot;</span><span class="s3">)) &lt; </span><span class="s6">8000000</span>
+
+    <span class="s2">def </span><span class="s1">test_read_s3_with_hash_in_key</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">s3_bucket_public_with_data</span><span class="s3">, </span><span class="s1">s3so</span><span class="s3">, </span><span class="s1">tips_df</span><span class="s3">):</span>
+        <span class="s5"># GH 25945</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">read_csv</span><span class="s3">(</span>
+            <span class="s4">f&quot;s3://</span><span class="s2">{</span><span class="s1">s3_bucket_public_with_data</span><span class="s3">.</span><span class="s1">name</span><span class="s2">}</span><span class="s4">/tips#1.csv&quot;</span><span class="s3">, </span><span class="s1">storage_options</span><span class="s3">=</span><span class="s1">s3so</span>
+        <span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">tips_df</span><span class="s3">, </span><span class="s1">result</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_read_feather_s3_file_path</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">s3_bucket_public_with_data</span><span class="s3">, </span><span class="s1">s3so</span><span class="s3">, </span><span class="s1">feather_file</span>
+    <span class="s3">):</span>
+        <span class="s5"># GH 29055</span>
+        <span class="s1">pytest</span><span class="s3">.</span><span class="s1">importorskip</span><span class="s3">(</span><span class="s4">&quot;pyarrow&quot;</span><span class="s3">)</span>
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">read_feather</span><span class="s3">(</span><span class="s1">feather_file</span><span class="s3">)</span>
+        <span class="s1">res </span><span class="s3">= </span><span class="s1">read_feather</span><span class="s3">(</span>
+            <span class="s4">f&quot;s3://</span><span class="s2">{</span><span class="s1">s3_bucket_public_with_data</span><span class="s3">.</span><span class="s1">name</span><span class="s2">}</span><span class="s4">/simple_dataset.feather&quot;</span><span class="s3">,</span>
+            <span class="s1">storage_options</span><span class="s3">=</span><span class="s1">s3so</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">expected</span><span class="s3">, </span><span class="s1">res</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,158 @@
+<html>
+<head>
+<title>buffer.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #5f826b; font-style: italic;}
+.s4 { color: #2aacb8;}
+.s5 { color: #7a7e85;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+buffer.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s2">,</span>
+    <span class="s1">Any</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">interchange</span><span class="s2">.</span><span class="s1">dataframe_protocol </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">Buffer</span><span class="s2">,</span>
+    <span class="s1">DlpackDeviceType</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s0">if </span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+    <span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+    <span class="s0">import </span><span class="s1">pyarrow </span><span class="s0">as </span><span class="s1">pa</span>
+
+
+<span class="s0">class </span><span class="s1">PandasBuffer</span><span class="s2">(</span><span class="s1">Buffer</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Data in the buffer is guaranteed to be contiguous in memory. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">x</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">, </span><span class="s1">allow_copy</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">True</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s3">&quot;&quot;&quot; 
+        Handle only regular columns (= numpy arrays) for now. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">x</span><span class="s2">.</span><span class="s1">strides</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] </span><span class="s0">and not </span><span class="s1">x</span><span class="s2">.</span><span class="s1">strides </span><span class="s2">== (</span><span class="s1">x</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">itemsize</span><span class="s2">,):</span>
+            <span class="s5"># The protocol does not support strided buffers, so a copy is</span>
+            <span class="s5"># necessary. If that's not allowed, we need to raise an exception.</span>
+            <span class="s0">if </span><span class="s1">allow_copy</span><span class="s2">:</span>
+                <span class="s1">x </span><span class="s2">= </span><span class="s1">x</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s0">raise </span><span class="s1">RuntimeError</span><span class="s2">(</span>
+                    <span class="s6">&quot;Exports cannot be zero-copy in the case of a non-contiguous buffer&quot;</span>
+                <span class="s2">)</span>
+
+        <span class="s5"># Store the numpy array in which the data resides as a private</span>
+        <span class="s5"># attribute, so we can use it to retrieve the public attributes</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_x </span><span class="s2">= </span><span class="s1">x</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">bufsize</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; int</span><span class="s2">:</span>
+        <span class="s3">&quot;&quot;&quot; 
+        Buffer size in bytes. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_x</span><span class="s2">.</span><span class="s1">size </span><span class="s2">* </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_x</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">itemsize</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">ptr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; int</span><span class="s2">:</span>
+        <span class="s3">&quot;&quot;&quot; 
+        Pointer to start of the buffer as an integer. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_x</span><span class="s2">.</span><span class="s1">__array_interface__</span><span class="s2">[</span><span class="s6">&quot;data&quot;</span><span class="s2">][</span><span class="s4">0</span><span class="s2">]</span>
+
+    <span class="s0">def </span><span class="s1">__dlpack__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Any</span><span class="s2">:</span>
+        <span class="s3">&quot;&quot;&quot; 
+        Represent this structure as DLPack interface. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_x</span><span class="s2">.</span><span class="s1">__dlpack__</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">__dlpack_device__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">DlpackDeviceType</span><span class="s2">, </span><span class="s1">int </span><span class="s2">| </span><span class="s0">None</span><span class="s2">]:</span>
+        <span class="s3">&quot;&quot;&quot; 
+        Device type and device ID for where the data in the buffer resides. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s2">(</span><span class="s1">DlpackDeviceType</span><span class="s2">.</span><span class="s1">CPU</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__repr__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s2">(</span>
+            <span class="s6">&quot;PandasBuffer(&quot;</span>
+            <span class="s2">+ </span><span class="s1">str</span><span class="s2">(</span>
+                <span class="s2">{</span>
+                    <span class="s6">&quot;bufsize&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">bufsize</span><span class="s2">,</span>
+                    <span class="s6">&quot;ptr&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">ptr</span><span class="s2">,</span>
+                    <span class="s6">&quot;device&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">__dlpack_device__</span><span class="s2">()[</span><span class="s4">0</span><span class="s2">].</span><span class="s1">name</span><span class="s2">,</span>
+                <span class="s2">}</span>
+            <span class="s2">)</span>
+            <span class="s2">+ </span><span class="s6">&quot;)&quot;</span>
+        <span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">PandasBufferPyarrow</span><span class="s2">(</span><span class="s1">Buffer</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Data in the buffer is guaranteed to be contiguous in memory. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">buffer</span><span class="s2">: </span><span class="s1">pa</span><span class="s2">.</span><span class="s1">Buffer</span><span class="s2">,</span>
+        <span class="s2">*,</span>
+        <span class="s1">length</span><span class="s2">: </span><span class="s1">int</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s3">&quot;&quot;&quot; 
+        Handle pyarrow chunked arrays. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_buffer </span><span class="s2">= </span><span class="s1">buffer</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_length </span><span class="s2">= </span><span class="s1">length</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">bufsize</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; int</span><span class="s2">:</span>
+        <span class="s3">&quot;&quot;&quot; 
+        Buffer size in bytes. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_buffer</span><span class="s2">.</span><span class="s1">size</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">ptr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; int</span><span class="s2">:</span>
+        <span class="s3">&quot;&quot;&quot; 
+        Pointer to start of the buffer as an integer. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_buffer</span><span class="s2">.</span><span class="s1">address</span>
+
+    <span class="s0">def </span><span class="s1">__dlpack__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Any</span><span class="s2">:</span>
+        <span class="s3">&quot;&quot;&quot; 
+        Represent this structure as DLPack interface. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError</span>
+
+    <span class="s0">def </span><span class="s1">__dlpack_device__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">DlpackDeviceType</span><span class="s2">, </span><span class="s1">int </span><span class="s2">| </span><span class="s0">None</span><span class="s2">]:</span>
+        <span class="s3">&quot;&quot;&quot; 
+        Device type and device ID for where the data in the buffer resides. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s2">(</span><span class="s1">DlpackDeviceType</span><span class="s2">.</span><span class="s1">CPU</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__repr__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s2">(</span>
+            <span class="s6">&quot;PandasBuffer[pyarrow](&quot;</span>
+            <span class="s2">+ </span><span class="s1">str</span><span class="s2">(</span>
+                <span class="s2">{</span>
+                    <span class="s6">&quot;bufsize&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">bufsize</span><span class="s2">,</span>
+                    <span class="s6">&quot;ptr&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">ptr</span><span class="s2">,</span>
+                    <span class="s6">&quot;device&quot;</span><span class="s2">: </span><span class="s6">&quot;CPU&quot;</span><span class="s2">,</span>
+                <span class="s2">}</span>
+            <span class="s2">)</span>
+            <span class="s2">+ </span><span class="s6">&quot;)&quot;</span>
+        <span class="s2">)</span>
+</pre>
+</body>
+</html>

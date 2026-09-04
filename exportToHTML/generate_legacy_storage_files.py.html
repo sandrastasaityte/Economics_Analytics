@@ -1,0 +1,444 @@
+<html>
+<head>
+<title>generate_legacy_storage_files.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #7a7e85;}
+.s4 { color: #bcbec4;}
+.s5 { color: #2aacb8;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+generate_legacy_storage_files.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+self-contained to write legacy storage pickle files 
+ 
+To use this script. Create an environment where you want 
+generate pickles, say its for 0.20.3, with your pandas clone 
+in ~/pandas 
+ 
+. activate pandas_0.20.3 
+cd ~/pandas/pandas 
+ 
+$ python -m tests.io.generate_legacy_storage_files \ 
+    tests/io/data/legacy_pickle/0.20.3/ pickle 
+ 
+This script generates a storage file for the current arch, system, 
+and python version 
+  pandas version: 0.20.3 
+  output dir    : pandas/pandas/tests/io/data/legacy_pickle/0.20.3/ 
+  storage format: pickle 
+created pickle file: 0.20.3_x86_64_darwin_3.5.2.pickle 
+ 
+The idea here is you are using the *current* version of the 
+generate_legacy_storage_files with an *older* version of pandas to 
+generate a pickle file. We will then check this file into a current 
+branch, and test using test_pickle.py. This will load the *older* 
+pickles and test versus the current data that is generated 
+(with main). These are then compared. 
+ 
+If we have cases where we changed the signature (e.g. we renamed 
+offset -&gt; freq in Timestamp). Then we have to conditionally execute 
+in the generate_legacy_storage_files.py to make it 
+run under the older AND the newer version. 
+ 
+&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">datetime </span><span class="s2">import </span><span class="s1">timedelta</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">pickle</span>
+<span class="s2">import </span><span class="s1">platform </span><span class="s2">as </span><span class="s1">pl</span>
+<span class="s2">import </span><span class="s1">sys</span>
+
+<span class="s3"># Remove script directory from path, otherwise Python will try to</span>
+<span class="s3"># import the JSON test directory as the json module</span>
+<span class="s1">sys</span><span class="s4">.</span><span class="s1">path</span><span class="s4">.</span><span class="s1">pop</span><span class="s4">(</span><span class="s5">0</span><span class="s4">)</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+
+<span class="s2">import </span><span class="s1">pandas</span>
+<span class="s2">from </span><span class="s1">pandas </span><span class="s2">import </span><span class="s4">(</span>
+    <span class="s1">Categorical</span><span class="s4">,</span>
+    <span class="s1">DataFrame</span><span class="s4">,</span>
+    <span class="s1">Index</span><span class="s4">,</span>
+    <span class="s1">MultiIndex</span><span class="s4">,</span>
+    <span class="s1">NaT</span><span class="s4">,</span>
+    <span class="s1">Period</span><span class="s4">,</span>
+    <span class="s1">RangeIndex</span><span class="s4">,</span>
+    <span class="s1">Series</span><span class="s4">,</span>
+    <span class="s1">Timestamp</span><span class="s4">,</span>
+    <span class="s1">bdate_range</span><span class="s4">,</span>
+    <span class="s1">date_range</span><span class="s4">,</span>
+    <span class="s1">interval_range</span><span class="s4">,</span>
+    <span class="s1">period_range</span><span class="s4">,</span>
+    <span class="s1">timedelta_range</span><span class="s4">,</span>
+<span class="s4">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s4">.</span><span class="s1">arrays </span><span class="s2">import </span><span class="s1">SparseArray</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s4">.</span><span class="s1">tseries</span><span class="s4">.</span><span class="s1">offsets </span><span class="s2">import </span><span class="s4">(</span>
+    <span class="s1">FY5253</span><span class="s4">,</span>
+    <span class="s1">BusinessDay</span><span class="s4">,</span>
+    <span class="s1">BusinessHour</span><span class="s4">,</span>
+    <span class="s1">CustomBusinessDay</span><span class="s4">,</span>
+    <span class="s1">DateOffset</span><span class="s4">,</span>
+    <span class="s1">Day</span><span class="s4">,</span>
+    <span class="s1">Easter</span><span class="s4">,</span>
+    <span class="s1">Hour</span><span class="s4">,</span>
+    <span class="s1">LastWeekOfMonth</span><span class="s4">,</span>
+    <span class="s1">Minute</span><span class="s4">,</span>
+    <span class="s1">MonthBegin</span><span class="s4">,</span>
+    <span class="s1">MonthEnd</span><span class="s4">,</span>
+    <span class="s1">QuarterBegin</span><span class="s4">,</span>
+    <span class="s1">QuarterEnd</span><span class="s4">,</span>
+    <span class="s1">SemiMonthBegin</span><span class="s4">,</span>
+    <span class="s1">SemiMonthEnd</span><span class="s4">,</span>
+    <span class="s1">Week</span><span class="s4">,</span>
+    <span class="s1">WeekOfMonth</span><span class="s4">,</span>
+    <span class="s1">YearBegin</span><span class="s4">,</span>
+    <span class="s1">YearEnd</span><span class="s4">,</span>
+<span class="s4">)</span>
+
+
+<span class="s2">def </span><span class="s1">_create_sp_series</span><span class="s4">():</span>
+    <span class="s1">nan </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">nan</span>
+
+    <span class="s3"># nan-based</span>
+    <span class="s1">arr </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">arange</span><span class="s4">(</span><span class="s5">15</span><span class="s4">, </span><span class="s1">dtype</span><span class="s4">=</span><span class="s1">np</span><span class="s4">.</span><span class="s1">float64</span><span class="s4">)</span>
+    <span class="s1">arr</span><span class="s4">[</span><span class="s5">7</span><span class="s4">:</span><span class="s5">12</span><span class="s4">] = </span><span class="s1">nan</span>
+    <span class="s1">arr</span><span class="s4">[-</span><span class="s5">1</span><span class="s4">:] = </span><span class="s1">nan</span>
+
+    <span class="s1">bseries </span><span class="s4">= </span><span class="s1">Series</span><span class="s4">(</span><span class="s1">SparseArray</span><span class="s4">(</span><span class="s1">arr</span><span class="s4">, </span><span class="s1">kind</span><span class="s4">=</span><span class="s6">&quot;block&quot;</span><span class="s4">))</span>
+    <span class="s1">bseries</span><span class="s4">.</span><span class="s1">name </span><span class="s4">= </span><span class="s6">&quot;bseries&quot;</span>
+    <span class="s2">return </span><span class="s1">bseries</span>
+
+
+<span class="s2">def </span><span class="s1">_create_sp_tsseries</span><span class="s4">():</span>
+    <span class="s1">nan </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">nan</span>
+
+    <span class="s3"># nan-based</span>
+    <span class="s1">arr </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">arange</span><span class="s4">(</span><span class="s5">15</span><span class="s4">, </span><span class="s1">dtype</span><span class="s4">=</span><span class="s1">np</span><span class="s4">.</span><span class="s1">float64</span><span class="s4">)</span>
+    <span class="s1">arr</span><span class="s4">[</span><span class="s5">7</span><span class="s4">:</span><span class="s5">12</span><span class="s4">] = </span><span class="s1">nan</span>
+    <span class="s1">arr</span><span class="s4">[-</span><span class="s5">1</span><span class="s4">:] = </span><span class="s1">nan</span>
+
+    <span class="s1">date_index </span><span class="s4">= </span><span class="s1">bdate_range</span><span class="s4">(</span><span class="s6">&quot;1/1/2011&quot;</span><span class="s4">, </span><span class="s1">periods</span><span class="s4">=</span><span class="s1">len</span><span class="s4">(</span><span class="s1">arr</span><span class="s4">))</span>
+    <span class="s1">bseries </span><span class="s4">= </span><span class="s1">Series</span><span class="s4">(</span><span class="s1">SparseArray</span><span class="s4">(</span><span class="s1">arr</span><span class="s4">, </span><span class="s1">kind</span><span class="s4">=</span><span class="s6">&quot;block&quot;</span><span class="s4">), </span><span class="s1">index</span><span class="s4">=</span><span class="s1">date_index</span><span class="s4">)</span>
+    <span class="s1">bseries</span><span class="s4">.</span><span class="s1">name </span><span class="s4">= </span><span class="s6">&quot;btsseries&quot;</span>
+    <span class="s2">return </span><span class="s1">bseries</span>
+
+
+<span class="s2">def </span><span class="s1">_create_sp_frame</span><span class="s4">():</span>
+    <span class="s1">nan </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">nan</span>
+
+    <span class="s1">data </span><span class="s4">= {</span>
+        <span class="s6">&quot;A&quot;</span><span class="s4">: [</span><span class="s1">nan</span><span class="s4">, </span><span class="s1">nan</span><span class="s4">, </span><span class="s1">nan</span><span class="s4">, </span><span class="s5">0</span><span class="s4">, </span><span class="s5">1</span><span class="s4">, </span><span class="s5">2</span><span class="s4">, </span><span class="s5">3</span><span class="s4">, </span><span class="s5">4</span><span class="s4">, </span><span class="s5">5</span><span class="s4">, </span><span class="s5">6</span><span class="s4">],</span>
+        <span class="s6">&quot;B&quot;</span><span class="s4">: [</span><span class="s5">0</span><span class="s4">, </span><span class="s5">1</span><span class="s4">, </span><span class="s5">2</span><span class="s4">, </span><span class="s1">nan</span><span class="s4">, </span><span class="s1">nan</span><span class="s4">, </span><span class="s1">nan</span><span class="s4">, </span><span class="s5">3</span><span class="s4">, </span><span class="s5">4</span><span class="s4">, </span><span class="s5">5</span><span class="s4">, </span><span class="s5">6</span><span class="s4">],</span>
+        <span class="s6">&quot;C&quot;</span><span class="s4">: </span><span class="s1">np</span><span class="s4">.</span><span class="s1">arange</span><span class="s4">(</span><span class="s5">10</span><span class="s4">).</span><span class="s1">astype</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">int64</span><span class="s4">),</span>
+        <span class="s6">&quot;D&quot;</span><span class="s4">: [</span><span class="s5">0</span><span class="s4">, </span><span class="s5">1</span><span class="s4">, </span><span class="s5">2</span><span class="s4">, </span><span class="s5">3</span><span class="s4">, </span><span class="s5">4</span><span class="s4">, </span><span class="s5">5</span><span class="s4">, </span><span class="s1">nan</span><span class="s4">, </span><span class="s1">nan</span><span class="s4">, </span><span class="s1">nan</span><span class="s4">, </span><span class="s1">nan</span><span class="s4">],</span>
+    <span class="s4">}</span>
+
+    <span class="s1">dates </span><span class="s4">= </span><span class="s1">bdate_range</span><span class="s4">(</span><span class="s6">&quot;1/1/2011&quot;</span><span class="s4">, </span><span class="s1">periods</span><span class="s4">=</span><span class="s5">10</span><span class="s4">)</span>
+    <span class="s2">return </span><span class="s1">DataFrame</span><span class="s4">(</span><span class="s1">data</span><span class="s4">, </span><span class="s1">index</span><span class="s4">=</span><span class="s1">dates</span><span class="s4">).</span><span class="s1">apply</span><span class="s4">(</span><span class="s1">SparseArray</span><span class="s4">)</span>
+
+
+<span class="s2">def </span><span class="s1">create_pickle_data</span><span class="s4">(</span><span class="s1">test</span><span class="s4">: </span><span class="s1">bool </span><span class="s4">= </span><span class="s2">True</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;create the pickle data&quot;&quot;&quot;</span>
+    <span class="s1">data </span><span class="s4">= {</span>
+        <span class="s6">&quot;A&quot;</span><span class="s4">: [</span><span class="s5">0.0</span><span class="s4">, </span><span class="s5">1.0</span><span class="s4">, </span><span class="s5">2.0</span><span class="s4">, </span><span class="s5">3.0</span><span class="s4">, </span><span class="s1">np</span><span class="s4">.</span><span class="s1">nan</span><span class="s4">],</span>
+        <span class="s6">&quot;B&quot;</span><span class="s4">: [</span><span class="s5">0</span><span class="s4">, </span><span class="s5">1</span><span class="s4">, </span><span class="s5">0</span><span class="s4">, </span><span class="s5">1</span><span class="s4">, </span><span class="s5">0</span><span class="s4">],</span>
+        <span class="s6">&quot;C&quot;</span><span class="s4">: [</span><span class="s6">&quot;foo1&quot;</span><span class="s4">, </span><span class="s6">&quot;foo2&quot;</span><span class="s4">, </span><span class="s6">&quot;foo3&quot;</span><span class="s4">, </span><span class="s6">&quot;foo4&quot;</span><span class="s4">, </span><span class="s6">&quot;foo5&quot;</span><span class="s4">],</span>
+        <span class="s6">&quot;D&quot;</span><span class="s4">: </span><span class="s1">date_range</span><span class="s4">(</span><span class="s6">&quot;1/1/2009&quot;</span><span class="s4">, </span><span class="s1">periods</span><span class="s4">=</span><span class="s5">5</span><span class="s4">),</span>
+        <span class="s6">&quot;E&quot;</span><span class="s4">: [</span><span class="s5">0.0</span><span class="s4">, </span><span class="s5">1</span><span class="s4">, </span><span class="s1">Timestamp</span><span class="s4">(</span><span class="s6">&quot;20100101&quot;</span><span class="s4">), </span><span class="s6">&quot;foo&quot;</span><span class="s4">, </span><span class="s5">2.0</span><span class="s4">],</span>
+    <span class="s4">}</span>
+
+    <span class="s1">scalars </span><span class="s4">= {</span><span class="s6">&quot;timestamp&quot;</span><span class="s4">: </span><span class="s1">Timestamp</span><span class="s4">(</span><span class="s6">&quot;20130101&quot;</span><span class="s4">), </span><span class="s6">&quot;period&quot;</span><span class="s4">: </span><span class="s1">Period</span><span class="s4">(</span><span class="s6">&quot;2012&quot;</span><span class="s4">, </span><span class="s6">&quot;M&quot;</span><span class="s4">)}</span>
+
+    <span class="s1">index </span><span class="s4">= {</span>
+        <span class="s6">&quot;int&quot;</span><span class="s4">: </span><span class="s1">Index</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">arange</span><span class="s4">(</span><span class="s5">10</span><span class="s4">)),</span>
+        <span class="s6">&quot;date&quot;</span><span class="s4">: </span><span class="s1">date_range</span><span class="s4">(</span><span class="s6">&quot;20130101&quot;</span><span class="s4">, </span><span class="s1">periods</span><span class="s4">=</span><span class="s5">10</span><span class="s4">),</span>
+        <span class="s6">&quot;period&quot;</span><span class="s4">: </span><span class="s1">period_range</span><span class="s4">(</span><span class="s6">&quot;2013-01-01&quot;</span><span class="s4">, </span><span class="s1">freq</span><span class="s4">=</span><span class="s6">&quot;M&quot;</span><span class="s4">, </span><span class="s1">periods</span><span class="s4">=</span><span class="s5">10</span><span class="s4">),</span>
+        <span class="s6">&quot;float&quot;</span><span class="s4">: </span><span class="s1">Index</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">arange</span><span class="s4">(</span><span class="s5">10</span><span class="s4">, </span><span class="s1">dtype</span><span class="s4">=</span><span class="s1">np</span><span class="s4">.</span><span class="s1">float64</span><span class="s4">)),</span>
+        <span class="s6">&quot;uint&quot;</span><span class="s4">: </span><span class="s1">Index</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">arange</span><span class="s4">(</span><span class="s5">10</span><span class="s4">, </span><span class="s1">dtype</span><span class="s4">=</span><span class="s1">np</span><span class="s4">.</span><span class="s1">uint64</span><span class="s4">)),</span>
+        <span class="s6">&quot;timedelta&quot;</span><span class="s4">: </span><span class="s1">timedelta_range</span><span class="s4">(</span><span class="s6">&quot;00:00:00&quot;</span><span class="s4">, </span><span class="s1">freq</span><span class="s4">=</span><span class="s6">&quot;30min&quot;</span><span class="s4">, </span><span class="s1">periods</span><span class="s4">=</span><span class="s5">10</span><span class="s4">),</span>
+        <span class="s6">&quot;string&quot;</span><span class="s4">: </span><span class="s1">Index</span><span class="s4">([</span><span class="s6">&quot;foo&quot;</span><span class="s4">, </span><span class="s6">&quot;bar&quot;</span><span class="s4">, </span><span class="s6">&quot;baz&quot;</span><span class="s4">, </span><span class="s6">&quot;qux&quot;</span><span class="s4">, </span><span class="s6">&quot;quux&quot;</span><span class="s4">], </span><span class="s1">dtype</span><span class="s4">=</span><span class="s6">&quot;string&quot;</span><span class="s4">),</span>
+    <span class="s4">}</span>
+
+    <span class="s1">index</span><span class="s4">[</span><span class="s6">&quot;range&quot;</span><span class="s4">] = </span><span class="s1">RangeIndex</span><span class="s4">(</span><span class="s5">10</span><span class="s4">)</span>
+
+    <span class="s1">index</span><span class="s4">[</span><span class="s6">&quot;interval&quot;</span><span class="s4">] = </span><span class="s1">interval_range</span><span class="s4">(</span><span class="s5">0</span><span class="s4">, </span><span class="s1">periods</span><span class="s4">=</span><span class="s5">10</span><span class="s4">)</span>
+
+    <span class="s1">mi </span><span class="s4">= {</span>
+        <span class="s6">&quot;reg2&quot;</span><span class="s4">: </span><span class="s1">MultiIndex</span><span class="s4">.</span><span class="s1">from_tuples</span><span class="s4">(</span>
+            <span class="s1">tuple</span><span class="s4">(</span>
+                <span class="s1">zip</span><span class="s4">(</span>
+                    <span class="s4">*[</span>
+                        <span class="s4">[</span><span class="s6">&quot;bar&quot;</span><span class="s4">, </span><span class="s6">&quot;bar&quot;</span><span class="s4">, </span><span class="s6">&quot;baz&quot;</span><span class="s4">, </span><span class="s6">&quot;baz&quot;</span><span class="s4">, </span><span class="s6">&quot;foo&quot;</span><span class="s4">, </span><span class="s6">&quot;foo&quot;</span><span class="s4">, </span><span class="s6">&quot;qux&quot;</span><span class="s4">, </span><span class="s6">&quot;qux&quot;</span><span class="s4">],</span>
+                        <span class="s4">[</span><span class="s6">&quot;one&quot;</span><span class="s4">, </span><span class="s6">&quot;two&quot;</span><span class="s4">, </span><span class="s6">&quot;one&quot;</span><span class="s4">, </span><span class="s6">&quot;two&quot;</span><span class="s4">, </span><span class="s6">&quot;one&quot;</span><span class="s4">, </span><span class="s6">&quot;two&quot;</span><span class="s4">, </span><span class="s6">&quot;one&quot;</span><span class="s4">, </span><span class="s6">&quot;two&quot;</span><span class="s4">],</span>
+                    <span class="s4">]</span>
+                <span class="s4">)</span>
+            <span class="s4">),</span>
+            <span class="s1">names</span><span class="s4">=[</span><span class="s6">&quot;first&quot;</span><span class="s4">, </span><span class="s6">&quot;second&quot;</span><span class="s4">],</span>
+        <span class="s4">)</span>
+    <span class="s4">}</span>
+
+    <span class="s1">series </span><span class="s4">= {</span>
+        <span class="s6">&quot;float&quot;</span><span class="s4">: </span><span class="s1">Series</span><span class="s4">(</span><span class="s1">data</span><span class="s4">[</span><span class="s6">&quot;A&quot;</span><span class="s4">]),</span>
+        <span class="s6">&quot;int&quot;</span><span class="s4">: </span><span class="s1">Series</span><span class="s4">(</span><span class="s1">data</span><span class="s4">[</span><span class="s6">&quot;B&quot;</span><span class="s4">]),</span>
+        <span class="s6">&quot;mixed&quot;</span><span class="s4">: </span><span class="s1">Series</span><span class="s4">(</span><span class="s1">data</span><span class="s4">[</span><span class="s6">&quot;E&quot;</span><span class="s4">]),</span>
+        <span class="s6">&quot;ts&quot;</span><span class="s4">: </span><span class="s1">Series</span><span class="s4">(</span>
+            <span class="s1">np</span><span class="s4">.</span><span class="s1">arange</span><span class="s4">(</span><span class="s5">10</span><span class="s4">).</span><span class="s1">astype</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">int64</span><span class="s4">), </span><span class="s1">index</span><span class="s4">=</span><span class="s1">date_range</span><span class="s4">(</span><span class="s6">&quot;20130101&quot;</span><span class="s4">, </span><span class="s1">periods</span><span class="s4">=</span><span class="s5">10</span><span class="s4">)</span>
+        <span class="s4">),</span>
+        <span class="s6">&quot;mi&quot;</span><span class="s4">: </span><span class="s1">Series</span><span class="s4">(</span>
+            <span class="s1">np</span><span class="s4">.</span><span class="s1">arange</span><span class="s4">(</span><span class="s5">5</span><span class="s4">).</span><span class="s1">astype</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">float64</span><span class="s4">),</span>
+            <span class="s1">index</span><span class="s4">=</span><span class="s1">MultiIndex</span><span class="s4">.</span><span class="s1">from_tuples</span><span class="s4">(</span>
+                <span class="s1">tuple</span><span class="s4">(</span><span class="s1">zip</span><span class="s4">(*[[</span><span class="s5">1</span><span class="s4">, </span><span class="s5">1</span><span class="s4">, </span><span class="s5">2</span><span class="s4">, </span><span class="s5">2</span><span class="s4">, </span><span class="s5">2</span><span class="s4">], [</span><span class="s5">3</span><span class="s4">, </span><span class="s5">4</span><span class="s4">, </span><span class="s5">3</span><span class="s4">, </span><span class="s5">4</span><span class="s4">, </span><span class="s5">5</span><span class="s4">]])), </span><span class="s1">names</span><span class="s4">=[</span><span class="s6">&quot;one&quot;</span><span class="s4">, </span><span class="s6">&quot;two&quot;</span><span class="s4">]</span>
+            <span class="s4">),</span>
+        <span class="s4">),</span>
+        <span class="s6">&quot;dup&quot;</span><span class="s4">: </span><span class="s1">Series</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">arange</span><span class="s4">(</span><span class="s5">5</span><span class="s4">).</span><span class="s1">astype</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">float64</span><span class="s4">), </span><span class="s1">index</span><span class="s4">=[</span><span class="s6">&quot;A&quot;</span><span class="s4">, </span><span class="s6">&quot;B&quot;</span><span class="s4">, </span><span class="s6">&quot;C&quot;</span><span class="s4">, </span><span class="s6">&quot;D&quot;</span><span class="s4">, </span><span class="s6">&quot;A&quot;</span><span class="s4">]),</span>
+        <span class="s6">&quot;cat&quot;</span><span class="s4">: </span><span class="s1">Series</span><span class="s4">(</span><span class="s1">Categorical</span><span class="s4">([</span><span class="s6">&quot;foo&quot;</span><span class="s4">, </span><span class="s6">&quot;bar&quot;</span><span class="s4">, </span><span class="s6">&quot;baz&quot;</span><span class="s4">])),</span>
+        <span class="s6">&quot;dt&quot;</span><span class="s4">: </span><span class="s1">Series</span><span class="s4">(</span><span class="s1">date_range</span><span class="s4">(</span><span class="s6">&quot;20130101&quot;</span><span class="s4">, </span><span class="s1">periods</span><span class="s4">=</span><span class="s5">5</span><span class="s4">)),</span>
+        <span class="s6">&quot;dt_tz&quot;</span><span class="s4">: </span><span class="s1">Series</span><span class="s4">(</span><span class="s1">date_range</span><span class="s4">(</span><span class="s6">&quot;20130101&quot;</span><span class="s4">, </span><span class="s1">periods</span><span class="s4">=</span><span class="s5">5</span><span class="s4">, </span><span class="s1">tz</span><span class="s4">=</span><span class="s6">&quot;US/Eastern&quot;</span><span class="s4">)),</span>
+        <span class="s6">&quot;period&quot;</span><span class="s4">: </span><span class="s1">Series</span><span class="s4">([</span><span class="s1">Period</span><span class="s4">(</span><span class="s6">&quot;2000Q1&quot;</span><span class="s4">)] * </span><span class="s5">5</span><span class="s4">),</span>
+        <span class="s6">&quot;string&quot;</span><span class="s4">: </span><span class="s1">Series</span><span class="s4">([</span><span class="s6">&quot;foo&quot;</span><span class="s4">, </span><span class="s6">&quot;bar&quot;</span><span class="s4">, </span><span class="s6">&quot;baz&quot;</span><span class="s4">, </span><span class="s6">&quot;qux&quot;</span><span class="s4">, </span><span class="s6">&quot;quux&quot;</span><span class="s4">], </span><span class="s1">dtype</span><span class="s4">=</span><span class="s6">&quot;string&quot;</span><span class="s4">),</span>
+    <span class="s4">}</span>
+
+    <span class="s1">mixed_dup_df </span><span class="s4">= </span><span class="s1">DataFrame</span><span class="s4">(</span><span class="s1">data</span><span class="s4">)</span>
+    <span class="s1">mixed_dup_df</span><span class="s4">.</span><span class="s1">columns </span><span class="s4">= </span><span class="s1">list</span><span class="s4">(</span><span class="s6">&quot;ABCDA&quot;</span><span class="s4">)</span>
+    <span class="s1">frame </span><span class="s4">= {</span>
+        <span class="s6">&quot;float&quot;</span><span class="s4">: </span><span class="s1">DataFrame</span><span class="s4">({</span><span class="s6">&quot;A&quot;</span><span class="s4">: </span><span class="s1">series</span><span class="s4">[</span><span class="s6">&quot;float&quot;</span><span class="s4">], </span><span class="s6">&quot;B&quot;</span><span class="s4">: </span><span class="s1">series</span><span class="s4">[</span><span class="s6">&quot;float&quot;</span><span class="s4">] + </span><span class="s5">1</span><span class="s4">}),</span>
+        <span class="s6">&quot;int&quot;</span><span class="s4">: </span><span class="s1">DataFrame</span><span class="s4">({</span><span class="s6">&quot;A&quot;</span><span class="s4">: </span><span class="s1">series</span><span class="s4">[</span><span class="s6">&quot;int&quot;</span><span class="s4">], </span><span class="s6">&quot;B&quot;</span><span class="s4">: </span><span class="s1">series</span><span class="s4">[</span><span class="s6">&quot;int&quot;</span><span class="s4">] + </span><span class="s5">1</span><span class="s4">}),</span>
+        <span class="s6">&quot;mixed&quot;</span><span class="s4">: </span><span class="s1">DataFrame</span><span class="s4">({</span><span class="s1">k</span><span class="s4">: </span><span class="s1">data</span><span class="s4">[</span><span class="s1">k</span><span class="s4">] </span><span class="s2">for </span><span class="s1">k </span><span class="s2">in </span><span class="s4">[</span><span class="s6">&quot;A&quot;</span><span class="s4">, </span><span class="s6">&quot;B&quot;</span><span class="s4">, </span><span class="s6">&quot;C&quot;</span><span class="s4">, </span><span class="s6">&quot;D&quot;</span><span class="s4">]}),</span>
+        <span class="s6">&quot;mi&quot;</span><span class="s4">: </span><span class="s1">DataFrame</span><span class="s4">(</span>
+            <span class="s4">{</span><span class="s6">&quot;A&quot;</span><span class="s4">: </span><span class="s1">np</span><span class="s4">.</span><span class="s1">arange</span><span class="s4">(</span><span class="s5">5</span><span class="s4">).</span><span class="s1">astype</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">float64</span><span class="s4">), </span><span class="s6">&quot;B&quot;</span><span class="s4">: </span><span class="s1">np</span><span class="s4">.</span><span class="s1">arange</span><span class="s4">(</span><span class="s5">5</span><span class="s4">).</span><span class="s1">astype</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">int64</span><span class="s4">)},</span>
+            <span class="s1">index</span><span class="s4">=</span><span class="s1">MultiIndex</span><span class="s4">.</span><span class="s1">from_tuples</span><span class="s4">(</span>
+                <span class="s1">tuple</span><span class="s4">(</span>
+                    <span class="s1">zip</span><span class="s4">(</span>
+                        <span class="s4">*[</span>
+                            <span class="s4">[</span><span class="s6">&quot;bar&quot;</span><span class="s4">, </span><span class="s6">&quot;bar&quot;</span><span class="s4">, </span><span class="s6">&quot;baz&quot;</span><span class="s4">, </span><span class="s6">&quot;baz&quot;</span><span class="s4">, </span><span class="s6">&quot;baz&quot;</span><span class="s4">],</span>
+                            <span class="s4">[</span><span class="s6">&quot;one&quot;</span><span class="s4">, </span><span class="s6">&quot;two&quot;</span><span class="s4">, </span><span class="s6">&quot;one&quot;</span><span class="s4">, </span><span class="s6">&quot;two&quot;</span><span class="s4">, </span><span class="s6">&quot;three&quot;</span><span class="s4">],</span>
+                        <span class="s4">]</span>
+                    <span class="s4">)</span>
+                <span class="s4">),</span>
+                <span class="s1">names</span><span class="s4">=[</span><span class="s6">&quot;first&quot;</span><span class="s4">, </span><span class="s6">&quot;second&quot;</span><span class="s4">],</span>
+            <span class="s4">),</span>
+        <span class="s4">),</span>
+        <span class="s6">&quot;dup&quot;</span><span class="s4">: </span><span class="s1">DataFrame</span><span class="s4">(</span>
+            <span class="s1">np</span><span class="s4">.</span><span class="s1">arange</span><span class="s4">(</span><span class="s5">15</span><span class="s4">).</span><span class="s1">reshape</span><span class="s4">(</span><span class="s5">5</span><span class="s4">, </span><span class="s5">3</span><span class="s4">).</span><span class="s1">astype</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">float64</span><span class="s4">), </span><span class="s1">columns</span><span class="s4">=[</span><span class="s6">&quot;A&quot;</span><span class="s4">, </span><span class="s6">&quot;B&quot;</span><span class="s4">, </span><span class="s6">&quot;A&quot;</span><span class="s4">]</span>
+        <span class="s4">),</span>
+        <span class="s6">&quot;cat_onecol&quot;</span><span class="s4">: </span><span class="s1">DataFrame</span><span class="s4">({</span><span class="s6">&quot;A&quot;</span><span class="s4">: </span><span class="s1">Categorical</span><span class="s4">([</span><span class="s6">&quot;foo&quot;</span><span class="s4">, </span><span class="s6">&quot;bar&quot;</span><span class="s4">])}),</span>
+        <span class="s6">&quot;cat_and_float&quot;</span><span class="s4">: </span><span class="s1">DataFrame</span><span class="s4">(</span>
+            <span class="s4">{</span>
+                <span class="s6">&quot;A&quot;</span><span class="s4">: </span><span class="s1">Categorical</span><span class="s4">([</span><span class="s6">&quot;foo&quot;</span><span class="s4">, </span><span class="s6">&quot;bar&quot;</span><span class="s4">, </span><span class="s6">&quot;baz&quot;</span><span class="s4">]),</span>
+                <span class="s6">&quot;B&quot;</span><span class="s4">: </span><span class="s1">np</span><span class="s4">.</span><span class="s1">arange</span><span class="s4">(</span><span class="s5">3</span><span class="s4">).</span><span class="s1">astype</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">int64</span><span class="s4">),</span>
+            <span class="s4">}</span>
+        <span class="s4">),</span>
+        <span class="s6">&quot;mixed_dup&quot;</span><span class="s4">: </span><span class="s1">mixed_dup_df</span><span class="s4">,</span>
+        <span class="s6">&quot;dt_mixed_tzs&quot;</span><span class="s4">: </span><span class="s1">DataFrame</span><span class="s4">(</span>
+            <span class="s4">{</span>
+                <span class="s6">&quot;A&quot;</span><span class="s4">: </span><span class="s1">Timestamp</span><span class="s4">(</span><span class="s6">&quot;20130102&quot;</span><span class="s4">, </span><span class="s1">tz</span><span class="s4">=</span><span class="s6">&quot;US/Eastern&quot;</span><span class="s4">),</span>
+                <span class="s6">&quot;B&quot;</span><span class="s4">: </span><span class="s1">Timestamp</span><span class="s4">(</span><span class="s6">&quot;20130603&quot;</span><span class="s4">, </span><span class="s1">tz</span><span class="s4">=</span><span class="s6">&quot;CET&quot;</span><span class="s4">),</span>
+            <span class="s4">},</span>
+            <span class="s1">index</span><span class="s4">=</span><span class="s1">range</span><span class="s4">(</span><span class="s5">5</span><span class="s4">),</span>
+        <span class="s4">),</span>
+        <span class="s6">&quot;dt_mixed2_tzs&quot;</span><span class="s4">: </span><span class="s1">DataFrame</span><span class="s4">(</span>
+            <span class="s4">{</span>
+                <span class="s6">&quot;A&quot;</span><span class="s4">: </span><span class="s1">Timestamp</span><span class="s4">(</span><span class="s6">&quot;20130102&quot;</span><span class="s4">, </span><span class="s1">tz</span><span class="s4">=</span><span class="s6">&quot;US/Eastern&quot;</span><span class="s4">),</span>
+                <span class="s6">&quot;B&quot;</span><span class="s4">: </span><span class="s1">Timestamp</span><span class="s4">(</span><span class="s6">&quot;20130603&quot;</span><span class="s4">, </span><span class="s1">tz</span><span class="s4">=</span><span class="s6">&quot;CET&quot;</span><span class="s4">),</span>
+                <span class="s6">&quot;C&quot;</span><span class="s4">: </span><span class="s1">Timestamp</span><span class="s4">(</span><span class="s6">&quot;20130603&quot;</span><span class="s4">, </span><span class="s1">tz</span><span class="s4">=</span><span class="s6">&quot;UTC&quot;</span><span class="s4">),</span>
+            <span class="s4">},</span>
+            <span class="s1">index</span><span class="s4">=</span><span class="s1">range</span><span class="s4">(</span><span class="s5">5</span><span class="s4">),</span>
+        <span class="s4">),</span>
+        <span class="s6">&quot;string&quot;</span><span class="s4">: </span><span class="s1">DataFrame</span><span class="s4">(</span>
+            <span class="s4">{</span>
+                <span class="s6">&quot;A&quot;</span><span class="s4">: </span><span class="s1">Series</span><span class="s4">([</span><span class="s6">&quot;foo&quot;</span><span class="s4">, </span><span class="s6">&quot;bar&quot;</span><span class="s4">, </span><span class="s6">&quot;baz&quot;</span><span class="s4">, </span><span class="s6">&quot;qux&quot;</span><span class="s4">, </span><span class="s6">&quot;quux&quot;</span><span class="s4">], </span><span class="s1">dtype</span><span class="s4">=</span><span class="s6">&quot;string&quot;</span><span class="s4">),</span>
+                <span class="s6">&quot;B&quot;</span><span class="s4">: </span><span class="s1">Series</span><span class="s4">([</span><span class="s6">&quot;one&quot;</span><span class="s4">, </span><span class="s6">&quot;two&quot;</span><span class="s4">, </span><span class="s6">&quot;one&quot;</span><span class="s4">, </span><span class="s6">&quot;two&quot;</span><span class="s4">, </span><span class="s6">&quot;three&quot;</span><span class="s4">], </span><span class="s1">dtype</span><span class="s4">=</span><span class="s6">&quot;string&quot;</span><span class="s4">),</span>
+            <span class="s4">}</span>
+        <span class="s4">),</span>
+    <span class="s4">}</span>
+
+    <span class="s1">cat </span><span class="s4">= {</span>
+        <span class="s6">&quot;int8&quot;</span><span class="s4">: </span><span class="s1">Categorical</span><span class="s4">(</span><span class="s1">list</span><span class="s4">(</span><span class="s6">&quot;abcdefg&quot;</span><span class="s4">)),</span>
+        <span class="s6">&quot;int16&quot;</span><span class="s4">: </span><span class="s1">Categorical</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">arange</span><span class="s4">(</span><span class="s5">1000</span><span class="s4">)),</span>
+        <span class="s6">&quot;int32&quot;</span><span class="s4">: </span><span class="s1">Categorical</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">arange</span><span class="s4">(</span><span class="s5">10000</span><span class="s4">)),</span>
+    <span class="s4">}</span>
+
+    <span class="s1">timestamp </span><span class="s4">= {</span>
+        <span class="s6">&quot;normal&quot;</span><span class="s4">: </span><span class="s1">Timestamp</span><span class="s4">(</span><span class="s6">&quot;2011-01-01&quot;</span><span class="s4">),</span>
+        <span class="s6">&quot;nat&quot;</span><span class="s4">: </span><span class="s1">NaT</span><span class="s4">,</span>
+        <span class="s6">&quot;tz&quot;</span><span class="s4">: </span><span class="s1">Timestamp</span><span class="s4">(</span><span class="s6">&quot;2011-01-01&quot;</span><span class="s4">, </span><span class="s1">tz</span><span class="s4">=</span><span class="s6">&quot;US/Eastern&quot;</span><span class="s4">),</span>
+    <span class="s4">}</span>
+    <span class="s2">if </span><span class="s1">test</span><span class="s4">:</span>
+        <span class="s3"># kept because those are present in the legacy pickles (&lt;= 1.4)</span>
+        <span class="s1">timestamp</span><span class="s4">[</span><span class="s6">&quot;freq&quot;</span><span class="s4">] = </span><span class="s1">Timestamp</span><span class="s4">(</span><span class="s6">&quot;2011-01-01&quot;</span><span class="s4">)</span>
+        <span class="s1">timestamp</span><span class="s4">[</span><span class="s6">&quot;both&quot;</span><span class="s4">] = </span><span class="s1">Timestamp</span><span class="s4">(</span><span class="s6">&quot;2011-01-01&quot;</span><span class="s4">, </span><span class="s1">tz</span><span class="s4">=</span><span class="s6">&quot;Asia/Tokyo&quot;</span><span class="s4">)</span>
+
+    <span class="s1">off </span><span class="s4">= {</span>
+        <span class="s6">&quot;DateOffset&quot;</span><span class="s4">: </span><span class="s1">DateOffset</span><span class="s4">(</span><span class="s1">years</span><span class="s4">=</span><span class="s5">1</span><span class="s4">),</span>
+        <span class="s6">&quot;DateOffset_h_ns&quot;</span><span class="s4">: </span><span class="s1">DateOffset</span><span class="s4">(</span><span class="s1">hour</span><span class="s4">=</span><span class="s5">6</span><span class="s4">, </span><span class="s1">nanoseconds</span><span class="s4">=</span><span class="s5">5824</span><span class="s4">),</span>
+        <span class="s6">&quot;BusinessDay&quot;</span><span class="s4">: </span><span class="s1">BusinessDay</span><span class="s4">(</span><span class="s1">offset</span><span class="s4">=</span><span class="s1">timedelta</span><span class="s4">(</span><span class="s1">seconds</span><span class="s4">=</span><span class="s5">9</span><span class="s4">)),</span>
+        <span class="s6">&quot;BusinessHour&quot;</span><span class="s4">: </span><span class="s1">BusinessHour</span><span class="s4">(</span><span class="s1">normalize</span><span class="s4">=</span><span class="s2">True</span><span class="s4">, </span><span class="s1">n</span><span class="s4">=</span><span class="s5">6</span><span class="s4">, </span><span class="s1">end</span><span class="s4">=</span><span class="s6">&quot;15:14&quot;</span><span class="s4">),</span>
+        <span class="s6">&quot;CustomBusinessDay&quot;</span><span class="s4">: </span><span class="s1">CustomBusinessDay</span><span class="s4">(</span><span class="s1">weekmask</span><span class="s4">=</span><span class="s6">&quot;Mon Fri&quot;</span><span class="s4">),</span>
+        <span class="s6">&quot;SemiMonthBegin&quot;</span><span class="s4">: </span><span class="s1">SemiMonthBegin</span><span class="s4">(</span><span class="s1">day_of_month</span><span class="s4">=</span><span class="s5">9</span><span class="s4">),</span>
+        <span class="s6">&quot;SemiMonthEnd&quot;</span><span class="s4">: </span><span class="s1">SemiMonthEnd</span><span class="s4">(</span><span class="s1">day_of_month</span><span class="s4">=</span><span class="s5">24</span><span class="s4">),</span>
+        <span class="s6">&quot;MonthBegin&quot;</span><span class="s4">: </span><span class="s1">MonthBegin</span><span class="s4">(</span><span class="s5">1</span><span class="s4">),</span>
+        <span class="s6">&quot;MonthEnd&quot;</span><span class="s4">: </span><span class="s1">MonthEnd</span><span class="s4">(</span><span class="s5">1</span><span class="s4">),</span>
+        <span class="s6">&quot;QuarterBegin&quot;</span><span class="s4">: </span><span class="s1">QuarterBegin</span><span class="s4">(</span><span class="s5">1</span><span class="s4">),</span>
+        <span class="s6">&quot;QuarterEnd&quot;</span><span class="s4">: </span><span class="s1">QuarterEnd</span><span class="s4">(</span><span class="s5">1</span><span class="s4">),</span>
+        <span class="s6">&quot;Day&quot;</span><span class="s4">: </span><span class="s1">Day</span><span class="s4">(</span><span class="s5">1</span><span class="s4">),</span>
+        <span class="s6">&quot;YearBegin&quot;</span><span class="s4">: </span><span class="s1">YearBegin</span><span class="s4">(</span><span class="s5">1</span><span class="s4">),</span>
+        <span class="s6">&quot;YearEnd&quot;</span><span class="s4">: </span><span class="s1">YearEnd</span><span class="s4">(</span><span class="s5">1</span><span class="s4">),</span>
+        <span class="s6">&quot;Week&quot;</span><span class="s4">: </span><span class="s1">Week</span><span class="s4">(</span><span class="s5">1</span><span class="s4">),</span>
+        <span class="s6">&quot;Week_Tues&quot;</span><span class="s4">: </span><span class="s1">Week</span><span class="s4">(</span><span class="s5">2</span><span class="s4">, </span><span class="s1">normalize</span><span class="s4">=</span><span class="s2">False</span><span class="s4">, </span><span class="s1">weekday</span><span class="s4">=</span><span class="s5">1</span><span class="s4">),</span>
+        <span class="s6">&quot;WeekOfMonth&quot;</span><span class="s4">: </span><span class="s1">WeekOfMonth</span><span class="s4">(</span><span class="s1">week</span><span class="s4">=</span><span class="s5">3</span><span class="s4">, </span><span class="s1">weekday</span><span class="s4">=</span><span class="s5">4</span><span class="s4">),</span>
+        <span class="s6">&quot;LastWeekOfMonth&quot;</span><span class="s4">: </span><span class="s1">LastWeekOfMonth</span><span class="s4">(</span><span class="s1">n</span><span class="s4">=</span><span class="s5">1</span><span class="s4">, </span><span class="s1">weekday</span><span class="s4">=</span><span class="s5">3</span><span class="s4">),</span>
+        <span class="s6">&quot;FY5253&quot;</span><span class="s4">: </span><span class="s1">FY5253</span><span class="s4">(</span><span class="s1">n</span><span class="s4">=</span><span class="s5">2</span><span class="s4">, </span><span class="s1">weekday</span><span class="s4">=</span><span class="s5">6</span><span class="s4">, </span><span class="s1">startingMonth</span><span class="s4">=</span><span class="s5">7</span><span class="s4">, </span><span class="s1">variation</span><span class="s4">=</span><span class="s6">&quot;last&quot;</span><span class="s4">),</span>
+        <span class="s6">&quot;Easter&quot;</span><span class="s4">: </span><span class="s1">Easter</span><span class="s4">(),</span>
+        <span class="s6">&quot;Hour&quot;</span><span class="s4">: </span><span class="s1">Hour</span><span class="s4">(</span><span class="s5">1</span><span class="s4">),</span>
+        <span class="s6">&quot;Minute&quot;</span><span class="s4">: </span><span class="s1">Minute</span><span class="s4">(</span><span class="s5">1</span><span class="s4">),</span>
+    <span class="s4">}</span>
+
+    <span class="s2">return </span><span class="s4">{</span>
+        <span class="s6">&quot;series&quot;</span><span class="s4">: </span><span class="s1">series</span><span class="s4">,</span>
+        <span class="s6">&quot;frame&quot;</span><span class="s4">: </span><span class="s1">frame</span><span class="s4">,</span>
+        <span class="s6">&quot;index&quot;</span><span class="s4">: </span><span class="s1">index</span><span class="s4">,</span>
+        <span class="s6">&quot;scalars&quot;</span><span class="s4">: </span><span class="s1">scalars</span><span class="s4">,</span>
+        <span class="s6">&quot;mi&quot;</span><span class="s4">: </span><span class="s1">mi</span><span class="s4">,</span>
+        <span class="s6">&quot;sp_series&quot;</span><span class="s4">: {</span><span class="s6">&quot;float&quot;</span><span class="s4">: </span><span class="s1">_create_sp_series</span><span class="s4">(), </span><span class="s6">&quot;ts&quot;</span><span class="s4">: </span><span class="s1">_create_sp_tsseries</span><span class="s4">()},</span>
+        <span class="s6">&quot;sp_frame&quot;</span><span class="s4">: {</span><span class="s6">&quot;float&quot;</span><span class="s4">: </span><span class="s1">_create_sp_frame</span><span class="s4">()},</span>
+        <span class="s6">&quot;cat&quot;</span><span class="s4">: </span><span class="s1">cat</span><span class="s4">,</span>
+        <span class="s6">&quot;timestamp&quot;</span><span class="s4">: </span><span class="s1">timestamp</span><span class="s4">,</span>
+        <span class="s6">&quot;offsets&quot;</span><span class="s4">: </span><span class="s1">off</span><span class="s4">,</span>
+    <span class="s4">}</span>
+
+
+<span class="s2">def </span><span class="s1">create_dataframe_all_types</span><span class="s4">():</span>
+    <span class="s1">timestamps </span><span class="s4">= </span><span class="s1">Series</span><span class="s4">(</span>
+        <span class="s4">[</span>
+            <span class="s1">Timestamp</span><span class="s4">(</span><span class="s6">&quot;2013-01-01&quot;</span><span class="s4">),</span>
+            <span class="s1">NaT</span><span class="s4">,</span>
+            <span class="s1">Timestamp</span><span class="s4">(</span><span class="s6">&quot;2013-01-03&quot;</span><span class="s4">),</span>
+            <span class="s1">Timestamp</span><span class="s4">(</span><span class="s6">&quot;2013-01-04&quot;</span><span class="s4">),</span>
+            <span class="s1">Timestamp</span><span class="s4">(</span><span class="s6">&quot;2013-01-05&quot;</span><span class="s4">),</span>
+        <span class="s4">]</span>
+    <span class="s4">)</span>
+    <span class="s1">timedeltas </span><span class="s4">= </span><span class="s1">timestamps </span><span class="s4">- </span><span class="s1">timestamps</span><span class="s4">[</span><span class="s5">0</span><span class="s4">]</span>
+
+    <span class="s1">data </span><span class="s4">= {</span>
+        <span class="s3"># &quot;string&quot;: Series(</span>
+        <span class="s3">#     [&quot;a&quot;, &quot;b&quot;, &quot;c&quot;, None, &quot;e&quot;], dtype=StringDtype(na_value=np.nan)</span>
+        <span class="s3"># ),</span>
+        <span class="s3"># &quot;object&quot;: Series([&quot;a&quot;, &quot;b&quot;, &quot;c&quot;, None, &quot;e&quot;], dtype=object),</span>
+        <span class="s3"># &quot;object_nan&quot;: Series([&quot;a&quot;, &quot;b&quot;, &quot;c&quot;, np.nan, &quot;e&quot;], dtype=object),</span>
+        <span class="s6">&quot;int&quot;</span><span class="s4">: </span><span class="s1">list</span><span class="s4">(</span><span class="s1">range</span><span class="s4">(</span><span class="s5">1</span><span class="s4">, </span><span class="s5">6</span><span class="s4">)),</span>
+        <span class="s6">&quot;uint64&quot;</span><span class="s4">: </span><span class="s1">np</span><span class="s4">.</span><span class="s1">arange</span><span class="s4">(</span><span class="s5">3</span><span class="s4">, </span><span class="s5">8</span><span class="s4">).</span><span class="s1">astype</span><span class="s4">(</span><span class="s6">&quot;uint64&quot;</span><span class="s4">),</span>
+        <span class="s6">&quot;float&quot;</span><span class="s4">: [</span><span class="s5">0.1</span><span class="s4">, </span><span class="s5">0.2</span><span class="s4">, </span><span class="s5">0.3</span><span class="s4">, </span><span class="s5">0.4</span><span class="s4">, </span><span class="s1">np</span><span class="s4">.</span><span class="s1">nan</span><span class="s4">],</span>
+        <span class="s6">&quot;float32&quot;</span><span class="s4">: </span><span class="s1">Series</span><span class="s4">([</span><span class="s5">0.1</span><span class="s4">, </span><span class="s5">0.2</span><span class="s4">, </span><span class="s5">0.3</span><span class="s4">, </span><span class="s5">0.4</span><span class="s4">, </span><span class="s1">np</span><span class="s4">.</span><span class="s1">nan</span><span class="s4">], </span><span class="s1">dtype</span><span class="s4">=</span><span class="s6">&quot;float32&quot;</span><span class="s4">),</span>
+        <span class="s6">&quot;bool&quot;</span><span class="s4">: [</span><span class="s2">True</span><span class="s4">, </span><span class="s2">False</span><span class="s4">, </span><span class="s2">True</span><span class="s4">, </span><span class="s2">False</span><span class="s4">, </span><span class="s2">True</span><span class="s4">],</span>
+        <span class="s6">&quot;datetime_ns&quot;</span><span class="s4">: </span><span class="s1">timestamps</span><span class="s4">.</span><span class="s1">dt</span><span class="s4">.</span><span class="s1">as_unit</span><span class="s4">(</span><span class="s6">&quot;ns&quot;</span><span class="s4">),</span>
+        <span class="s6">&quot;datetime_us&quot;</span><span class="s4">: </span><span class="s1">timestamps</span><span class="s4">.</span><span class="s1">dt</span><span class="s4">.</span><span class="s1">as_unit</span><span class="s4">(</span><span class="s6">&quot;us&quot;</span><span class="s4">),</span>
+        <span class="s6">&quot;datetime_ms&quot;</span><span class="s4">: </span><span class="s1">timestamps</span><span class="s4">.</span><span class="s1">dt</span><span class="s4">.</span><span class="s1">as_unit</span><span class="s4">(</span><span class="s6">&quot;ms&quot;</span><span class="s4">),</span>
+        <span class="s6">&quot;datetime_s&quot;</span><span class="s4">: </span><span class="s1">timestamps</span><span class="s4">.</span><span class="s1">dt</span><span class="s4">.</span><span class="s1">as_unit</span><span class="s4">(</span><span class="s6">&quot;s&quot;</span><span class="s4">),</span>
+        <span class="s6">&quot;datetimetz_ns&quot;</span><span class="s4">: </span><span class="s1">timestamps</span><span class="s4">.</span><span class="s1">dt</span><span class="s4">.</span><span class="s1">tz_localize</span><span class="s4">(</span><span class="s6">&quot;US/Eastern&quot;</span><span class="s4">).</span><span class="s1">dt</span><span class="s4">.</span><span class="s1">as_unit</span><span class="s4">(</span><span class="s6">&quot;ns&quot;</span><span class="s4">),</span>
+        <span class="s6">&quot;datetimetz_us&quot;</span><span class="s4">: </span><span class="s1">timestamps</span><span class="s4">.</span><span class="s1">dt</span><span class="s4">.</span><span class="s1">tz_localize</span><span class="s4">(</span><span class="s6">&quot;US/Eastern&quot;</span><span class="s4">).</span><span class="s1">dt</span><span class="s4">.</span><span class="s1">as_unit</span><span class="s4">(</span><span class="s6">&quot;us&quot;</span><span class="s4">),</span>
+        <span class="s6">&quot;timedelta_ns&quot;</span><span class="s4">: </span><span class="s1">timedeltas</span><span class="s4">.</span><span class="s1">dt</span><span class="s4">.</span><span class="s1">as_unit</span><span class="s4">(</span><span class="s6">&quot;ns&quot;</span><span class="s4">),</span>
+        <span class="s6">&quot;timedelta_us&quot;</span><span class="s4">: </span><span class="s1">timedeltas</span><span class="s4">.</span><span class="s1">dt</span><span class="s4">.</span><span class="s1">as_unit</span><span class="s4">(</span><span class="s6">&quot;us&quot;</span><span class="s4">),</span>
+        <span class="s6">&quot;timedelta_ms&quot;</span><span class="s4">: </span><span class="s1">timedeltas</span><span class="s4">.</span><span class="s1">dt</span><span class="s4">.</span><span class="s1">as_unit</span><span class="s4">(</span><span class="s6">&quot;ms&quot;</span><span class="s4">),</span>
+        <span class="s6">&quot;timedelta_s&quot;</span><span class="s4">: </span><span class="s1">timedeltas</span><span class="s4">.</span><span class="s1">dt</span><span class="s4">.</span><span class="s1">as_unit</span><span class="s4">(</span><span class="s6">&quot;s&quot;</span><span class="s4">),</span>
+        <span class="s3"># &quot;categorical&quot;: Categorical(</span>
+        <span class="s3">#     Series(</span>
+        <span class="s3">#         [&quot;foo&quot;, &quot;bar&quot;, &quot;baz&quot;,np.nan,&quot;foo&quot;],dtype=StringDtype(na_value=np.nan)</span>
+        <span class="s3">#     )</span>
+        <span class="s3"># ),</span>
+        <span class="s3"># &quot;categorical_object&quot;: Categorical(</span>
+        <span class="s3">#     Series([&quot;foo&quot;, &quot;bar&quot;, &quot;baz&quot;, np.nan, &quot;foo&quot;], dtype=object)</span>
+        <span class="s3"># ),</span>
+        <span class="s6">&quot;categorical_int&quot;</span><span class="s4">: </span><span class="s1">Categorical</span><span class="s4">([</span><span class="s5">1</span><span class="s4">, </span><span class="s5">2</span><span class="s4">, </span><span class="s5">3</span><span class="s4">, </span><span class="s1">np</span><span class="s4">.</span><span class="s1">nan</span><span class="s4">, </span><span class="s5">1</span><span class="s4">]),</span>
+    <span class="s4">}</span>
+    <span class="s2">return </span><span class="s1">DataFrame</span><span class="s4">(</span><span class="s1">data</span><span class="s4">)</span>
+
+
+<span class="s2">def </span><span class="s1">platform_name</span><span class="s4">():</span>
+    <span class="s2">return </span><span class="s6">&quot;_&quot;</span><span class="s4">.</span><span class="s1">join</span><span class="s4">(</span>
+        <span class="s4">[</span>
+            <span class="s1">str</span><span class="s4">(</span><span class="s1">pandas</span><span class="s4">.</span><span class="s1">__version__</span><span class="s4">),</span>
+            <span class="s1">str</span><span class="s4">(</span><span class="s1">pl</span><span class="s4">.</span><span class="s1">machine</span><span class="s4">()),</span>
+            <span class="s1">str</span><span class="s4">(</span><span class="s1">pl</span><span class="s4">.</span><span class="s1">system</span><span class="s4">().</span><span class="s1">lower</span><span class="s4">()),</span>
+            <span class="s1">str</span><span class="s4">(</span><span class="s1">pl</span><span class="s4">.</span><span class="s1">python_version</span><span class="s4">()),</span>
+        <span class="s4">]</span>
+    <span class="s4">)</span>
+
+
+<span class="s2">def </span><span class="s1">write_legacy_pickles</span><span class="s4">(</span><span class="s1">output_dir</span><span class="s4">):</span>
+    <span class="s1">pth </span><span class="s4">= </span><span class="s6">f&quot;</span><span class="s2">{</span><span class="s1">platform_name</span><span class="s4">()</span><span class="s2">}</span><span class="s6">.pickle&quot;</span>
+
+    <span class="s2">with </span><span class="s1">open</span><span class="s4">(</span><span class="s1">os</span><span class="s4">.</span><span class="s1">path</span><span class="s4">.</span><span class="s1">join</span><span class="s4">(</span><span class="s1">output_dir</span><span class="s4">, </span><span class="s1">pth</span><span class="s4">), </span><span class="s6">&quot;wb&quot;</span><span class="s4">) </span><span class="s2">as </span><span class="s1">fh</span><span class="s4">:</span>
+        <span class="s1">pickle</span><span class="s4">.</span><span class="s1">dump</span><span class="s4">(</span><span class="s1">create_pickle_data</span><span class="s4">(</span><span class="s1">test</span><span class="s4">=</span><span class="s2">False</span><span class="s4">), </span><span class="s1">fh</span><span class="s4">, </span><span class="s1">pickle</span><span class="s4">.</span><span class="s1">DEFAULT_PROTOCOL</span><span class="s4">)</span>
+
+    <span class="s1">print</span><span class="s4">(</span><span class="s6">f&quot;created pickle file: </span><span class="s2">{</span><span class="s1">pth</span><span class="s2">}</span><span class="s6">&quot;</span><span class="s4">)</span>
+
+
+<span class="s2">def </span><span class="s1">write_legacy_hdf</span><span class="s4">(</span><span class="s1">output_dir</span><span class="s4">, </span><span class="s1">format</span><span class="s4">):</span>
+    <span class="s2">import </span><span class="s1">tables</span>
+
+    <span class="s1">pth </span><span class="s4">= </span><span class="s6">f&quot;</span><span class="s2">{</span><span class="s1">platform_name</span><span class="s4">()</span><span class="s2">}</span><span class="s6">_pytables-</span><span class="s2">{</span><span class="s1">tables</span><span class="s4">.</span><span class="s1">__version__</span><span class="s2">}</span><span class="s6">_</span><span class="s2">{</span><span class="s1">format</span><span class="s2">}</span><span class="s6">.h5&quot;</span>
+
+    <span class="s1">df </span><span class="s4">= </span><span class="s1">create_dataframe_all_types</span><span class="s4">()</span>
+    <span class="s2">if </span><span class="s1">format </span><span class="s4">== </span><span class="s6">&quot;fixed&quot;</span><span class="s4">:</span>
+        <span class="s3"># df = df.drop(columns=[&quot;categorical&quot;, &quot;categorical_object&quot;, &quot;categorical_int&quot;])</span>
+        <span class="s1">df </span><span class="s4">= </span><span class="s1">df</span><span class="s4">.</span><span class="s1">drop</span><span class="s4">(</span><span class="s1">columns</span><span class="s4">=[</span><span class="s6">&quot;categorical_int&quot;</span><span class="s4">])</span>
+    <span class="s1">complevel </span><span class="s4">= </span><span class="s5">9 </span><span class="s2">if </span><span class="s1">format </span><span class="s4">== </span><span class="s6">&quot;table&quot; </span><span class="s2">else None</span>
+    <span class="s1">df</span><span class="s4">.</span><span class="s1">to_hdf</span><span class="s4">(</span>
+        <span class="s1">os</span><span class="s4">.</span><span class="s1">path</span><span class="s4">.</span><span class="s1">join</span><span class="s4">(</span><span class="s1">output_dir</span><span class="s4">, </span><span class="s1">pth</span><span class="s4">),</span>
+        <span class="s1">key</span><span class="s4">=</span><span class="s6">&quot;df_alltypes&quot;</span><span class="s4">,</span>
+        <span class="s1">format</span><span class="s4">=</span><span class="s1">format</span><span class="s4">,</span>
+        <span class="s1">complevel</span><span class="s4">=</span><span class="s1">complevel</span><span class="s4">,</span>
+    <span class="s4">)</span>
+
+    <span class="s1">print</span><span class="s4">(</span><span class="s6">f&quot;created hdf file: </span><span class="s2">{</span><span class="s1">pth</span><span class="s2">}</span><span class="s6">&quot;</span><span class="s4">)</span>
+
+
+<span class="s2">def </span><span class="s1">write_legacy_file</span><span class="s4">():</span>
+    <span class="s3"># force our cwd to be the first searched</span>
+    <span class="s1">sys</span><span class="s4">.</span><span class="s1">path</span><span class="s4">.</span><span class="s1">insert</span><span class="s4">(</span><span class="s5">0</span><span class="s4">, </span><span class="s6">&quot;&quot;</span><span class="s4">)</span>
+
+    <span class="s2">if not </span><span class="s5">3 </span><span class="s4">&lt;= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">sys</span><span class="s4">.</span><span class="s1">argv</span><span class="s4">) &lt;= </span><span class="s5">4</span><span class="s4">:</span>
+        <span class="s1">sys</span><span class="s4">.</span><span class="s1">exit</span><span class="s4">(</span>
+            <span class="s6">&quot;Specify output directory and storage type: generate_legacy_&quot;</span>
+            <span class="s6">&quot;storage_files.py &lt;output_dir&gt; &lt;storage_type&gt; &quot;</span>
+        <span class="s4">)</span>
+
+    <span class="s1">output_dir </span><span class="s4">= </span><span class="s1">str</span><span class="s4">(</span><span class="s1">sys</span><span class="s4">.</span><span class="s1">argv</span><span class="s4">[</span><span class="s5">1</span><span class="s4">])</span>
+    <span class="s1">storage_type </span><span class="s4">= </span><span class="s1">str</span><span class="s4">(</span><span class="s1">sys</span><span class="s4">.</span><span class="s1">argv</span><span class="s4">[</span><span class="s5">2</span><span class="s4">])</span>
+
+    <span class="s1">print</span><span class="s4">(</span>
+        <span class="s6">&quot;This script generates a storage file for the current arch, system, &quot;</span>
+        <span class="s6">&quot;and python version&quot;</span>
+    <span class="s4">)</span>
+    <span class="s1">print</span><span class="s4">(</span><span class="s6">f&quot;  pandas version: </span><span class="s2">{</span><span class="s1">pandas</span><span class="s4">.</span><span class="s1">__version__</span><span class="s2">}</span><span class="s6">&quot;</span><span class="s4">)</span>
+    <span class="s1">print</span><span class="s4">(</span><span class="s6">f&quot;  output dir    : </span><span class="s2">{</span><span class="s1">output_dir</span><span class="s2">}</span><span class="s6">&quot;</span><span class="s4">)</span>
+    <span class="s1">print</span><span class="s4">(</span><span class="s6">f&quot;  storage format: </span><span class="s2">{</span><span class="s1">storage_type</span><span class="s2">}</span><span class="s6">&quot;</span><span class="s4">)</span>
+
+    <span class="s2">if not </span><span class="s1">os</span><span class="s4">.</span><span class="s1">path</span><span class="s4">.</span><span class="s1">exists</span><span class="s4">(</span><span class="s1">output_dir</span><span class="s4">):</span>
+        <span class="s1">os</span><span class="s4">.</span><span class="s1">mkdir</span><span class="s4">(</span><span class="s1">output_dir</span><span class="s4">)</span>
+
+    <span class="s2">if </span><span class="s1">storage_type </span><span class="s4">== </span><span class="s6">&quot;pickle&quot;</span><span class="s4">:</span>
+        <span class="s1">write_legacy_pickles</span><span class="s4">(</span><span class="s1">output_dir</span><span class="s4">=</span><span class="s1">output_dir</span><span class="s4">)</span>
+    <span class="s2">elif </span><span class="s1">storage_type </span><span class="s4">== </span><span class="s6">&quot;hdf&quot;</span><span class="s4">:</span>
+        <span class="s1">write_legacy_hdf</span><span class="s4">(</span><span class="s1">output_dir</span><span class="s4">=</span><span class="s1">output_dir</span><span class="s4">, </span><span class="s1">format</span><span class="s4">=</span><span class="s6">&quot;fixed&quot;</span><span class="s4">)</span>
+        <span class="s1">write_legacy_hdf</span><span class="s4">(</span><span class="s1">output_dir</span><span class="s4">=</span><span class="s1">output_dir</span><span class="s4">, </span><span class="s1">format</span><span class="s4">=</span><span class="s6">&quot;table&quot;</span><span class="s4">)</span>
+    <span class="s2">else</span><span class="s4">:</span>
+        <span class="s1">sys</span><span class="s4">.</span><span class="s1">exit</span><span class="s4">(</span><span class="s6">&quot;storage_type must be one of {'pickle', 'hdf'}&quot;</span><span class="s4">)</span>
+
+
+<span class="s2">if </span><span class="s1">__name__ </span><span class="s4">== </span><span class="s6">&quot;__main__&quot;</span><span class="s4">:</span>
+    <span class="s1">write_legacy_file</span><span class="s4">()</span>
+</pre>
+</body>
+</html>

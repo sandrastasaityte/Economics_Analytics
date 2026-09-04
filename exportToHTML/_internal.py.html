@@ -1,0 +1,987 @@
+<html>
+<head>
+<title>_internal.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_internal.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+A place for internal code 
+ 
+Some things are more easily handled Python. 
+ 
+&quot;&quot;&quot;</span>
+<span class="s2">import </span><span class="s1">ast</span>
+<span class="s2">import </span><span class="s1">math</span>
+<span class="s2">import </span><span class="s1">re</span>
+<span class="s2">import </span><span class="s1">sys</span>
+<span class="s2">import </span><span class="s1">warnings</span>
+
+<span class="s2">from </span><span class="s1">numpy </span><span class="s2">import </span><span class="s1">_NoValue</span>
+<span class="s2">from </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">exceptions </span><span class="s2">import </span><span class="s1">DTypePromotionError</span>
+
+<span class="s2">from </span><span class="s3">.</span><span class="s1">_multiarray_umath </span><span class="s2">import </span><span class="s1">_is_view_safe_cast</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">multiarray </span><span class="s2">import </span><span class="s1">StringDType</span><span class="s3">, </span><span class="s1">array</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">promote_types</span>
+
+<span class="s2">try</span><span class="s3">:</span>
+    <span class="s2">import </span><span class="s1">ctypes</span>
+<span class="s2">except </span><span class="s1">ImportError</span><span class="s3">:</span>
+    <span class="s1">ctypes </span><span class="s3">= </span><span class="s2">None</span>
+
+<span class="s2">if </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">byteorder </span><span class="s3">== </span><span class="s4">'little'</span><span class="s3">:</span>
+    <span class="s1">_nbo </span><span class="s3">= </span><span class="s4">'&lt;'</span>
+<span class="s2">else</span><span class="s3">:</span>
+    <span class="s1">_nbo </span><span class="s3">= </span><span class="s4">'&gt;'</span>
+
+<span class="s2">def </span><span class="s1">_makenames_list</span><span class="s3">(</span><span class="s1">adict</span><span class="s3">, </span><span class="s1">align</span><span class="s3">):</span>
+    <span class="s1">allfields </span><span class="s3">= []</span>
+
+    <span class="s2">for </span><span class="s1">fname</span><span class="s3">, </span><span class="s1">obj </span><span class="s2">in </span><span class="s1">adict</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+        <span class="s1">n </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">)</span>
+        <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">, </span><span class="s1">tuple</span><span class="s3">) </span><span class="s2">or </span><span class="s1">n </span><span class="s2">not in </span><span class="s3">(</span><span class="s5">2</span><span class="s3">, </span><span class="s5">3</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;entry not a 2- or 3- tuple&quot;</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">n </span><span class="s3">&gt; </span><span class="s5">2 </span><span class="s2">and </span><span class="s1">obj</span><span class="s3">[</span><span class="s5">2</span><span class="s3">] == </span><span class="s1">fname</span><span class="s3">:</span>
+            <span class="s2">continue</span>
+        <span class="s1">num </span><span class="s3">= </span><span class="s1">int</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">[</span><span class="s5">1</span><span class="s3">])</span>
+        <span class="s2">if </span><span class="s1">num </span><span class="s3">&lt; </span><span class="s5">0</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;invalid offset.&quot;</span><span class="s3">)</span>
+        <span class="s1">format </span><span class="s3">= </span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">[</span><span class="s5">0</span><span class="s3">], </span><span class="s1">align</span><span class="s3">=</span><span class="s1">align</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">n </span><span class="s3">&gt; </span><span class="s5">2</span><span class="s3">:</span>
+            <span class="s1">title </span><span class="s3">= </span><span class="s1">obj</span><span class="s3">[</span><span class="s5">2</span><span class="s3">]</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">title </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s1">allfields</span><span class="s3">.</span><span class="s1">append</span><span class="s3">((</span><span class="s1">fname</span><span class="s3">, </span><span class="s1">format</span><span class="s3">, </span><span class="s1">num</span><span class="s3">, </span><span class="s1">title</span><span class="s3">))</span>
+    <span class="s6"># sort by offsets</span>
+    <span class="s1">allfields</span><span class="s3">.</span><span class="s1">sort</span><span class="s3">(</span><span class="s1">key</span><span class="s3">=</span><span class="s2">lambda </span><span class="s1">x</span><span class="s3">: </span><span class="s1">x</span><span class="s3">[</span><span class="s5">2</span><span class="s3">])</span>
+    <span class="s1">names </span><span class="s3">= [</span><span class="s1">x</span><span class="s3">[</span><span class="s5">0</span><span class="s3">] </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">allfields</span><span class="s3">]</span>
+    <span class="s1">formats </span><span class="s3">= [</span><span class="s1">x</span><span class="s3">[</span><span class="s5">1</span><span class="s3">] </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">allfields</span><span class="s3">]</span>
+    <span class="s1">offsets </span><span class="s3">= [</span><span class="s1">x</span><span class="s3">[</span><span class="s5">2</span><span class="s3">] </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">allfields</span><span class="s3">]</span>
+    <span class="s1">titles </span><span class="s3">= [</span><span class="s1">x</span><span class="s3">[</span><span class="s5">3</span><span class="s3">] </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">allfields</span><span class="s3">]</span>
+
+    <span class="s2">return </span><span class="s1">names</span><span class="s3">, </span><span class="s1">formats</span><span class="s3">, </span><span class="s1">offsets</span><span class="s3">, </span><span class="s1">titles</span>
+
+<span class="s6"># Called in PyArray_DescrConverter function when</span>
+<span class="s6">#  a dictionary without &quot;names&quot; and &quot;formats&quot;</span>
+<span class="s6">#  fields is used as a data-type descriptor.</span>
+<span class="s2">def </span><span class="s1">_usefields</span><span class="s3">(</span><span class="s1">adict</span><span class="s3">, </span><span class="s1">align</span><span class="s3">):</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s1">names </span><span class="s3">= </span><span class="s1">adict</span><span class="s3">[-</span><span class="s5">1</span><span class="s3">]</span>
+    <span class="s2">except </span><span class="s1">KeyError</span><span class="s3">:</span>
+        <span class="s1">names </span><span class="s3">= </span><span class="s2">None</span>
+    <span class="s2">if </span><span class="s1">names </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">names</span><span class="s3">, </span><span class="s1">formats</span><span class="s3">, </span><span class="s1">offsets</span><span class="s3">, </span><span class="s1">titles </span><span class="s3">= </span><span class="s1">_makenames_list</span><span class="s3">(</span><span class="s1">adict</span><span class="s3">, </span><span class="s1">align</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">formats </span><span class="s3">= []</span>
+        <span class="s1">offsets </span><span class="s3">= []</span>
+        <span class="s1">titles </span><span class="s3">= []</span>
+        <span class="s2">for </span><span class="s1">name </span><span class="s2">in </span><span class="s1">names</span><span class="s3">:</span>
+            <span class="s1">res </span><span class="s3">= </span><span class="s1">adict</span><span class="s3">[</span><span class="s1">name</span><span class="s3">]</span>
+            <span class="s1">formats</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">res</span><span class="s3">[</span><span class="s5">0</span><span class="s3">])</span>
+            <span class="s1">offsets</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">res</span><span class="s3">[</span><span class="s5">1</span><span class="s3">])</span>
+            <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">res</span><span class="s3">) &gt; </span><span class="s5">2</span><span class="s3">:</span>
+                <span class="s1">titles</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">res</span><span class="s3">[</span><span class="s5">2</span><span class="s3">])</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">titles</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s2">None</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">dtype</span><span class="s3">({</span><span class="s4">&quot;names&quot;</span><span class="s3">: </span><span class="s1">names</span><span class="s3">,</span>
+                  <span class="s4">&quot;formats&quot;</span><span class="s3">: </span><span class="s1">formats</span><span class="s3">,</span>
+                  <span class="s4">&quot;offsets&quot;</span><span class="s3">: </span><span class="s1">offsets</span><span class="s3">,</span>
+                  <span class="s4">&quot;titles&quot;</span><span class="s3">: </span><span class="s1">titles</span><span class="s3">}, </span><span class="s1">align</span><span class="s3">)</span>
+
+
+<span class="s6"># construct an array_protocol descriptor list</span>
+<span class="s6">#  from the fields attribute of a descriptor</span>
+<span class="s6"># This calls itself recursively but should eventually hit</span>
+<span class="s6">#  a descriptor that has no fields and then return</span>
+<span class="s6">#  a simple typestring</span>
+
+<span class="s2">def </span><span class="s1">_array_descr</span><span class="s3">(</span><span class="s1">descriptor</span><span class="s3">):</span>
+    <span class="s1">fields </span><span class="s3">= </span><span class="s1">descriptor</span><span class="s3">.</span><span class="s1">fields</span>
+    <span class="s2">if </span><span class="s1">fields </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">subdtype </span><span class="s3">= </span><span class="s1">descriptor</span><span class="s3">.</span><span class="s1">subdtype</span>
+        <span class="s2">if </span><span class="s1">subdtype </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">descriptor</span><span class="s3">.</span><span class="s1">metadata </span><span class="s2">is None</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">descriptor</span><span class="s3">.</span><span class="s1">str</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">new </span><span class="s3">= </span><span class="s1">descriptor</span><span class="s3">.</span><span class="s1">metadata</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+                <span class="s2">if </span><span class="s1">new</span><span class="s3">:</span>
+                    <span class="s2">return </span><span class="s3">(</span><span class="s1">descriptor</span><span class="s3">.</span><span class="s1">str</span><span class="s3">, </span><span class="s1">new</span><span class="s3">)</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s2">return </span><span class="s1">descriptor</span><span class="s3">.</span><span class="s1">str</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s3">(</span><span class="s1">_array_descr</span><span class="s3">(</span><span class="s1">subdtype</span><span class="s3">[</span><span class="s5">0</span><span class="s3">]), </span><span class="s1">subdtype</span><span class="s3">[</span><span class="s5">1</span><span class="s3">])</span>
+
+    <span class="s1">names </span><span class="s3">= </span><span class="s1">descriptor</span><span class="s3">.</span><span class="s1">names</span>
+    <span class="s1">ordered_fields </span><span class="s3">= [</span><span class="s1">fields</span><span class="s3">[</span><span class="s1">x</span><span class="s3">] + (</span><span class="s1">x</span><span class="s3">,) </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">names</span><span class="s3">]</span>
+    <span class="s1">result </span><span class="s3">= []</span>
+    <span class="s1">offset </span><span class="s3">= </span><span class="s5">0</span>
+    <span class="s2">for </span><span class="s1">field </span><span class="s2">in </span><span class="s1">ordered_fields</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">field</span><span class="s3">[</span><span class="s5">1</span><span class="s3">] &gt; </span><span class="s1">offset</span><span class="s3">:</span>
+            <span class="s1">num </span><span class="s3">= </span><span class="s1">field</span><span class="s3">[</span><span class="s5">1</span><span class="s3">] - </span><span class="s1">offset</span>
+            <span class="s1">result</span><span class="s3">.</span><span class="s1">append</span><span class="s3">((</span><span class="s4">''</span><span class="s3">, </span><span class="s4">f'|V</span><span class="s2">{</span><span class="s1">num</span><span class="s2">}</span><span class="s4">'</span><span class="s3">))</span>
+            <span class="s1">offset </span><span class="s3">+= </span><span class="s1">num</span>
+        <span class="s2">elif </span><span class="s1">field</span><span class="s3">[</span><span class="s5">1</span><span class="s3">] &lt; </span><span class="s1">offset</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                <span class="s4">&quot;dtype.descr is not defined for types with overlapping or &quot;</span>
+                <span class="s4">&quot;out-of-order fields&quot;</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">field</span><span class="s3">) &gt; </span><span class="s5">3</span><span class="s3">:</span>
+            <span class="s1">name </span><span class="s3">= (</span><span class="s1">field</span><span class="s3">[</span><span class="s5">2</span><span class="s3">], </span><span class="s1">field</span><span class="s3">[</span><span class="s5">3</span><span class="s3">])</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">name </span><span class="s3">= </span><span class="s1">field</span><span class="s3">[</span><span class="s5">2</span><span class="s3">]</span>
+        <span class="s2">if </span><span class="s1">field</span><span class="s3">[</span><span class="s5">0</span><span class="s3">].</span><span class="s1">subdtype</span><span class="s3">:</span>
+            <span class="s1">tup </span><span class="s3">= (</span><span class="s1">name</span><span class="s3">, </span><span class="s1">_array_descr</span><span class="s3">(</span><span class="s1">field</span><span class="s3">[</span><span class="s5">0</span><span class="s3">].</span><span class="s1">subdtype</span><span class="s3">[</span><span class="s5">0</span><span class="s3">]),</span>
+                   <span class="s1">field</span><span class="s3">[</span><span class="s5">0</span><span class="s3">].</span><span class="s1">subdtype</span><span class="s3">[</span><span class="s5">1</span><span class="s3">])</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">tup </span><span class="s3">= (</span><span class="s1">name</span><span class="s3">, </span><span class="s1">_array_descr</span><span class="s3">(</span><span class="s1">field</span><span class="s3">[</span><span class="s5">0</span><span class="s3">]))</span>
+        <span class="s1">offset </span><span class="s3">+= </span><span class="s1">field</span><span class="s3">[</span><span class="s5">0</span><span class="s3">].</span><span class="s1">itemsize</span>
+        <span class="s1">result</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">tup</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">descriptor</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">&gt; </span><span class="s1">offset</span><span class="s3">:</span>
+        <span class="s1">num </span><span class="s3">= </span><span class="s1">descriptor</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">- </span><span class="s1">offset</span>
+        <span class="s1">result</span><span class="s3">.</span><span class="s1">append</span><span class="s3">((</span><span class="s4">''</span><span class="s3">, </span><span class="s4">f'|V</span><span class="s2">{</span><span class="s1">num</span><span class="s2">}</span><span class="s4">'</span><span class="s3">))</span>
+
+    <span class="s2">return </span><span class="s1">result</span>
+
+
+<span class="s6"># format_re was originally from numarray by J. Todd Miller</span>
+
+<span class="s1">format_re </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">r'(?P&lt;order1&gt;[&lt;&gt;|=]?)'</span>
+                       <span class="s4">r'(?P&lt;repeats&gt; *[(]?[ ,0-9]*[)]? *)'</span>
+                       <span class="s4">r'(?P&lt;order2&gt;[&lt;&gt;|=]?)'</span>
+                       <span class="s4">r'(?P&lt;dtype&gt;[A-Za-z0-9.?]*(?:\[[a-zA-Z0-9,.]+\])?)'</span><span class="s3">)</span>
+<span class="s1">sep_re </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">r'\s*,\s*'</span><span class="s3">)</span>
+<span class="s1">space_re </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">r'\s+$'</span><span class="s3">)</span>
+
+<span class="s6"># astr is a string (perhaps comma separated)</span>
+
+<span class="s1">_convorder </span><span class="s3">= {</span><span class="s4">'='</span><span class="s3">: </span><span class="s1">_nbo</span><span class="s3">}</span>
+
+<span class="s2">def </span><span class="s1">_commastring</span><span class="s3">(</span><span class="s1">astr</span><span class="s3">):</span>
+    <span class="s1">startindex </span><span class="s3">= </span><span class="s5">0</span>
+    <span class="s1">result </span><span class="s3">= []</span>
+    <span class="s1">islist </span><span class="s3">= </span><span class="s2">False</span>
+    <span class="s2">while </span><span class="s1">startindex </span><span class="s3">&lt; </span><span class="s1">len</span><span class="s3">(</span><span class="s1">astr</span><span class="s3">):</span>
+        <span class="s1">mo </span><span class="s3">= </span><span class="s1">format_re</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s1">astr</span><span class="s3">, </span><span class="s1">pos</span><span class="s3">=</span><span class="s1">startindex</span><span class="s3">)</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s3">(</span><span class="s1">order1</span><span class="s3">, </span><span class="s1">repeats</span><span class="s3">, </span><span class="s1">order2</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">) = </span><span class="s1">mo</span><span class="s3">.</span><span class="s1">groups</span><span class="s3">()</span>
+        <span class="s2">except </span><span class="s3">(</span><span class="s1">TypeError</span><span class="s3">, </span><span class="s1">AttributeError</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                <span class="s4">f'format number </span><span class="s2">{</span><span class="s1">len</span><span class="s3">(</span><span class="s1">result</span><span class="s3">) + </span><span class="s5">1</span><span class="s2">} </span><span class="s4">of &quot;</span><span class="s2">{</span><span class="s1">astr</span><span class="s2">}</span><span class="s4">&quot; is not recognized'</span>
+                <span class="s3">) </span><span class="s2">from None</span>
+        <span class="s1">startindex </span><span class="s3">= </span><span class="s1">mo</span><span class="s3">.</span><span class="s1">end</span><span class="s3">()</span>
+        <span class="s6"># Separator or ending padding</span>
+        <span class="s2">if </span><span class="s1">startindex </span><span class="s3">&lt; </span><span class="s1">len</span><span class="s3">(</span><span class="s1">astr</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">space_re</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s1">astr</span><span class="s3">, </span><span class="s1">pos</span><span class="s3">=</span><span class="s1">startindex</span><span class="s3">):</span>
+                <span class="s1">startindex </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">astr</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">mo </span><span class="s3">= </span><span class="s1">sep_re</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s1">astr</span><span class="s3">, </span><span class="s1">pos</span><span class="s3">=</span><span class="s1">startindex</span><span class="s3">)</span>
+                <span class="s2">if not </span><span class="s1">mo</span><span class="s3">:</span>
+                    <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                        <span class="s4">f'format number </span><span class="s2">{</span><span class="s1">len</span><span class="s3">(</span><span class="s1">result</span><span class="s3">) + </span><span class="s5">1</span><span class="s2">} </span><span class="s4">of &quot;</span><span class="s2">{</span><span class="s1">astr</span><span class="s2">}</span><span class="s4">&quot; '</span>
+                        <span class="s4">'is not recognized'</span><span class="s3">)</span>
+                <span class="s1">startindex </span><span class="s3">= </span><span class="s1">mo</span><span class="s3">.</span><span class="s1">end</span><span class="s3">()</span>
+                <span class="s1">islist </span><span class="s3">= </span><span class="s2">True</span>
+
+        <span class="s2">if </span><span class="s1">order2 </span><span class="s3">== </span><span class="s4">''</span><span class="s3">:</span>
+            <span class="s1">order </span><span class="s3">= </span><span class="s1">order1</span>
+        <span class="s2">elif </span><span class="s1">order1 </span><span class="s3">== </span><span class="s4">''</span><span class="s3">:</span>
+            <span class="s1">order </span><span class="s3">= </span><span class="s1">order2</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">order1 </span><span class="s3">= </span><span class="s1">_convorder</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">order1</span><span class="s3">, </span><span class="s1">order1</span><span class="s3">)</span>
+            <span class="s1">order2 </span><span class="s3">= </span><span class="s1">_convorder</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">order2</span><span class="s3">, </span><span class="s1">order2</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s3">(</span><span class="s1">order1 </span><span class="s3">!= </span><span class="s1">order2</span><span class="s3">):</span>
+                <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                    <span class="s4">f'inconsistent byte-order specification </span><span class="s2">{</span><span class="s1">order1</span><span class="s2">} </span><span class="s4">and </span><span class="s2">{</span><span class="s1">order2</span><span class="s2">}</span><span class="s4">'</span><span class="s3">)</span>
+            <span class="s1">order </span><span class="s3">= </span><span class="s1">order1</span>
+
+        <span class="s2">if </span><span class="s1">order </span><span class="s2">in </span><span class="s3">(</span><span class="s4">'|'</span><span class="s3">, </span><span class="s4">'='</span><span class="s3">, </span><span class="s1">_nbo</span><span class="s3">):</span>
+            <span class="s1">order </span><span class="s3">= </span><span class="s4">''</span>
+        <span class="s1">dtype </span><span class="s3">= </span><span class="s1">order </span><span class="s3">+ </span><span class="s1">dtype</span>
+        <span class="s2">if </span><span class="s1">repeats </span><span class="s3">== </span><span class="s4">''</span><span class="s3">:</span>
+            <span class="s1">newitem </span><span class="s3">= </span><span class="s1">dtype</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s3">(</span><span class="s1">repeats</span><span class="s3">[</span><span class="s5">0</span><span class="s3">] == </span><span class="s4">&quot;(&quot; </span><span class="s2">and </span><span class="s1">repeats</span><span class="s3">[-</span><span class="s5">1</span><span class="s3">] == </span><span class="s4">&quot;)&quot;</span>
+                    <span class="s2">and </span><span class="s1">repeats</span><span class="s3">[</span><span class="s5">1</span><span class="s3">:-</span><span class="s5">1</span><span class="s3">].</span><span class="s1">strip</span><span class="s3">() != </span><span class="s4">&quot;&quot;</span>
+                    <span class="s2">and </span><span class="s4">&quot;,&quot; </span><span class="s2">not in </span><span class="s1">repeats</span><span class="s3">):</span>
+                <span class="s1">warnings</span><span class="s3">.</span><span class="s1">warn</span><span class="s3">(</span>
+                    <span class="s4">'Passing in a parenthesized single number for repeats '</span>
+                    <span class="s4">'is deprecated; pass either a single number or indicate '</span>
+                    <span class="s4">'a tuple with a comma, like &quot;(2,)&quot;.'</span><span class="s3">, </span><span class="s1">DeprecationWarning</span><span class="s3">,</span>
+                    <span class="s1">stacklevel</span><span class="s3">=</span><span class="s5">2</span><span class="s3">)</span>
+            <span class="s1">newitem </span><span class="s3">= (</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">ast</span><span class="s3">.</span><span class="s1">literal_eval</span><span class="s3">(</span><span class="s1">repeats</span><span class="s3">))</span>
+
+        <span class="s1">result</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">newitem</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">result </span><span class="s2">if </span><span class="s1">islist </span><span class="s2">else </span><span class="s1">result</span><span class="s3">[</span><span class="s5">0</span><span class="s3">]</span>
+
+<span class="s2">class </span><span class="s1">dummy_ctype</span><span class="s3">:</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">cls</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_cls </span><span class="s3">= </span><span class="s1">cls</span>
+
+    <span class="s2">def </span><span class="s1">__mul__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span>
+
+    <span class="s2">def </span><span class="s1">__call__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, *</span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_cls</span><span class="s3">(</span><span class="s1">other</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__eq__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_cls </span><span class="s3">== </span><span class="s1">other</span><span class="s3">.</span><span class="s1">_cls</span>
+
+    <span class="s2">def </span><span class="s1">__ne__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_cls </span><span class="s3">!= </span><span class="s1">other</span><span class="s3">.</span><span class="s1">_cls</span>
+
+<span class="s2">def </span><span class="s1">_getintp_ctype</span><span class="s3">():</span>
+    <span class="s1">val </span><span class="s3">= </span><span class="s1">_getintp_ctype</span><span class="s3">.</span><span class="s1">cache</span>
+    <span class="s2">if </span><span class="s1">val </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">val</span>
+    <span class="s2">if </span><span class="s1">ctypes </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+        <span class="s1">val </span><span class="s3">= </span><span class="s1">dummy_ctype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">char </span><span class="s3">= </span><span class="s1">dtype</span><span class="s3">(</span><span class="s4">'n'</span><span class="s3">).</span><span class="s1">char</span>
+        <span class="s2">if </span><span class="s1">char </span><span class="s3">== </span><span class="s4">'i'</span><span class="s3">:</span>
+            <span class="s1">val </span><span class="s3">= </span><span class="s1">ctypes</span><span class="s3">.</span><span class="s1">c_int</span>
+        <span class="s2">elif </span><span class="s1">char </span><span class="s3">== </span><span class="s4">'l'</span><span class="s3">:</span>
+            <span class="s1">val </span><span class="s3">= </span><span class="s1">ctypes</span><span class="s3">.</span><span class="s1">c_long</span>
+        <span class="s2">elif </span><span class="s1">char </span><span class="s3">== </span><span class="s4">'q'</span><span class="s3">:</span>
+            <span class="s1">val </span><span class="s3">= </span><span class="s1">ctypes</span><span class="s3">.</span><span class="s1">c_longlong</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">val </span><span class="s3">= </span><span class="s1">ctypes</span><span class="s3">.</span><span class="s1">c_long</span>
+    <span class="s1">_getintp_ctype</span><span class="s3">.</span><span class="s1">cache </span><span class="s3">= </span><span class="s1">val</span>
+    <span class="s2">return </span><span class="s1">val</span>
+
+
+<span class="s1">_getintp_ctype</span><span class="s3">.</span><span class="s1">cache </span><span class="s3">= </span><span class="s2">None</span>
+
+<span class="s6"># Used for .ctypes attribute of ndarray</span>
+
+<span class="s2">class </span><span class="s1">_missing_ctypes</span><span class="s3">:</span>
+    <span class="s2">def </span><span class="s1">cast</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">num</span><span class="s3">, </span><span class="s1">obj</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">num</span><span class="s3">.</span><span class="s1">value</span>
+
+    <span class="s2">class </span><span class="s1">c_void_p</span><span class="s3">:</span>
+        <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">ptr</span><span class="s3">):</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">value </span><span class="s3">= </span><span class="s1">ptr</span>
+
+
+<span class="s2">class </span><span class="s1">_ctypes</span><span class="s3">:</span>
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">array</span><span class="s3">, </span><span class="s1">ptr</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_arr </span><span class="s3">= </span><span class="s1">array</span>
+
+        <span class="s2">if </span><span class="s1">ctypes</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_ctypes </span><span class="s3">= </span><span class="s1">ctypes</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_data </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_ctypes</span><span class="s3">.</span><span class="s1">c_void_p</span><span class="s3">(</span><span class="s1">ptr</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s6"># fake a pointer-like object that holds onto the reference</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_ctypes </span><span class="s3">= </span><span class="s1">_missing_ctypes</span><span class="s3">()</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_data </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_ctypes</span><span class="s3">.</span><span class="s1">c_void_p</span><span class="s3">(</span><span class="s1">ptr</span><span class="s3">)</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">_objects </span><span class="s3">= </span><span class="s1">array</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_arr</span><span class="s3">.</span><span class="s1">ndim </span><span class="s3">== </span><span class="s5">0</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_zerod </span><span class="s3">= </span><span class="s2">True</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_zerod </span><span class="s3">= </span><span class="s2">False</span>
+
+    <span class="s2">def </span><span class="s1">data_as</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">obj</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return the data pointer cast to a particular c-types object. 
+        For example, calling ``self._as_parameter_`` is equivalent to 
+        ``self.data_as(ctypes.c_void_p)``. Perhaps you want to use 
+        the data as a pointer to a ctypes array of floating-point data: 
+        ``self.data_as(ctypes.POINTER(ctypes.c_double))``. 
+ 
+        The returned pointer will keep a reference to the array. 
+        &quot;&quot;&quot;</span>
+        <span class="s6"># _ctypes.cast function causes a circular reference of self._data in</span>
+        <span class="s6"># self._data._objects. Attributes of self._data cannot be released</span>
+        <span class="s6"># until gc.collect is called. Make a copy of the pointer first then</span>
+        <span class="s6"># let it hold the array reference. This is a workaround to circumvent</span>
+        <span class="s6"># the CPython bug https://bugs.python.org/issue12836.</span>
+        <span class="s1">ptr </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_ctypes</span><span class="s3">.</span><span class="s1">cast</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">, </span><span class="s1">obj</span><span class="s3">)</span>
+        <span class="s1">ptr</span><span class="s3">.</span><span class="s1">_arr </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_arr</span>
+        <span class="s2">return </span><span class="s1">ptr</span>
+
+    <span class="s2">def </span><span class="s1">shape_as</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">obj</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return the shape tuple as an array of some other c-types 
+        type. For example: ``self.shape_as(ctypes.c_short)``. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_zerod</span><span class="s3">:</span>
+            <span class="s2">return None</span>
+        <span class="s2">return </span><span class="s3">(</span><span class="s1">obj </span><span class="s3">* </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_arr</span><span class="s3">.</span><span class="s1">ndim</span><span class="s3">)(*</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_arr</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">strides_as</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">obj</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return the strides tuple as an array of some other 
+        c-types type. For example: ``self.strides_as(ctypes.c_longlong)``. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_zerod</span><span class="s3">:</span>
+            <span class="s2">return None</span>
+        <span class="s2">return </span><span class="s3">(</span><span class="s1">obj </span><span class="s3">* </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_arr</span><span class="s3">.</span><span class="s1">ndim</span><span class="s3">)(*</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_arr</span><span class="s3">.</span><span class="s1">strides</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">data</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        A pointer to the memory area of the array as a Python integer. 
+        This memory area may contain data that is not aligned, or not in 
+        correct byte-order. The memory area may not even be writeable. 
+        The array flags and data-type of this array should be respected 
+        when passing this attribute to arbitrary C-code to avoid trouble 
+        that can include Python crashing. User Beware! The value of this 
+        attribute is exactly the same as: 
+        ``self._array_interface_['data'][0]``. 
+ 
+        Note that unlike ``data_as``, a reference won't be kept to the array: 
+        code like ``ctypes.c_void_p((a + b).ctypes.data)`` will result in a 
+        pointer to a deallocated array, and should be spelt 
+        ``(a + b).ctypes.data_as(ctypes.c_void_p)`` 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_data</span><span class="s3">.</span><span class="s1">value</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">shape</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        (c_intp*self.ndim): A ctypes array of length self.ndim where 
+        the basetype is the C-integer corresponding to ``dtype('p')`` on this 
+        platform (see `~numpy.ctypeslib.c_intp`). This base-type could be 
+        `ctypes.c_int`, `ctypes.c_long`, or `ctypes.c_longlong` depending on 
+        the platform. The ctypes array contains the shape of 
+        the underlying array. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">shape_as</span><span class="s3">(</span><span class="s1">_getintp_ctype</span><span class="s3">())</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">strides</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        (c_intp*self.ndim): A ctypes array of length self.ndim where 
+        the basetype is the same as for the shape attribute. This ctypes 
+        array contains the strides information from the underlying array. 
+        This strides information is important for showing how many bytes 
+        must be jumped to get to the next element in the array. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">strides_as</span><span class="s3">(</span><span class="s1">_getintp_ctype</span><span class="s3">())</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">_as_parameter_</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Overrides the ctypes semi-magic method 
+ 
+        Enables `c_func(some_array.ctypes)` 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">data_as</span><span class="s3">(</span><span class="s1">ctypes</span><span class="s3">.</span><span class="s1">c_void_p</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_newnames</span><span class="s3">(</span><span class="s1">datatype</span><span class="s3">, </span><span class="s1">order</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Given a datatype and an order object, return a new names tuple, with the 
+    order indicated 
+    &quot;&quot;&quot;</span>
+    <span class="s1">oldnames </span><span class="s3">= </span><span class="s1">datatype</span><span class="s3">.</span><span class="s1">names</span>
+    <span class="s1">nameslist </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">oldnames</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">order</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+        <span class="s1">order </span><span class="s3">= [</span><span class="s1">order</span><span class="s3">]</span>
+    <span class="s1">seen </span><span class="s3">= </span><span class="s1">set</span><span class="s3">()</span>
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">order</span><span class="s3">, (</span><span class="s1">list</span><span class="s3">, </span><span class="s1">tuple</span><span class="s3">)):</span>
+        <span class="s2">for </span><span class="s1">name </span><span class="s2">in </span><span class="s1">order</span><span class="s3">:</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">nameslist</span><span class="s3">.</span><span class="s1">remove</span><span class="s3">(</span><span class="s1">name</span><span class="s3">)</span>
+            <span class="s2">except </span><span class="s1">ValueError</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">name </span><span class="s2">in </span><span class="s1">seen</span><span class="s3">:</span>
+                    <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">f&quot;duplicate field name: </span><span class="s2">{</span><span class="s1">name</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">) </span><span class="s2">from None</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">f&quot;unknown field name: </span><span class="s2">{</span><span class="s1">name</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">) </span><span class="s2">from None</span>
+            <span class="s1">seen</span><span class="s3">.</span><span class="s1">add</span><span class="s3">(</span><span class="s1">name</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">tuple</span><span class="s3">(</span><span class="s1">list</span><span class="s3">(</span><span class="s1">order</span><span class="s3">) + </span><span class="s1">nameslist</span><span class="s3">)</span>
+    <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">f&quot;unsupported order value: </span><span class="s2">{</span><span class="s1">order</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">)</span>
+
+<span class="s2">def </span><span class="s1">_copy_fields</span><span class="s3">(</span><span class="s1">ary</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Return copy of structured array with padding between fields removed. 
+ 
+    Parameters 
+    ---------- 
+    ary : ndarray 
+       Structured array from which to remove padding bytes 
+ 
+    Returns 
+    ------- 
+    ary_copy : ndarray 
+       Copy of ary with padding bytes removed 
+    &quot;&quot;&quot;</span>
+    <span class="s1">dt </span><span class="s3">= </span><span class="s1">ary</span><span class="s3">.</span><span class="s1">dtype</span>
+    <span class="s1">copy_dtype </span><span class="s3">= {</span><span class="s4">'names'</span><span class="s3">: </span><span class="s1">dt</span><span class="s3">.</span><span class="s1">names</span><span class="s3">,</span>
+                  <span class="s4">'formats'</span><span class="s3">: [</span><span class="s1">dt</span><span class="s3">.</span><span class="s1">fields</span><span class="s3">[</span><span class="s1">name</span><span class="s3">][</span><span class="s5">0</span><span class="s3">] </span><span class="s2">for </span><span class="s1">name </span><span class="s2">in </span><span class="s1">dt</span><span class="s3">.</span><span class="s1">names</span><span class="s3">]}</span>
+    <span class="s2">return </span><span class="s1">array</span><span class="s3">(</span><span class="s1">ary</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">copy_dtype</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+
+<span class="s2">def </span><span class="s1">_promote_fields</span><span class="s3">(</span><span class="s1">dt1</span><span class="s3">, </span><span class="s1">dt2</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; Perform type promotion for two structured dtypes. 
+ 
+    Parameters 
+    ---------- 
+    dt1 : structured dtype 
+        First dtype. 
+    dt2 : structured dtype 
+        Second dtype. 
+ 
+    Returns 
+    ------- 
+    out : dtype 
+        The promoted dtype 
+ 
+    Notes 
+    ----- 
+    If one of the inputs is aligned, the result will be.  The titles of 
+    both descriptors must match (point to the same field). 
+    &quot;&quot;&quot;</span>
+    <span class="s6"># Both must be structured and have the same names in the same order</span>
+    <span class="s2">if </span><span class="s3">(</span><span class="s1">dt1</span><span class="s3">.</span><span class="s1">names </span><span class="s2">is None or </span><span class="s1">dt2</span><span class="s3">.</span><span class="s1">names </span><span class="s2">is None</span><span class="s3">) </span><span class="s2">or </span><span class="s1">dt1</span><span class="s3">.</span><span class="s1">names </span><span class="s3">!= </span><span class="s1">dt2</span><span class="s3">.</span><span class="s1">names</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">DTypePromotionError</span><span class="s3">(</span>
+                <span class="s4">f&quot;field names `</span><span class="s2">{</span><span class="s1">dt1</span><span class="s3">.</span><span class="s1">names</span><span class="s2">}</span><span class="s4">` and `</span><span class="s2">{</span><span class="s1">dt2</span><span class="s3">.</span><span class="s1">names</span><span class="s2">}</span><span class="s4">` mismatch.&quot;</span><span class="s3">)</span>
+
+    <span class="s6"># if both are identical, we can (maybe!) just return the same dtype.</span>
+    <span class="s1">identical </span><span class="s3">= </span><span class="s1">dt1 </span><span class="s2">is </span><span class="s1">dt2</span>
+    <span class="s1">new_fields </span><span class="s3">= []</span>
+    <span class="s2">for </span><span class="s1">name </span><span class="s2">in </span><span class="s1">dt1</span><span class="s3">.</span><span class="s1">names</span><span class="s3">:</span>
+        <span class="s1">field1 </span><span class="s3">= </span><span class="s1">dt1</span><span class="s3">.</span><span class="s1">fields</span><span class="s3">[</span><span class="s1">name</span><span class="s3">]</span>
+        <span class="s1">field2 </span><span class="s3">= </span><span class="s1">dt2</span><span class="s3">.</span><span class="s1">fields</span><span class="s3">[</span><span class="s1">name</span><span class="s3">]</span>
+        <span class="s1">new_descr </span><span class="s3">= </span><span class="s1">promote_types</span><span class="s3">(</span><span class="s1">field1</span><span class="s3">[</span><span class="s5">0</span><span class="s3">], </span><span class="s1">field2</span><span class="s3">[</span><span class="s5">0</span><span class="s3">])</span>
+        <span class="s1">identical </span><span class="s3">= </span><span class="s1">identical </span><span class="s2">and </span><span class="s1">new_descr </span><span class="s2">is </span><span class="s1">field1</span><span class="s3">[</span><span class="s5">0</span><span class="s3">]</span>
+
+        <span class="s6"># Check that the titles match (if given):</span>
+        <span class="s2">if </span><span class="s1">field1</span><span class="s3">[</span><span class="s5">2</span><span class="s3">:] != </span><span class="s1">field2</span><span class="s3">[</span><span class="s5">2</span><span class="s3">:]:</span>
+            <span class="s2">raise </span><span class="s1">DTypePromotionError</span><span class="s3">(</span>
+                    <span class="s4">f&quot;field titles of field '</span><span class="s2">{</span><span class="s1">name</span><span class="s2">}</span><span class="s4">' mismatch&quot;</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">field1</span><span class="s3">) == </span><span class="s5">2</span><span class="s3">:</span>
+            <span class="s1">new_fields</span><span class="s3">.</span><span class="s1">append</span><span class="s3">((</span><span class="s1">name</span><span class="s3">, </span><span class="s1">new_descr</span><span class="s3">))</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">new_fields</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(((</span><span class="s1">field1</span><span class="s3">[</span><span class="s5">2</span><span class="s3">], </span><span class="s1">name</span><span class="s3">), </span><span class="s1">new_descr</span><span class="s3">))</span>
+
+    <span class="s1">res </span><span class="s3">= </span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">new_fields</span><span class="s3">, </span><span class="s1">align</span><span class="s3">=</span><span class="s1">dt1</span><span class="s3">.</span><span class="s1">isalignedstruct </span><span class="s2">or </span><span class="s1">dt2</span><span class="s3">.</span><span class="s1">isalignedstruct</span><span class="s3">)</span>
+
+    <span class="s6"># Might as well preserve identity (and metadata) if the dtype is identical</span>
+    <span class="s6"># and the itemsize, offsets are also unmodified.  This could probably be</span>
+    <span class="s6"># sped up, but also probably just be removed entirely.</span>
+    <span class="s2">if </span><span class="s1">identical </span><span class="s2">and </span><span class="s1">res</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">== </span><span class="s1">dt1</span><span class="s3">.</span><span class="s1">itemsize</span><span class="s3">:</span>
+        <span class="s2">for </span><span class="s1">name </span><span class="s2">in </span><span class="s1">dt1</span><span class="s3">.</span><span class="s1">names</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">dt1</span><span class="s3">.</span><span class="s1">fields</span><span class="s3">[</span><span class="s1">name</span><span class="s3">][</span><span class="s5">1</span><span class="s3">] != </span><span class="s1">res</span><span class="s3">.</span><span class="s1">fields</span><span class="s3">[</span><span class="s1">name</span><span class="s3">][</span><span class="s5">1</span><span class="s3">]:</span>
+                <span class="s2">return </span><span class="s1">res  </span><span class="s6"># the dtype changed.</span>
+        <span class="s2">return </span><span class="s1">dt1</span>
+
+    <span class="s2">return </span><span class="s1">res</span>
+
+
+<span class="s2">def </span><span class="s1">_getfield_is_safe</span><span class="s3">(</span><span class="s1">oldtype</span><span class="s3">, </span><span class="s1">newtype</span><span class="s3">, </span><span class="s1">offset</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; Checks safety of getfield for object arrays. 
+ 
+    As in _view_is_safe, we need to check that memory containing objects is not 
+    reinterpreted as a non-object datatype and vice versa. 
+ 
+    Parameters 
+    ---------- 
+    oldtype : data-type 
+        Data type of the original ndarray. 
+    newtype : data-type 
+        Data type of the field being accessed by ndarray.getfield 
+    offset : int 
+        Offset of the field being accessed by ndarray.getfield 
+ 
+    Raises 
+    ------ 
+    TypeError 
+        If the field access is invalid 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">newtype</span><span class="s3">.</span><span class="s1">hasobject </span><span class="s2">or </span><span class="s1">oldtype</span><span class="s3">.</span><span class="s1">hasobject</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">offset </span><span class="s3">== </span><span class="s5">0 </span><span class="s2">and </span><span class="s1">_is_view_safe_cast</span><span class="s3">(</span><span class="s1">oldtype</span><span class="s3">, </span><span class="s1">newtype</span><span class="s3">):</span>
+            <span class="s2">return</span>
+        <span class="s2">if </span><span class="s1">oldtype</span><span class="s3">.</span><span class="s1">names </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">for </span><span class="s1">name </span><span class="s2">in </span><span class="s1">oldtype</span><span class="s3">.</span><span class="s1">names</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s3">(</span><span class="s1">oldtype</span><span class="s3">.</span><span class="s1">fields</span><span class="s3">[</span><span class="s1">name</span><span class="s3">][</span><span class="s5">1</span><span class="s3">] == </span><span class="s1">offset </span><span class="s2">and</span>
+                        <span class="s1">oldtype</span><span class="s3">.</span><span class="s1">fields</span><span class="s3">[</span><span class="s1">name</span><span class="s3">][</span><span class="s5">0</span><span class="s3">] == </span><span class="s1">newtype</span><span class="s3">):</span>
+                    <span class="s2">return</span>
+        <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span><span class="s4">&quot;Cannot get/set field of an object array&quot;</span><span class="s3">)</span>
+    <span class="s2">return</span>
+
+<span class="s2">def </span><span class="s1">_view_is_safe</span><span class="s3">(</span><span class="s1">oldtype</span><span class="s3">, </span><span class="s1">newtype</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; Checks safety of a view involving object arrays, for example when 
+    doing:: 
+ 
+        np.zeros(10, dtype=oldtype).view(newtype) 
+ 
+    Parameters 
+    ---------- 
+    oldtype : data-type 
+        Data type of original ndarray 
+    newtype : data-type 
+        Data type of the view 
+ 
+    Raises 
+    ------ 
+    TypeError 
+        If the new type is incompatible with the old type. 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s6"># more precise than ``oldtype == newtype``: e.g. dtype((np.record, 'i4,i4'))</span>
+    <span class="s6"># views safely as dtype((np.void, 'i4,i4')), while two equal StringDType</span>
+    <span class="s6"># instances with separate allocators do not</span>
+    <span class="s2">if </span><span class="s1">_is_view_safe_cast</span><span class="s3">(</span><span class="s1">oldtype</span><span class="s3">, </span><span class="s1">newtype</span><span class="s3">):</span>
+        <span class="s2">return</span>
+
+    <span class="s2">if </span><span class="s1">newtype</span><span class="s3">.</span><span class="s1">hasobject </span><span class="s2">or </span><span class="s1">oldtype</span><span class="s3">.</span><span class="s1">hasobject</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span><span class="s4">&quot;Cannot change data-type for array of references.&quot;</span><span class="s3">)</span>
+    <span class="s2">return</span>
+
+
+<span class="s6"># Given a string containing a PEP 3118 format specifier,</span>
+<span class="s6"># construct a NumPy dtype</span>
+
+<span class="s1">_pep3118_native_map </span><span class="s3">= {</span>
+    <span class="s4">'?'</span><span class="s3">: </span><span class="s4">'?'</span><span class="s3">,</span>
+    <span class="s4">'c'</span><span class="s3">: </span><span class="s4">'S1'</span><span class="s3">,</span>
+    <span class="s4">'b'</span><span class="s3">: </span><span class="s4">'b'</span><span class="s3">,</span>
+    <span class="s4">'B'</span><span class="s3">: </span><span class="s4">'B'</span><span class="s3">,</span>
+    <span class="s4">'h'</span><span class="s3">: </span><span class="s4">'h'</span><span class="s3">,</span>
+    <span class="s4">'H'</span><span class="s3">: </span><span class="s4">'H'</span><span class="s3">,</span>
+    <span class="s4">'i'</span><span class="s3">: </span><span class="s4">'i'</span><span class="s3">,</span>
+    <span class="s4">'I'</span><span class="s3">: </span><span class="s4">'I'</span><span class="s3">,</span>
+    <span class="s4">'l'</span><span class="s3">: </span><span class="s4">'l'</span><span class="s3">,</span>
+    <span class="s4">'L'</span><span class="s3">: </span><span class="s4">'L'</span><span class="s3">,</span>
+    <span class="s4">'q'</span><span class="s3">: </span><span class="s4">'q'</span><span class="s3">,</span>
+    <span class="s4">'Q'</span><span class="s3">: </span><span class="s4">'Q'</span><span class="s3">,</span>
+    <span class="s4">'e'</span><span class="s3">: </span><span class="s4">'e'</span><span class="s3">,</span>
+    <span class="s4">'f'</span><span class="s3">: </span><span class="s4">'f'</span><span class="s3">,</span>
+    <span class="s4">'d'</span><span class="s3">: </span><span class="s4">'d'</span><span class="s3">,</span>
+    <span class="s4">'g'</span><span class="s3">: </span><span class="s4">'g'</span><span class="s3">,</span>
+    <span class="s4">'Zf'</span><span class="s3">: </span><span class="s4">'F'</span><span class="s3">,</span>
+    <span class="s4">'Zd'</span><span class="s3">: </span><span class="s4">'D'</span><span class="s3">,</span>
+    <span class="s4">'Zg'</span><span class="s3">: </span><span class="s4">'G'</span><span class="s3">,</span>
+    <span class="s4">'s'</span><span class="s3">: </span><span class="s4">'S'</span><span class="s3">,</span>
+    <span class="s4">'w'</span><span class="s3">: </span><span class="s4">'U'</span><span class="s3">,</span>
+    <span class="s4">'O'</span><span class="s3">: </span><span class="s4">'O'</span><span class="s3">,</span>
+    <span class="s4">'x'</span><span class="s3">: </span><span class="s4">'V'</span><span class="s3">,  </span><span class="s6"># padding</span>
+<span class="s3">}</span>
+<span class="s1">_pep3118_native_typechars </span><span class="s3">= </span><span class="s4">''</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">_pep3118_native_map</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">())</span>
+
+<span class="s1">_pep3118_standard_map </span><span class="s3">= {</span>
+    <span class="s4">'?'</span><span class="s3">: </span><span class="s4">'?'</span><span class="s3">,</span>
+    <span class="s4">'c'</span><span class="s3">: </span><span class="s4">'S1'</span><span class="s3">,</span>
+    <span class="s4">'b'</span><span class="s3">: </span><span class="s4">'b'</span><span class="s3">,</span>
+    <span class="s4">'B'</span><span class="s3">: </span><span class="s4">'B'</span><span class="s3">,</span>
+    <span class="s4">'h'</span><span class="s3">: </span><span class="s4">'i2'</span><span class="s3">,</span>
+    <span class="s4">'H'</span><span class="s3">: </span><span class="s4">'u2'</span><span class="s3">,</span>
+    <span class="s4">'i'</span><span class="s3">: </span><span class="s4">'i4'</span><span class="s3">,</span>
+    <span class="s4">'I'</span><span class="s3">: </span><span class="s4">'u4'</span><span class="s3">,</span>
+    <span class="s4">'l'</span><span class="s3">: </span><span class="s4">'i4'</span><span class="s3">,</span>
+    <span class="s4">'L'</span><span class="s3">: </span><span class="s4">'u4'</span><span class="s3">,</span>
+    <span class="s4">'q'</span><span class="s3">: </span><span class="s4">'i8'</span><span class="s3">,</span>
+    <span class="s4">'Q'</span><span class="s3">: </span><span class="s4">'u8'</span><span class="s3">,</span>
+    <span class="s4">'e'</span><span class="s3">: </span><span class="s4">'f2'</span><span class="s3">,</span>
+    <span class="s4">'f'</span><span class="s3">: </span><span class="s4">'f'</span><span class="s3">,</span>
+    <span class="s4">'d'</span><span class="s3">: </span><span class="s4">'d'</span><span class="s3">,</span>
+    <span class="s4">'Zf'</span><span class="s3">: </span><span class="s4">'F'</span><span class="s3">,</span>
+    <span class="s4">'Zd'</span><span class="s3">: </span><span class="s4">'D'</span><span class="s3">,</span>
+    <span class="s4">'s'</span><span class="s3">: </span><span class="s4">'S'</span><span class="s3">,</span>
+    <span class="s4">'w'</span><span class="s3">: </span><span class="s4">'U'</span><span class="s3">,</span>
+    <span class="s4">'O'</span><span class="s3">: </span><span class="s4">'O'</span><span class="s3">,</span>
+    <span class="s4">'x'</span><span class="s3">: </span><span class="s4">'V'</span><span class="s3">,  </span><span class="s6"># padding</span>
+<span class="s3">}</span>
+<span class="s1">_pep3118_standard_typechars </span><span class="s3">= </span><span class="s4">''</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">_pep3118_standard_map</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">())</span>
+
+<span class="s1">_pep3118_unsupported_map </span><span class="s3">= {</span>
+    <span class="s4">'u'</span><span class="s3">: </span><span class="s4">'UCS-2 strings'</span><span class="s3">,</span>
+    <span class="s4">'&amp;'</span><span class="s3">: </span><span class="s4">'pointers'</span><span class="s3">,</span>
+    <span class="s4">'t'</span><span class="s3">: </span><span class="s4">'bitfields'</span><span class="s3">,</span>
+    <span class="s4">'X'</span><span class="s3">: </span><span class="s4">'function pointers'</span><span class="s3">,</span>
+<span class="s3">}</span>
+
+<span class="s2">class </span><span class="s1">_Stream</span><span class="s3">:</span>
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">s</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">s </span><span class="s3">= </span><span class="s1">s</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">byteorder </span><span class="s3">= </span><span class="s4">'@'</span>
+
+    <span class="s2">def </span><span class="s1">advance</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">n</span><span class="s3">):</span>
+        <span class="s1">res </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">s</span><span class="s3">[:</span><span class="s1">n</span><span class="s3">]</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">s </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">s</span><span class="s3">[</span><span class="s1">n</span><span class="s3">:]</span>
+        <span class="s2">return </span><span class="s1">res</span>
+
+    <span class="s2">def </span><span class="s1">consume</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">c</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">s</span><span class="s3">[:</span><span class="s1">len</span><span class="s3">(</span><span class="s1">c</span><span class="s3">)] == </span><span class="s1">c</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">advance</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">c</span><span class="s3">))</span>
+            <span class="s2">return True</span>
+        <span class="s2">return False</span>
+
+    <span class="s2">def </span><span class="s1">consume_until</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">c</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">callable</span><span class="s3">(</span><span class="s1">c</span><span class="s3">):</span>
+            <span class="s1">i </span><span class="s3">= </span><span class="s5">0</span>
+            <span class="s2">while </span><span class="s1">i </span><span class="s3">&lt; </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">s</span><span class="s3">) </span><span class="s2">and not </span><span class="s1">c</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">s</span><span class="s3">[</span><span class="s1">i</span><span class="s3">]):</span>
+                <span class="s1">i </span><span class="s3">= </span><span class="s1">i </span><span class="s3">+ </span><span class="s5">1</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">advance</span><span class="s3">(</span><span class="s1">i</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">i </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">s</span><span class="s3">.</span><span class="s1">index</span><span class="s3">(</span><span class="s1">c</span><span class="s3">)</span>
+            <span class="s1">res </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">advance</span><span class="s3">(</span><span class="s1">i</span><span class="s3">)</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">advance</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">c</span><span class="s3">))</span>
+            <span class="s2">return </span><span class="s1">res</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">next</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">s</span><span class="s3">[</span><span class="s5">0</span><span class="s3">]</span>
+
+    <span class="s2">def </span><span class="s1">__bool__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">bool</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">s</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_dtype_from_pep3118</span><span class="s3">(</span><span class="s1">spec</span><span class="s3">):</span>
+    <span class="s1">stream </span><span class="s3">= </span><span class="s1">_Stream</span><span class="s3">(</span><span class="s1">spec</span><span class="s3">)</span>
+    <span class="s1">dtype</span><span class="s3">, </span><span class="s1">align </span><span class="s3">= </span><span class="s1">__dtype_from_pep3118</span><span class="s3">(</span><span class="s1">stream</span><span class="s3">, </span><span class="s1">is_subdtype</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">dtype</span>
+
+<span class="s2">def </span><span class="s1">__dtype_from_pep3118</span><span class="s3">(</span><span class="s1">stream</span><span class="s3">, </span><span class="s1">is_subdtype</span><span class="s3">):</span>
+    <span class="s1">field_spec </span><span class="s3">= {</span>
+        <span class="s4">'names'</span><span class="s3">: [],</span>
+        <span class="s4">'formats'</span><span class="s3">: [],</span>
+        <span class="s4">'offsets'</span><span class="s3">: [],</span>
+        <span class="s4">'itemsize'</span><span class="s3">: </span><span class="s5">0</span>
+    <span class="s3">}</span>
+    <span class="s1">offset </span><span class="s3">= </span><span class="s5">0</span>
+    <span class="s1">common_alignment </span><span class="s3">= </span><span class="s5">1</span>
+    <span class="s1">is_padding </span><span class="s3">= </span><span class="s2">False</span>
+
+    <span class="s6"># Parse spec</span>
+    <span class="s2">while </span><span class="s1">stream</span><span class="s3">:</span>
+        <span class="s1">value </span><span class="s3">= </span><span class="s2">None</span>
+
+        <span class="s6"># End of structure, bail out to upper level</span>
+        <span class="s2">if </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">consume</span><span class="s3">(</span><span class="s4">'}'</span><span class="s3">):</span>
+            <span class="s2">break</span>
+
+        <span class="s6"># Sub-arrays (1)</span>
+        <span class="s1">shape </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">if </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">consume</span><span class="s3">(</span><span class="s4">'('</span><span class="s3">):</span>
+            <span class="s1">shape </span><span class="s3">= </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">consume_until</span><span class="s3">(</span><span class="s4">')'</span><span class="s3">)</span>
+            <span class="s1">shape </span><span class="s3">= </span><span class="s1">tuple</span><span class="s3">(</span><span class="s1">map</span><span class="s3">(</span><span class="s1">int</span><span class="s3">, </span><span class="s1">shape</span><span class="s3">.</span><span class="s1">split</span><span class="s3">(</span><span class="s4">','</span><span class="s3">)))</span>
+
+        <span class="s6"># Byte order</span>
+        <span class="s2">if </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">next </span><span class="s2">in </span><span class="s3">(</span><span class="s4">'@'</span><span class="s3">, </span><span class="s4">'='</span><span class="s3">, </span><span class="s4">'&lt;'</span><span class="s3">, </span><span class="s4">'&gt;'</span><span class="s3">, </span><span class="s4">'^'</span><span class="s3">, </span><span class="s4">'!'</span><span class="s3">):</span>
+            <span class="s1">byteorder </span><span class="s3">= </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">advance</span><span class="s3">(</span><span class="s5">1</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">byteorder </span><span class="s3">== </span><span class="s4">'!'</span><span class="s3">:</span>
+                <span class="s1">byteorder </span><span class="s3">= </span><span class="s4">'&gt;'</span>
+            <span class="s1">stream</span><span class="s3">.</span><span class="s1">byteorder </span><span class="s3">= </span><span class="s1">byteorder</span>
+
+        <span class="s6"># Byte order characters also control native vs. standard type sizes</span>
+        <span class="s2">if </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">byteorder </span><span class="s2">in </span><span class="s3">(</span><span class="s4">'@'</span><span class="s3">, </span><span class="s4">'^'</span><span class="s3">):</span>
+            <span class="s1">type_map </span><span class="s3">= </span><span class="s1">_pep3118_native_map</span>
+            <span class="s1">type_map_chars </span><span class="s3">= </span><span class="s1">_pep3118_native_typechars</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">type_map </span><span class="s3">= </span><span class="s1">_pep3118_standard_map</span>
+            <span class="s1">type_map_chars </span><span class="s3">= </span><span class="s1">_pep3118_standard_typechars</span>
+
+        <span class="s6"># Item sizes</span>
+        <span class="s1">itemsize_str </span><span class="s3">= </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">consume_until</span><span class="s3">(</span><span class="s2">lambda </span><span class="s1">c</span><span class="s3">: </span><span class="s2">not </span><span class="s1">c</span><span class="s3">.</span><span class="s1">isdigit</span><span class="s3">())</span>
+        <span class="s2">if </span><span class="s1">itemsize_str</span><span class="s3">:</span>
+            <span class="s1">itemsize </span><span class="s3">= </span><span class="s1">int</span><span class="s3">(</span><span class="s1">itemsize_str</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">itemsize </span><span class="s3">= </span><span class="s5">1</span>
+
+        <span class="s6"># Data types</span>
+        <span class="s1">is_padding </span><span class="s3">= </span><span class="s2">False</span>
+
+        <span class="s2">if </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">consume</span><span class="s3">(</span><span class="s4">'T{'</span><span class="s3">):</span>
+            <span class="s1">value</span><span class="s3">, </span><span class="s1">align </span><span class="s3">= </span><span class="s1">__dtype_from_pep3118</span><span class="s3">(</span>
+                <span class="s1">stream</span><span class="s3">, </span><span class="s1">is_subdtype</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">next </span><span class="s2">in </span><span class="s1">type_map_chars</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">next </span><span class="s3">== </span><span class="s4">'Z'</span><span class="s3">:</span>
+                <span class="s1">typechar </span><span class="s3">= </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">advance</span><span class="s3">(</span><span class="s5">2</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">typechar </span><span class="s3">= </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">advance</span><span class="s3">(</span><span class="s5">1</span><span class="s3">)</span>
+
+            <span class="s1">is_padding </span><span class="s3">= (</span><span class="s1">typechar </span><span class="s3">== </span><span class="s4">'x'</span><span class="s3">)</span>
+            <span class="s1">dtypechar </span><span class="s3">= </span><span class="s1">type_map</span><span class="s3">[</span><span class="s1">typechar</span><span class="s3">]</span>
+            <span class="s2">if </span><span class="s1">dtypechar </span><span class="s2">in </span><span class="s4">'USV'</span><span class="s3">:</span>
+                <span class="s1">dtypechar </span><span class="s3">+= </span><span class="s4">f'</span><span class="s2">{</span><span class="s1">itemsize</span><span class="s2">}</span><span class="s4">'</span>
+                <span class="s1">itemsize </span><span class="s3">= </span><span class="s5">1</span>
+            <span class="s1">numpy_byteorder </span><span class="s3">= {</span><span class="s4">'@'</span><span class="s3">: </span><span class="s4">'='</span><span class="s3">, </span><span class="s4">'^'</span><span class="s3">: </span><span class="s4">'='</span><span class="s3">}.</span><span class="s1">get</span><span class="s3">(</span>
+                <span class="s1">stream</span><span class="s3">.</span><span class="s1">byteorder</span><span class="s3">, </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">byteorder</span><span class="s3">)</span>
+            <span class="s1">value </span><span class="s3">= </span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">numpy_byteorder </span><span class="s3">+ </span><span class="s1">dtypechar</span><span class="s3">)</span>
+            <span class="s1">align </span><span class="s3">= </span><span class="s1">value</span><span class="s3">.</span><span class="s1">alignment</span>
+        <span class="s2">elif </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">next </span><span class="s2">in </span><span class="s1">_pep3118_unsupported_map</span><span class="s3">:</span>
+            <span class="s1">desc </span><span class="s3">= </span><span class="s1">_pep3118_unsupported_map</span><span class="s3">[</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">next</span><span class="s3">]</span>
+            <span class="s2">raise </span><span class="s1">NotImplementedError</span><span class="s3">(</span>
+                <span class="s4">f&quot;Unrepresentable PEP 3118 data type </span><span class="s2">{</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">next</span><span class="s2">!r} </span><span class="s4">(</span><span class="s2">{</span><span class="s1">desc</span><span class="s2">}</span><span class="s4">)&quot;</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                <span class="s4">f&quot;Unknown PEP 3118 data type specifier </span><span class="s2">{</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">s</span><span class="s2">!r}</span><span class="s4">&quot;</span>
+            <span class="s3">)</span>
+
+        <span class="s6">#</span>
+        <span class="s6"># Native alignment may require padding</span>
+        <span class="s6">#</span>
+        <span class="s6"># Here we assume that the presence of a '@' character implicitly</span>
+        <span class="s6"># implies that the start of the array is *already* aligned.</span>
+        <span class="s6">#</span>
+        <span class="s1">extra_offset </span><span class="s3">= </span><span class="s5">0</span>
+        <span class="s2">if </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">byteorder </span><span class="s3">== </span><span class="s4">'@'</span><span class="s3">:</span>
+            <span class="s1">start_padding </span><span class="s3">= (-</span><span class="s1">offset</span><span class="s3">) % </span><span class="s1">align</span>
+            <span class="s1">intra_padding </span><span class="s3">= (-</span><span class="s1">value</span><span class="s3">.</span><span class="s1">itemsize</span><span class="s3">) % </span><span class="s1">align</span>
+
+            <span class="s1">offset </span><span class="s3">+= </span><span class="s1">start_padding</span>
+
+            <span class="s2">if </span><span class="s1">intra_padding </span><span class="s3">!= </span><span class="s5">0</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">itemsize </span><span class="s3">&gt; </span><span class="s5">1 </span><span class="s2">or </span><span class="s3">(</span><span class="s1">shape </span><span class="s2">is not None and </span><span class="s1">_prod</span><span class="s3">(</span><span class="s1">shape</span><span class="s3">) &gt; </span><span class="s5">1</span><span class="s3">):</span>
+                    <span class="s6"># Inject internal padding to the end of the sub-item</span>
+                    <span class="s1">value </span><span class="s3">= </span><span class="s1">_add_trailing_padding</span><span class="s3">(</span><span class="s1">value</span><span class="s3">, </span><span class="s1">intra_padding</span><span class="s3">)</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s6"># We can postpone the injection of internal padding,</span>
+                    <span class="s6"># as the item appears at most once</span>
+                    <span class="s1">extra_offset </span><span class="s3">+= </span><span class="s1">intra_padding</span>
+
+            <span class="s6"># Update common alignment</span>
+            <span class="s1">common_alignment </span><span class="s3">= </span><span class="s1">_lcm</span><span class="s3">(</span><span class="s1">align</span><span class="s3">, </span><span class="s1">common_alignment</span><span class="s3">)</span>
+
+        <span class="s6"># Convert itemsize to sub-array</span>
+        <span class="s2">if </span><span class="s1">itemsize </span><span class="s3">!= </span><span class="s5">1</span><span class="s3">:</span>
+            <span class="s1">value </span><span class="s3">= </span><span class="s1">dtype</span><span class="s3">((</span><span class="s1">value</span><span class="s3">, (</span><span class="s1">itemsize</span><span class="s3">,)))</span>
+
+        <span class="s6"># Sub-arrays (2)</span>
+        <span class="s2">if </span><span class="s1">shape </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">value </span><span class="s3">= </span><span class="s1">dtype</span><span class="s3">((</span><span class="s1">value</span><span class="s3">, </span><span class="s1">shape</span><span class="s3">))</span>
+
+        <span class="s6"># Field name</span>
+        <span class="s2">if </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">consume</span><span class="s3">(</span><span class="s4">':'</span><span class="s3">):</span>
+            <span class="s1">name </span><span class="s3">= </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">consume_until</span><span class="s3">(</span><span class="s4">':'</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">name </span><span class="s3">= </span><span class="s2">None</span>
+
+        <span class="s2">if not </span><span class="s3">(</span><span class="s1">is_padding </span><span class="s2">and </span><span class="s1">name </span><span class="s2">is None</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">name </span><span class="s2">is not None and </span><span class="s1">name </span><span class="s2">in </span><span class="s1">field_spec</span><span class="s3">[</span><span class="s4">'names'</span><span class="s3">]:</span>
+                <span class="s2">raise </span><span class="s1">RuntimeError</span><span class="s3">(</span>
+                    <span class="s4">f&quot;Duplicate field name '</span><span class="s2">{</span><span class="s1">name</span><span class="s2">}</span><span class="s4">' in PEP3118 format&quot;</span>
+                <span class="s3">)</span>
+            <span class="s1">field_spec</span><span class="s3">[</span><span class="s4">'names'</span><span class="s3">].</span><span class="s1">append</span><span class="s3">(</span><span class="s1">name</span><span class="s3">)</span>
+            <span class="s1">field_spec</span><span class="s3">[</span><span class="s4">'formats'</span><span class="s3">].</span><span class="s1">append</span><span class="s3">(</span><span class="s1">value</span><span class="s3">)</span>
+            <span class="s1">field_spec</span><span class="s3">[</span><span class="s4">'offsets'</span><span class="s3">].</span><span class="s1">append</span><span class="s3">(</span><span class="s1">offset</span><span class="s3">)</span>
+
+        <span class="s1">offset </span><span class="s3">+= </span><span class="s1">value</span><span class="s3">.</span><span class="s1">itemsize</span>
+        <span class="s1">offset </span><span class="s3">+= </span><span class="s1">extra_offset</span>
+
+        <span class="s1">field_spec</span><span class="s3">[</span><span class="s4">'itemsize'</span><span class="s3">] = </span><span class="s1">offset</span>
+
+    <span class="s6"># extra final padding for aligned types</span>
+    <span class="s2">if </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">byteorder </span><span class="s3">== </span><span class="s4">'@'</span><span class="s3">:</span>
+        <span class="s1">field_spec</span><span class="s3">[</span><span class="s4">'itemsize'</span><span class="s3">] += (-</span><span class="s1">offset</span><span class="s3">) % </span><span class="s1">common_alignment</span>
+
+    <span class="s6"># Check if this was a simple 1-item type, and unwrap it</span>
+    <span class="s2">if </span><span class="s3">(</span><span class="s1">field_spec</span><span class="s3">[</span><span class="s4">'names'</span><span class="s3">] == [</span><span class="s2">None</span><span class="s3">]</span>
+            <span class="s2">and </span><span class="s1">field_spec</span><span class="s3">[</span><span class="s4">'offsets'</span><span class="s3">][</span><span class="s5">0</span><span class="s3">] == </span><span class="s5">0</span>
+            <span class="s2">and </span><span class="s1">field_spec</span><span class="s3">[</span><span class="s4">'itemsize'</span><span class="s3">] == </span><span class="s1">field_spec</span><span class="s3">[</span><span class="s4">'formats'</span><span class="s3">][</span><span class="s5">0</span><span class="s3">].</span><span class="s1">itemsize</span>
+            <span class="s2">and not </span><span class="s1">is_subdtype</span><span class="s3">):</span>
+        <span class="s1">ret </span><span class="s3">= </span><span class="s1">field_spec</span><span class="s3">[</span><span class="s4">'formats'</span><span class="s3">][</span><span class="s5">0</span><span class="s3">]</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">_fix_names</span><span class="s3">(</span><span class="s1">field_spec</span><span class="s3">)</span>
+        <span class="s1">ret </span><span class="s3">= </span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">field_spec</span><span class="s3">)</span>
+
+    <span class="s6"># Finished</span>
+    <span class="s2">return </span><span class="s1">ret</span><span class="s3">, </span><span class="s1">common_alignment</span>
+
+<span class="s2">def </span><span class="s1">_fix_names</span><span class="s3">(</span><span class="s1">field_spec</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; Replace names which are None with the next unused f%d name &quot;&quot;&quot;</span>
+    <span class="s1">names </span><span class="s3">= </span><span class="s1">field_spec</span><span class="s3">[</span><span class="s4">'names'</span><span class="s3">]</span>
+    <span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">name </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">names</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">name </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">continue</span>
+
+        <span class="s1">j </span><span class="s3">= </span><span class="s5">0</span>
+        <span class="s2">while True</span><span class="s3">:</span>
+            <span class="s1">name </span><span class="s3">= </span><span class="s4">f'f</span><span class="s2">{</span><span class="s1">j</span><span class="s2">}</span><span class="s4">'</span>
+            <span class="s2">if </span><span class="s1">name </span><span class="s2">not in </span><span class="s1">names</span><span class="s3">:</span>
+                <span class="s2">break</span>
+            <span class="s1">j </span><span class="s3">= </span><span class="s1">j </span><span class="s3">+ </span><span class="s5">1</span>
+        <span class="s1">names</span><span class="s3">[</span><span class="s1">i</span><span class="s3">] = </span><span class="s1">name</span>
+
+<span class="s2">def </span><span class="s1">_add_trailing_padding</span><span class="s3">(</span><span class="s1">value</span><span class="s3">, </span><span class="s1">padding</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Inject the specified number of padding bytes at the end of a dtype&quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">value</span><span class="s3">.</span><span class="s1">fields </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">field_spec </span><span class="s3">= {</span>
+            <span class="s4">'names'</span><span class="s3">: [</span><span class="s4">'f0'</span><span class="s3">],</span>
+            <span class="s4">'formats'</span><span class="s3">: [</span><span class="s1">value</span><span class="s3">],</span>
+            <span class="s4">'offsets'</span><span class="s3">: [</span><span class="s5">0</span><span class="s3">],</span>
+            <span class="s4">'itemsize'</span><span class="s3">: </span><span class="s1">value</span><span class="s3">.</span><span class="s1">itemsize</span>
+        <span class="s3">}</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">fields </span><span class="s3">= </span><span class="s1">value</span><span class="s3">.</span><span class="s1">fields</span>
+        <span class="s1">names </span><span class="s3">= </span><span class="s1">value</span><span class="s3">.</span><span class="s1">names</span>
+        <span class="s1">field_spec </span><span class="s3">= {</span>
+            <span class="s4">'names'</span><span class="s3">: </span><span class="s1">names</span><span class="s3">,</span>
+            <span class="s4">'formats'</span><span class="s3">: [</span><span class="s1">fields</span><span class="s3">[</span><span class="s1">name</span><span class="s3">][</span><span class="s5">0</span><span class="s3">] </span><span class="s2">for </span><span class="s1">name </span><span class="s2">in </span><span class="s1">names</span><span class="s3">],</span>
+            <span class="s4">'offsets'</span><span class="s3">: [</span><span class="s1">fields</span><span class="s3">[</span><span class="s1">name</span><span class="s3">][</span><span class="s5">1</span><span class="s3">] </span><span class="s2">for </span><span class="s1">name </span><span class="s2">in </span><span class="s1">names</span><span class="s3">],</span>
+            <span class="s4">'itemsize'</span><span class="s3">: </span><span class="s1">value</span><span class="s3">.</span><span class="s1">itemsize</span>
+        <span class="s3">}</span>
+
+    <span class="s1">field_spec</span><span class="s3">[</span><span class="s4">'itemsize'</span><span class="s3">] += </span><span class="s1">padding</span>
+    <span class="s2">return </span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">field_spec</span><span class="s3">)</span>
+
+<span class="s2">def </span><span class="s1">_prod</span><span class="s3">(</span><span class="s1">a</span><span class="s3">):</span>
+    <span class="s1">p </span><span class="s3">= </span><span class="s5">1</span>
+    <span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">a</span><span class="s3">:</span>
+        <span class="s1">p </span><span class="s3">*= </span><span class="s1">x</span>
+    <span class="s2">return </span><span class="s1">p</span>
+
+<span class="s2">def </span><span class="s1">_gcd</span><span class="s3">(</span><span class="s1">a</span><span class="s3">, </span><span class="s1">b</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Calculate the greatest common divisor of a and b&quot;&quot;&quot;</span>
+    <span class="s2">if not </span><span class="s3">(</span><span class="s1">math</span><span class="s3">.</span><span class="s1">isfinite</span><span class="s3">(</span><span class="s1">a</span><span class="s3">) </span><span class="s2">and </span><span class="s1">math</span><span class="s3">.</span><span class="s1">isfinite</span><span class="s3">(</span><span class="s1">b</span><span class="s3">)):</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">'Can only find greatest common divisor of '</span>
+                         <span class="s4">f'finite arguments, found &quot;</span><span class="s2">{</span><span class="s1">a</span><span class="s2">}</span><span class="s4">&quot; and &quot;</span><span class="s2">{</span><span class="s1">b</span><span class="s2">}</span><span class="s4">&quot;'</span><span class="s3">)</span>
+    <span class="s2">while </span><span class="s1">b</span><span class="s3">:</span>
+        <span class="s1">a</span><span class="s3">, </span><span class="s1">b </span><span class="s3">= </span><span class="s1">b</span><span class="s3">, </span><span class="s1">a </span><span class="s3">% </span><span class="s1">b</span>
+    <span class="s2">return </span><span class="s1">a</span>
+
+<span class="s2">def </span><span class="s1">_lcm</span><span class="s3">(</span><span class="s1">a</span><span class="s3">, </span><span class="s1">b</span><span class="s3">):</span>
+    <span class="s2">return </span><span class="s1">a </span><span class="s3">// </span><span class="s1">_gcd</span><span class="s3">(</span><span class="s1">a</span><span class="s3">, </span><span class="s1">b</span><span class="s3">) * </span><span class="s1">b</span>
+
+<span class="s2">def </span><span class="s1">array_ufunc_errmsg_formatter</span><span class="s3">(</span><span class="s1">dummy</span><span class="s3">, </span><span class="s1">ufunc</span><span class="s3">, </span><span class="s1">method</span><span class="s3">, *</span><span class="s1">inputs</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; Format the error message for when __array_ufunc__ gives up. &quot;&quot;&quot;</span>
+    <span class="s1">args_string </span><span class="s3">= </span><span class="s4">', '</span><span class="s3">.</span><span class="s1">join</span><span class="s3">([</span><span class="s4">f'</span><span class="s2">{</span><span class="s1">arg</span><span class="s2">!r}</span><span class="s4">' </span><span class="s2">for </span><span class="s1">arg </span><span class="s2">in </span><span class="s1">inputs</span><span class="s3">] +</span>
+                            <span class="s3">[</span><span class="s4">f'</span><span class="s2">{</span><span class="s1">k</span><span class="s2">}</span><span class="s4">=</span><span class="s2">{</span><span class="s1">v</span><span class="s2">!r}</span><span class="s4">'</span>
+                             <span class="s2">for </span><span class="s1">k</span><span class="s3">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">kwargs</span><span class="s3">.</span><span class="s1">items</span><span class="s3">()])</span>
+    <span class="s1">args </span><span class="s3">= </span><span class="s1">inputs </span><span class="s3">+ </span><span class="s1">kwargs</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s4">'out'</span><span class="s3">, ())</span>
+    <span class="s1">types_string </span><span class="s3">= </span><span class="s4">', '</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">repr</span><span class="s3">(</span><span class="s1">type</span><span class="s3">(</span><span class="s1">arg</span><span class="s3">).</span><span class="s1">__name__</span><span class="s3">) </span><span class="s2">for </span><span class="s1">arg </span><span class="s2">in </span><span class="s1">args</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s3">(</span><span class="s4">'operand type(s) all returned NotImplemented from '</span>
+            <span class="s4">f'__array_ufunc__(</span><span class="s2">{</span><span class="s1">ufunc</span><span class="s2">!r}</span><span class="s4">, </span><span class="s2">{</span><span class="s1">method</span><span class="s2">!r}</span><span class="s4">, </span><span class="s2">{</span><span class="s1">args_string</span><span class="s2">}</span><span class="s4">): </span><span class="s2">{</span><span class="s1">types_string</span><span class="s2">}</span><span class="s4">'</span>
+            <span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">array_function_errmsg_formatter</span><span class="s3">(</span><span class="s1">public_api</span><span class="s3">, </span><span class="s1">types</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; Format the error message for when __array_ufunc__ gives up. &quot;&quot;&quot;</span>
+    <span class="s1">func_name </span><span class="s3">= </span><span class="s4">f'</span><span class="s2">{</span><span class="s1">public_api</span><span class="s3">.</span><span class="s1">__module__</span><span class="s2">}</span><span class="s4">.</span><span class="s2">{</span><span class="s1">public_api</span><span class="s3">.</span><span class="s1">__name__</span><span class="s2">}</span><span class="s4">'</span>
+    <span class="s2">return </span><span class="s3">(</span><span class="s4">f&quot;no implementation found for '</span><span class="s2">{</span><span class="s1">func_name</span><span class="s2">}</span><span class="s4">' on types that implement &quot;</span>
+            <span class="s4">f'__array_function__: </span><span class="s2">{</span><span class="s1">list</span><span class="s3">(</span><span class="s1">types</span><span class="s3">)</span><span class="s2">}</span><span class="s4">'</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_ufunc_doc_signature_formatter</span><span class="s3">(</span><span class="s1">ufunc</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Builds a signature string which resembles PEP 457 
+ 
+    This is used to construct the first line of the docstring 
+ 
+    Keep in sync with `_ufunc_inspect_signature_builder`. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s6"># input arguments are simple</span>
+    <span class="s2">if </span><span class="s1">ufunc</span><span class="s3">.</span><span class="s1">nin </span><span class="s3">== </span><span class="s5">1</span><span class="s3">:</span>
+        <span class="s1">in_args </span><span class="s3">= </span><span class="s4">'x'</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">in_args </span><span class="s3">= </span><span class="s4">', '</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s4">f'x</span><span class="s2">{</span><span class="s1">i </span><span class="s3">+ </span><span class="s5">1</span><span class="s2">}</span><span class="s4">' </span><span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">ufunc</span><span class="s3">.</span><span class="s1">nin</span><span class="s3">))</span>
+
+    <span class="s6"># output arguments are both keyword or positional</span>
+    <span class="s2">if </span><span class="s1">ufunc</span><span class="s3">.</span><span class="s1">nout </span><span class="s3">== </span><span class="s5">0</span><span class="s3">:</span>
+        <span class="s1">out_args </span><span class="s3">= </span><span class="s4">', /, out=()'</span>
+    <span class="s2">elif </span><span class="s1">ufunc</span><span class="s3">.</span><span class="s1">nout </span><span class="s3">== </span><span class="s5">1</span><span class="s3">:</span>
+        <span class="s1">out_args </span><span class="s3">= </span><span class="s4">', /, out=None'</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">out_args </span><span class="s3">= </span><span class="s4">'[, {positional}], / [, out={default}]'</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span>
+            <span class="s1">positional</span><span class="s3">=</span><span class="s4">', '</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span>
+                <span class="s4">f'out</span><span class="s2">{</span><span class="s1">i </span><span class="s3">+ </span><span class="s5">1</span><span class="s2">}</span><span class="s4">' </span><span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">ufunc</span><span class="s3">.</span><span class="s1">nout</span><span class="s3">)),</span>
+            <span class="s1">default</span><span class="s3">=</span><span class="s1">repr</span><span class="s3">((</span><span class="s2">None</span><span class="s3">,) * </span><span class="s1">ufunc</span><span class="s3">.</span><span class="s1">nout</span><span class="s3">)</span>
+        <span class="s3">)</span>
+
+    <span class="s6"># keyword only args depend on whether this is a gufunc</span>
+    <span class="s1">kwargs </span><span class="s3">= (</span>
+        <span class="s4">&quot;, casting='same_kind'&quot;</span>
+        <span class="s4">&quot;, order='K'&quot;</span>
+        <span class="s4">&quot;, dtype=None&quot;</span>
+        <span class="s4">&quot;, subok=True&quot;</span>
+    <span class="s3">)</span>
+
+    <span class="s6"># NOTE: gufuncs may or may not support the `axis` parameter</span>
+    <span class="s2">if </span><span class="s1">ufunc</span><span class="s3">.</span><span class="s1">signature </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">kwargs </span><span class="s3">= </span><span class="s4">f&quot;, where=True</span><span class="s2">{</span><span class="s1">kwargs</span><span class="s2">}</span><span class="s4">[, signature]&quot;</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">kwargs </span><span class="s3">+= </span><span class="s4">&quot;[, signature, axes, axis]&quot;</span>
+
+    <span class="s6"># join all the parts together</span>
+    <span class="s2">return </span><span class="s4">f'</span><span class="s2">{</span><span class="s1">ufunc</span><span class="s3">.</span><span class="s1">__name__</span><span class="s2">}</span><span class="s4">(</span><span class="s2">{</span><span class="s1">in_args</span><span class="s2">}{</span><span class="s1">out_args</span><span class="s2">}</span><span class="s4">, *</span><span class="s2">{</span><span class="s1">kwargs</span><span class="s2">}</span><span class="s4">)'</span>
+
+
+<span class="s2">def </span><span class="s1">_ufunc_inspect_signature_builder</span><span class="s3">(</span><span class="s1">ufunc</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Builds a ``__signature__`` string. 
+ 
+    Should be kept in sync with `_ufunc_doc_signature_formatter`. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">from </span><span class="s1">inspect </span><span class="s2">import </span><span class="s1">Parameter</span><span class="s3">, </span><span class="s1">Signature</span>
+
+    <span class="s1">params </span><span class="s3">= []</span>
+
+    <span class="s6"># positional-only input parameters</span>
+    <span class="s2">if </span><span class="s1">ufunc</span><span class="s3">.</span><span class="s1">nin </span><span class="s3">== </span><span class="s5">1</span><span class="s3">:</span>
+        <span class="s1">params</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">Parameter</span><span class="s3">(</span><span class="s4">&quot;x&quot;</span><span class="s3">, </span><span class="s1">Parameter</span><span class="s3">.</span><span class="s1">POSITIONAL_ONLY</span><span class="s3">))</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">params</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">(</span>
+            <span class="s1">Parameter</span><span class="s3">(</span><span class="s4">f&quot;x</span><span class="s2">{</span><span class="s1">i</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">, </span><span class="s1">Parameter</span><span class="s3">.</span><span class="s1">POSITIONAL_ONLY</span><span class="s3">)</span>
+            <span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s5">1</span><span class="s3">, </span><span class="s1">ufunc</span><span class="s3">.</span><span class="s1">nin </span><span class="s3">+ </span><span class="s5">1</span><span class="s3">)</span>
+        <span class="s3">)</span>
+
+    <span class="s6"># for the sake of simplicity, we only consider a single output parameter</span>
+    <span class="s2">if </span><span class="s1">ufunc</span><span class="s3">.</span><span class="s1">nout </span><span class="s3">== </span><span class="s5">1</span><span class="s3">:</span>
+        <span class="s1">out_default </span><span class="s3">= </span><span class="s2">None</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">out_default </span><span class="s3">= (</span><span class="s2">None</span><span class="s3">,) * </span><span class="s1">ufunc</span><span class="s3">.</span><span class="s1">nout</span>
+    <span class="s1">params</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span>
+        <span class="s1">Parameter</span><span class="s3">(</span><span class="s4">&quot;out&quot;</span><span class="s3">, </span><span class="s1">Parameter</span><span class="s3">.</span><span class="s1">POSITIONAL_OR_KEYWORD</span><span class="s3">, </span><span class="s1">default</span><span class="s3">=</span><span class="s1">out_default</span><span class="s3">),</span>
+    <span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">ufunc</span><span class="s3">.</span><span class="s1">signature </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">params</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">Parameter</span><span class="s3">(</span><span class="s4">&quot;where&quot;</span><span class="s3">, </span><span class="s1">Parameter</span><span class="s3">.</span><span class="s1">KEYWORD_ONLY</span><span class="s3">, </span><span class="s1">default</span><span class="s3">=</span><span class="s2">True</span><span class="s3">))</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s6"># NOTE: not all gufuncs support the `axis` parameters</span>
+        <span class="s1">params</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">Parameter</span><span class="s3">(</span><span class="s4">&quot;axes&quot;</span><span class="s3">, </span><span class="s1">Parameter</span><span class="s3">.</span><span class="s1">KEYWORD_ONLY</span><span class="s3">, </span><span class="s1">default</span><span class="s3">=</span><span class="s1">_NoValue</span><span class="s3">))</span>
+        <span class="s1">params</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">Parameter</span><span class="s3">(</span><span class="s4">&quot;axis&quot;</span><span class="s3">, </span><span class="s1">Parameter</span><span class="s3">.</span><span class="s1">KEYWORD_ONLY</span><span class="s3">, </span><span class="s1">default</span><span class="s3">=</span><span class="s1">_NoValue</span><span class="s3">))</span>
+        <span class="s1">params</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">Parameter</span><span class="s3">(</span><span class="s4">&quot;keepdims&quot;</span><span class="s3">, </span><span class="s1">Parameter</span><span class="s3">.</span><span class="s1">KEYWORD_ONLY</span><span class="s3">, </span><span class="s1">default</span><span class="s3">=</span><span class="s2">False</span><span class="s3">))</span>
+
+    <span class="s1">params</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">((</span>
+        <span class="s1">Parameter</span><span class="s3">(</span><span class="s4">&quot;casting&quot;</span><span class="s3">, </span><span class="s1">Parameter</span><span class="s3">.</span><span class="s1">KEYWORD_ONLY</span><span class="s3">, </span><span class="s1">default</span><span class="s3">=</span><span class="s4">'same_kind'</span><span class="s3">),</span>
+        <span class="s1">Parameter</span><span class="s3">(</span><span class="s4">&quot;order&quot;</span><span class="s3">, </span><span class="s1">Parameter</span><span class="s3">.</span><span class="s1">KEYWORD_ONLY</span><span class="s3">, </span><span class="s1">default</span><span class="s3">=</span><span class="s4">'K'</span><span class="s3">),</span>
+        <span class="s1">Parameter</span><span class="s3">(</span><span class="s4">&quot;dtype&quot;</span><span class="s3">, </span><span class="s1">Parameter</span><span class="s3">.</span><span class="s1">KEYWORD_ONLY</span><span class="s3">, </span><span class="s1">default</span><span class="s3">=</span><span class="s2">None</span><span class="s3">),</span>
+        <span class="s1">Parameter</span><span class="s3">(</span><span class="s4">&quot;subok&quot;</span><span class="s3">, </span><span class="s1">Parameter</span><span class="s3">.</span><span class="s1">KEYWORD_ONLY</span><span class="s3">, </span><span class="s1">default</span><span class="s3">=</span><span class="s2">True</span><span class="s3">),</span>
+        <span class="s1">Parameter</span><span class="s3">(</span><span class="s4">&quot;signature&quot;</span><span class="s3">, </span><span class="s1">Parameter</span><span class="s3">.</span><span class="s1">KEYWORD_ONLY</span><span class="s3">, </span><span class="s1">default</span><span class="s3">=</span><span class="s2">None</span><span class="s3">),</span>
+    <span class="s3">))</span>
+
+    <span class="s2">return </span><span class="s1">Signature</span><span class="s3">(</span><span class="s1">params</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">npy_ctypes_check</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">):</span>
+    <span class="s6"># determine if a class comes from ctypes, in order to work around</span>
+    <span class="s6"># a bug in the buffer protocol for those objects, bpo-10746</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s6"># ctypes class are new-style, so have an __mro__. This probably fails</span>
+        <span class="s6"># for ctypes classes with multiple inheritance.</span>
+        <span class="s6"># # (..., _ctypes._CData, object)</span>
+        <span class="s1">ctype_base </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">__mro__</span><span class="s3">[-</span><span class="s5">2</span><span class="s3">]</span>
+        <span class="s6"># right now, they're part of the _ctypes module</span>
+        <span class="s2">return </span><span class="s4">'_ctypes' </span><span class="s2">in </span><span class="s1">ctype_base</span><span class="s3">.</span><span class="s1">__module__</span>
+    <span class="s2">except </span><span class="s1">Exception</span><span class="s3">:</span>
+        <span class="s2">return False</span>
+
+<span class="s6"># used to handle the _NoValue default argument for na_object</span>
+<span class="s6"># in the C implementation of the __reduce__ method for stringdtype</span>
+<span class="s2">def </span><span class="s1">_convert_to_stringdtype_kwargs</span><span class="s3">(</span><span class="s1">coerce</span><span class="s3">, </span><span class="s1">na_object</span><span class="s3">=</span><span class="s1">_NoValue</span><span class="s3">):</span>
+    <span class="s2">if </span><span class="s1">na_object </span><span class="s2">is </span><span class="s1">_NoValue</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">StringDType</span><span class="s3">(</span><span class="s1">coerce</span><span class="s3">=</span><span class="s1">coerce</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">StringDType</span><span class="s3">(</span><span class="s1">coerce</span><span class="s3">=</span><span class="s1">coerce</span><span class="s3">, </span><span class="s1">na_object</span><span class="s3">=</span><span class="s1">na_object</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

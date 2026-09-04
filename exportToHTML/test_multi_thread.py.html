@@ -1,0 +1,182 @@
+<html>
+<head>
+<title>test_multi_thread.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_multi_thread.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Tests multithreading behaviour for reading and 
+parsing files for each parser defined in parsers.py 
+&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">contextlib </span><span class="s2">import </span><span class="s1">ExitStack</span>
+<span class="s2">from </span><span class="s1">io </span><span class="s2">import </span><span class="s1">BytesIO</span>
+<span class="s2">from </span><span class="s1">multiprocessing</span><span class="s3">.</span><span class="s1">pool </span><span class="s2">import </span><span class="s1">ThreadPool</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+<span class="s2">import </span><span class="s1">pytest</span>
+
+<span class="s2">import </span><span class="s1">pandas </span><span class="s2">as </span><span class="s1">pd</span>
+<span class="s2">from </span><span class="s1">pandas </span><span class="s2">import </span><span class="s1">DataFrame</span>
+<span class="s2">import </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_testing </span><span class="s2">as </span><span class="s1">tm</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">version </span><span class="s2">import </span><span class="s1">Version</span>
+
+<span class="s1">xfail_pyarrow </span><span class="s3">= </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">usefixtures</span><span class="s3">(</span><span class="s4">&quot;pyarrow_xfail&quot;</span><span class="s3">)</span>
+
+<span class="s5"># We'll probably always skip these for pyarrow</span>
+<span class="s5"># Maybe we'll add our own tests for pyarrow too</span>
+<span class="s1">pytestmark </span><span class="s3">= [</span>
+    <span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">single_cpu</span><span class="s3">,</span>
+    <span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">slow</span><span class="s3">,</span>
+<span class="s3">]</span>
+
+
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">filterwarnings</span><span class="s3">(</span><span class="s4">&quot;ignore:Passing a BlockManager:DeprecationWarning&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">test_multi_thread_string_io_read_csv</span><span class="s3">(</span><span class="s1">all_parsers</span><span class="s3">, </span><span class="s1">request</span><span class="s3">):</span>
+    <span class="s5"># see gh-11786</span>
+    <span class="s1">parser </span><span class="s3">= </span><span class="s1">all_parsers</span>
+    <span class="s2">if </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">engine </span><span class="s3">== </span><span class="s4">&quot;pyarrow&quot;</span><span class="s3">:</span>
+        <span class="s1">pa </span><span class="s3">= </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">importorskip</span><span class="s3">(</span><span class="s4">&quot;pyarrow&quot;</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">Version</span><span class="s3">(</span><span class="s1">pa</span><span class="s3">.</span><span class="s1">__version__</span><span class="s3">) &lt; </span><span class="s1">Version</span><span class="s3">(</span><span class="s4">&quot;16.0&quot;</span><span class="s3">):</span>
+            <span class="s1">request</span><span class="s3">.</span><span class="s1">applymarker</span><span class="s3">(</span>
+                <span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">xfail</span><span class="s3">(</span><span class="s1">reason</span><span class="s3">=</span><span class="s4">&quot;# ValueError: Found non-unique column index&quot;</span><span class="s3">)</span>
+            <span class="s3">)</span>
+    <span class="s1">max_row_range </span><span class="s3">= </span><span class="s6">100</span>
+    <span class="s1">num_files </span><span class="s3">= </span><span class="s6">10</span>
+
+    <span class="s1">bytes_to_df </span><span class="s3">= (</span>
+        <span class="s4">&quot;</span><span class="s2">\n</span><span class="s4">&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">([</span><span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">i</span><span class="s2">:</span><span class="s4">d</span><span class="s2">}</span><span class="s4">,</span><span class="s2">{</span><span class="s1">i</span><span class="s2">:</span><span class="s4">d</span><span class="s2">}</span><span class="s4">,</span><span class="s2">{</span><span class="s1">i</span><span class="s2">:</span><span class="s4">d</span><span class="s2">}</span><span class="s4">&quot; </span><span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">max_row_range</span><span class="s3">)]).</span><span class="s1">encode</span><span class="s3">()</span>
+        <span class="s2">for </span><span class="s1">_ </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">num_files</span><span class="s3">)</span>
+    <span class="s3">)</span>
+
+    <span class="s5"># Read all files in many threads.</span>
+    <span class="s2">with </span><span class="s1">ExitStack</span><span class="s3">() </span><span class="s2">as </span><span class="s1">stack</span><span class="s3">:</span>
+        <span class="s1">files </span><span class="s3">= [</span><span class="s1">stack</span><span class="s3">.</span><span class="s1">enter_context</span><span class="s3">(</span><span class="s1">BytesIO</span><span class="s3">(</span><span class="s1">b</span><span class="s3">)) </span><span class="s2">for </span><span class="s1">b </span><span class="s2">in </span><span class="s1">bytes_to_df</span><span class="s3">]</span>
+
+        <span class="s1">pool </span><span class="s3">= </span><span class="s1">stack</span><span class="s3">.</span><span class="s1">enter_context</span><span class="s3">(</span><span class="s1">ThreadPool</span><span class="s3">(</span><span class="s6">8</span><span class="s3">))</span>
+
+        <span class="s1">results </span><span class="s3">= </span><span class="s1">pool</span><span class="s3">.</span><span class="s1">map</span><span class="s3">(</span><span class="s1">parser</span><span class="s3">.</span><span class="s1">read_csv</span><span class="s3">, </span><span class="s1">files</span><span class="s3">)</span>
+        <span class="s1">first_result </span><span class="s3">= </span><span class="s1">results</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]</span>
+
+        <span class="s2">for </span><span class="s1">result </span><span class="s2">in </span><span class="s1">results</span><span class="s3">:</span>
+            <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">first_result</span><span class="s3">, </span><span class="s1">result</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_generate_multi_thread_dataframe</span><span class="s3">(</span><span class="s1">parser</span><span class="s3">, </span><span class="s1">path</span><span class="s3">, </span><span class="s1">num_rows</span><span class="s3">, </span><span class="s1">num_tasks</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Generate a DataFrame via multi-thread. 
+ 
+    Parameters 
+    ---------- 
+    parser : BaseParser 
+        The parser object to use for reading the data. 
+    path : str 
+        The location of the CSV file to read. 
+    num_rows : int 
+        The number of rows to read per task. 
+    num_tasks : int 
+        The number of tasks to use for reading this DataFrame. 
+ 
+    Returns 
+    ------- 
+    df : DataFrame 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">reader</span><span class="s3">(</span><span class="s1">arg</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Create a reader for part of the CSV. 
+ 
+        Parameters 
+        ---------- 
+        arg : tuple 
+            A tuple of the following: 
+ 
+            * start : int 
+                The starting row to start for parsing CSV 
+            * nrows : int 
+                The number of rows to read. 
+ 
+        Returns 
+        ------- 
+        df : DataFrame 
+        &quot;&quot;&quot;</span>
+        <span class="s1">start</span><span class="s3">, </span><span class="s1">nrows </span><span class="s3">= </span><span class="s1">arg</span>
+
+        <span class="s2">if not </span><span class="s1">start</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">read_csv</span><span class="s3">(</span>
+                <span class="s1">path</span><span class="s3">, </span><span class="s1">index_col</span><span class="s3">=</span><span class="s6">0</span><span class="s3">, </span><span class="s1">header</span><span class="s3">=</span><span class="s6">0</span><span class="s3">, </span><span class="s1">nrows</span><span class="s3">=</span><span class="s1">nrows</span><span class="s3">, </span><span class="s1">parse_dates</span><span class="s3">=[</span><span class="s4">&quot;date&quot;</span><span class="s3">]</span>
+            <span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">read_csv</span><span class="s3">(</span>
+            <span class="s1">path</span><span class="s3">,</span>
+            <span class="s1">index_col</span><span class="s3">=</span><span class="s6">0</span><span class="s3">,</span>
+            <span class="s1">header</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+            <span class="s1">skiprows</span><span class="s3">=</span><span class="s1">int</span><span class="s3">(</span><span class="s1">start</span><span class="s3">) + </span><span class="s6">1</span><span class="s3">,</span>
+            <span class="s1">nrows</span><span class="s3">=</span><span class="s1">nrows</span><span class="s3">,</span>
+            <span class="s1">parse_dates</span><span class="s3">=[</span><span class="s6">9</span><span class="s3">],</span>
+        <span class="s3">)</span>
+
+    <span class="s1">tasks </span><span class="s3">= [</span>
+        <span class="s3">(</span><span class="s1">num_rows </span><span class="s3">* </span><span class="s1">i </span><span class="s3">// </span><span class="s1">num_tasks</span><span class="s3">, </span><span class="s1">num_rows </span><span class="s3">// </span><span class="s1">num_tasks</span><span class="s3">) </span><span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">num_tasks</span><span class="s3">)</span>
+    <span class="s3">]</span>
+
+    <span class="s2">with </span><span class="s1">ThreadPool</span><span class="s3">(</span><span class="s1">processes</span><span class="s3">=</span><span class="s1">num_tasks</span><span class="s3">) </span><span class="s2">as </span><span class="s1">pool</span><span class="s3">:</span>
+        <span class="s1">results </span><span class="s3">= </span><span class="s1">pool</span><span class="s3">.</span><span class="s1">map</span><span class="s3">(</span><span class="s1">reader</span><span class="s3">, </span><span class="s1">tasks</span><span class="s3">)</span>
+
+    <span class="s1">header </span><span class="s3">= </span><span class="s1">results</span><span class="s3">[</span><span class="s6">0</span><span class="s3">].</span><span class="s1">columns</span>
+
+    <span class="s2">for </span><span class="s1">r </span><span class="s2">in </span><span class="s1">results</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:]:</span>
+        <span class="s1">r</span><span class="s3">.</span><span class="s1">columns </span><span class="s3">= </span><span class="s1">header</span>
+
+    <span class="s1">final_dataframe </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">concat</span><span class="s3">(</span><span class="s1">results</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">final_dataframe</span>
+
+
+<span class="s3">@</span><span class="s1">xfail_pyarrow  </span><span class="s5"># ValueError: The 'nrows' option is not supported</span>
+<span class="s2">def </span><span class="s1">test_multi_thread_path_multipart_read_csv</span><span class="s3">(</span><span class="s1">tmp_path</span><span class="s3">, </span><span class="s1">all_parsers</span><span class="s3">):</span>
+    <span class="s5"># see gh-11786</span>
+    <span class="s1">num_tasks </span><span class="s3">= </span><span class="s6">4</span>
+    <span class="s1">num_rows </span><span class="s3">= </span><span class="s6">48</span>
+
+    <span class="s1">parser </span><span class="s3">= </span><span class="s1">all_parsers</span>
+    <span class="s1">file_name </span><span class="s3">= </span><span class="s4">&quot;__thread_pool_reader__.csv&quot;</span>
+    <span class="s1">df </span><span class="s3">= </span><span class="s1">DataFrame</span><span class="s3">(</span>
+        <span class="s3">{</span>
+            <span class="s4">&quot;a&quot;</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">random</span><span class="s3">.</span><span class="s1">default_rng</span><span class="s3">(</span><span class="s6">2</span><span class="s3">).</span><span class="s1">random</span><span class="s3">(</span><span class="s1">num_rows</span><span class="s3">),</span>
+            <span class="s4">&quot;b&quot;</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">random</span><span class="s3">.</span><span class="s1">default_rng</span><span class="s3">(</span><span class="s6">2</span><span class="s3">).</span><span class="s1">random</span><span class="s3">(</span><span class="s1">num_rows</span><span class="s3">),</span>
+            <span class="s4">&quot;c&quot;</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">random</span><span class="s3">.</span><span class="s1">default_rng</span><span class="s3">(</span><span class="s6">2</span><span class="s3">).</span><span class="s1">random</span><span class="s3">(</span><span class="s1">num_rows</span><span class="s3">),</span>
+            <span class="s4">&quot;d&quot;</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">random</span><span class="s3">.</span><span class="s1">default_rng</span><span class="s3">(</span><span class="s6">2</span><span class="s3">).</span><span class="s1">random</span><span class="s3">(</span><span class="s1">num_rows</span><span class="s3">),</span>
+            <span class="s4">&quot;e&quot;</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">random</span><span class="s3">.</span><span class="s1">default_rng</span><span class="s3">(</span><span class="s6">2</span><span class="s3">).</span><span class="s1">random</span><span class="s3">(</span><span class="s1">num_rows</span><span class="s3">),</span>
+            <span class="s4">&quot;foo&quot;</span><span class="s3">: [</span><span class="s4">&quot;foo&quot;</span><span class="s3">] * </span><span class="s1">num_rows</span><span class="s3">,</span>
+            <span class="s4">&quot;bar&quot;</span><span class="s3">: [</span><span class="s4">&quot;bar&quot;</span><span class="s3">] * </span><span class="s1">num_rows</span><span class="s3">,</span>
+            <span class="s4">&quot;baz&quot;</span><span class="s3">: [</span><span class="s4">&quot;baz&quot;</span><span class="s3">] * </span><span class="s1">num_rows</span><span class="s3">,</span>
+            <span class="s4">&quot;date&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">date_range</span><span class="s3">(</span><span class="s4">&quot;20000101 09:00:00&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s1">num_rows</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;s&quot;</span><span class="s3">),</span>
+            <span class="s4">&quot;int&quot;</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">arange</span><span class="s3">(</span><span class="s1">num_rows</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s4">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">}</span>
+    <span class="s3">)</span>
+
+    <span class="s1">path </span><span class="s3">= </span><span class="s1">tmp_path </span><span class="s3">/ </span><span class="s1">file_name</span>
+    <span class="s1">df</span><span class="s3">.</span><span class="s1">to_csv</span><span class="s3">(</span><span class="s1">path</span><span class="s3">)</span>
+
+    <span class="s1">result </span><span class="s3">= </span><span class="s1">_generate_multi_thread_dataframe</span><span class="s3">(</span><span class="s1">parser</span><span class="s3">, </span><span class="s1">path</span><span class="s3">, </span><span class="s1">num_rows</span><span class="s3">, </span><span class="s1">num_tasks</span><span class="s3">)</span>
+
+    <span class="s1">expected </span><span class="s3">= </span><span class="s1">df</span><span class="s3">[:]</span>
+    <span class="s1">expected</span><span class="s3">[</span><span class="s4">&quot;date&quot;</span><span class="s3">] = </span><span class="s1">expected</span><span class="s3">[</span><span class="s4">&quot;date&quot;</span><span class="s3">].</span><span class="s1">astype</span><span class="s3">(</span><span class="s4">&quot;M8[us]&quot;</span><span class="s3">)</span>
+    <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">expected</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

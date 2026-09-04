@@ -1,0 +1,143 @@
+<html>
+<head>
+<title>_dtype_ctypes.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #7a7e85;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #2aacb8;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_dtype_ctypes.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Conversion from ctypes to dtype. 
+ 
+In an ideal world, we could achieve this through the PEP3118 buffer protocol, 
+something like:: 
+ 
+    def dtype_from_ctypes_type(t): 
+        # needed to ensure that the shape of `t` is within memoryview.format 
+        class DummyStruct(ctypes.Structure): 
+            _fields_ = [('a', t)] 
+ 
+        # empty to avoid memory allocation 
+        ctype_0 = (DummyStruct * 0)() 
+        mv = memoryview(ctype_0) 
+ 
+        # convert the struct, and slice back out the field 
+        return _dtype_from_pep3118(mv.format)['a'] 
+ 
+Unfortunately, this fails because: 
+ 
+* ctypes cannot handle length-0 arrays with PEP3118 (bpo-32782) 
+* PEP3118 cannot represent unions, but both numpy and ctypes can 
+* ctypes cannot handle big-endian structs with PEP3118 (bpo-32780) 
+&quot;&quot;&quot;</span>
+
+<span class="s2"># We delay-import ctypes for distributions that do not include it.</span>
+<span class="s2"># While this module is not used unless the user passes in ctypes</span>
+<span class="s2"># members, it is eagerly imported from numpy/_core/__init__.py.</span>
+<span class="s3">import </span><span class="s1">numpy </span><span class="s3">as </span><span class="s1">np</span>
+
+
+<span class="s3">def </span><span class="s1">_from_ctypes_array</span><span class="s4">(</span><span class="s1">t</span><span class="s4">):</span>
+    <span class="s3">return </span><span class="s1">np</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">((</span><span class="s1">dtype_from_ctypes_type</span><span class="s4">(</span><span class="s1">t</span><span class="s4">.</span><span class="s1">_type_</span><span class="s4">), (</span><span class="s1">t</span><span class="s4">.</span><span class="s1">_length_</span><span class="s4">,)))</span>
+
+
+<span class="s3">def </span><span class="s1">_from_ctypes_structure</span><span class="s4">(</span><span class="s1">t</span><span class="s4">):</span>
+    <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">t</span><span class="s4">.</span><span class="s1">_fields_</span><span class="s4">:</span>
+        <span class="s3">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">item</span><span class="s4">) &gt; </span><span class="s5">2</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">TypeError</span><span class="s4">(</span>
+                <span class="s6">&quot;ctypes bitfields have no dtype equivalent&quot;</span><span class="s4">)</span>
+
+    <span class="s3">if </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">t</span><span class="s4">, </span><span class="s6">&quot;_pack_&quot;</span><span class="s4">):</span>
+        <span class="s3">import </span><span class="s1">ctypes</span>
+        <span class="s1">formats </span><span class="s4">= []</span>
+        <span class="s1">offsets </span><span class="s4">= []</span>
+        <span class="s1">names </span><span class="s4">= []</span>
+        <span class="s1">current_offset </span><span class="s4">= </span><span class="s5">0</span>
+        <span class="s3">for </span><span class="s1">fname</span><span class="s4">, </span><span class="s1">ftyp </span><span class="s3">in </span><span class="s1">t</span><span class="s4">.</span><span class="s1">_fields_</span><span class="s4">:</span>
+            <span class="s1">names</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">fname</span><span class="s4">)</span>
+            <span class="s1">formats</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">dtype_from_ctypes_type</span><span class="s4">(</span><span class="s1">ftyp</span><span class="s4">))</span>
+            <span class="s2"># Each type has a default offset, this is platform dependent</span>
+            <span class="s2"># for some types.</span>
+            <span class="s1">effective_pack </span><span class="s4">= </span><span class="s1">min</span><span class="s4">(</span><span class="s1">t</span><span class="s4">.</span><span class="s1">_pack_</span><span class="s4">, </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">alignment</span><span class="s4">(</span><span class="s1">ftyp</span><span class="s4">))</span>
+            <span class="s1">current_offset </span><span class="s4">= (</span>
+                <span class="s4">(</span><span class="s1">current_offset </span><span class="s4">+ </span><span class="s1">effective_pack </span><span class="s4">- </span><span class="s5">1</span><span class="s4">) // </span><span class="s1">effective_pack</span>
+            <span class="s4">) * </span><span class="s1">effective_pack</span>
+            <span class="s1">offsets</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">current_offset</span><span class="s4">)</span>
+            <span class="s1">current_offset </span><span class="s4">+= </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">sizeof</span><span class="s4">(</span><span class="s1">ftyp</span><span class="s4">)</span>
+
+        <span class="s3">return </span><span class="s1">np</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">({</span>
+            <span class="s6">&quot;formats&quot;</span><span class="s4">: </span><span class="s1">formats</span><span class="s4">,</span>
+            <span class="s6">&quot;offsets&quot;</span><span class="s4">: </span><span class="s1">offsets</span><span class="s4">,</span>
+            <span class="s6">&quot;names&quot;</span><span class="s4">: </span><span class="s1">names</span><span class="s4">,</span>
+            <span class="s6">&quot;itemsize&quot;</span><span class="s4">: </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">sizeof</span><span class="s4">(</span><span class="s1">t</span><span class="s4">)})</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s1">fields </span><span class="s4">= []</span>
+        <span class="s3">for </span><span class="s1">fname</span><span class="s4">, </span><span class="s1">ftyp </span><span class="s3">in </span><span class="s1">t</span><span class="s4">.</span><span class="s1">_fields_</span><span class="s4">:</span>
+            <span class="s1">fields</span><span class="s4">.</span><span class="s1">append</span><span class="s4">((</span><span class="s1">fname</span><span class="s4">, </span><span class="s1">dtype_from_ctypes_type</span><span class="s4">(</span><span class="s1">ftyp</span><span class="s4">)))</span>
+
+        <span class="s2"># by default, ctypes structs are aligned</span>
+        <span class="s3">return </span><span class="s1">np</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">(</span><span class="s1">fields</span><span class="s4">, </span><span class="s1">align</span><span class="s4">=</span><span class="s3">True</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_from_ctypes_scalar</span><span class="s4">(</span><span class="s1">t</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Return the dtype type with endianness included if it's the case 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">t</span><span class="s4">, </span><span class="s6">'__ctype_be__'</span><span class="s4">, </span><span class="s3">None</span><span class="s4">) </span><span class="s3">is </span><span class="s1">t</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">np</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">(</span><span class="s6">'&gt;' </span><span class="s4">+ </span><span class="s1">t</span><span class="s4">.</span><span class="s1">_type_</span><span class="s4">)</span>
+    <span class="s3">elif </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">t</span><span class="s4">, </span><span class="s6">'__ctype_le__'</span><span class="s4">, </span><span class="s3">None</span><span class="s4">) </span><span class="s3">is </span><span class="s1">t</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">np</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">(</span><span class="s6">'&lt;' </span><span class="s4">+ </span><span class="s1">t</span><span class="s4">.</span><span class="s1">_type_</span><span class="s4">)</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">np</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">(</span><span class="s1">t</span><span class="s4">.</span><span class="s1">_type_</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_from_ctypes_union</span><span class="s4">(</span><span class="s1">t</span><span class="s4">):</span>
+    <span class="s3">import </span><span class="s1">ctypes</span>
+    <span class="s1">formats </span><span class="s4">= []</span>
+    <span class="s1">offsets </span><span class="s4">= []</span>
+    <span class="s1">names </span><span class="s4">= []</span>
+    <span class="s3">for </span><span class="s1">fname</span><span class="s4">, </span><span class="s1">ftyp </span><span class="s3">in </span><span class="s1">t</span><span class="s4">.</span><span class="s1">_fields_</span><span class="s4">:</span>
+        <span class="s1">names</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">fname</span><span class="s4">)</span>
+        <span class="s1">formats</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">dtype_from_ctypes_type</span><span class="s4">(</span><span class="s1">ftyp</span><span class="s4">))</span>
+        <span class="s1">offsets</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s5">0</span><span class="s4">)  </span><span class="s2"># Union fields are offset to 0</span>
+
+    <span class="s3">return </span><span class="s1">np</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">({</span>
+        <span class="s6">&quot;formats&quot;</span><span class="s4">: </span><span class="s1">formats</span><span class="s4">,</span>
+        <span class="s6">&quot;offsets&quot;</span><span class="s4">: </span><span class="s1">offsets</span><span class="s4">,</span>
+        <span class="s6">&quot;names&quot;</span><span class="s4">: </span><span class="s1">names</span><span class="s4">,</span>
+        <span class="s6">&quot;itemsize&quot;</span><span class="s4">: </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">sizeof</span><span class="s4">(</span><span class="s1">t</span><span class="s4">)})</span>
+
+
+<span class="s3">def </span><span class="s1">dtype_from_ctypes_type</span><span class="s4">(</span><span class="s1">t</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Construct a dtype object from a ctypes type 
+    &quot;&quot;&quot;</span>
+    <span class="s3">import </span><span class="s1">_ctypes</span>
+    <span class="s3">if </span><span class="s1">issubclass</span><span class="s4">(</span><span class="s1">t</span><span class="s4">, </span><span class="s1">_ctypes</span><span class="s4">.</span><span class="s1">Array</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">_from_ctypes_array</span><span class="s4">(</span><span class="s1">t</span><span class="s4">)</span>
+    <span class="s3">elif </span><span class="s1">issubclass</span><span class="s4">(</span><span class="s1">t</span><span class="s4">, </span><span class="s1">_ctypes</span><span class="s4">.</span><span class="s1">_Pointer</span><span class="s4">):</span>
+        <span class="s3">raise </span><span class="s1">TypeError</span><span class="s4">(</span><span class="s6">&quot;ctypes pointers have no dtype equivalent&quot;</span><span class="s4">)</span>
+    <span class="s3">elif </span><span class="s1">issubclass</span><span class="s4">(</span><span class="s1">t</span><span class="s4">, </span><span class="s1">_ctypes</span><span class="s4">.</span><span class="s1">Structure</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">_from_ctypes_structure</span><span class="s4">(</span><span class="s1">t</span><span class="s4">)</span>
+    <span class="s3">elif </span><span class="s1">issubclass</span><span class="s4">(</span><span class="s1">t</span><span class="s4">, </span><span class="s1">_ctypes</span><span class="s4">.</span><span class="s1">Union</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">_from_ctypes_union</span><span class="s4">(</span><span class="s1">t</span><span class="s4">)</span>
+    <span class="s3">elif </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">t</span><span class="s4">, </span><span class="s6">'_type_'</span><span class="s4">, </span><span class="s3">None</span><span class="s4">), </span><span class="s1">str</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">_from_ctypes_scalar</span><span class="s4">(</span><span class="s1">t</span><span class="s4">)</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">NotImplementedError</span><span class="s4">(</span>
+            <span class="s6">f&quot;Unknown ctypes type </span><span class="s3">{</span><span class="s1">t</span><span class="s4">.</span><span class="s1">__name__</span><span class="s3">}</span><span class="s6">&quot;</span><span class="s4">)</span>
+</pre>
+</body>
+</html>

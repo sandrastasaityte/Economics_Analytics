@@ -1,0 +1,940 @@
+<html>
+<head>
+<title>incremental_tree.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #5f826b; font-style: italic;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+incremental_tree.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Code modified from cPython's Lib/xml/etree/ElementTree.py</span>
+<span class="s0"># The write() code is modified to allow specifying a particular namespace</span>
+<span class="s0"># uri -&gt; prefix mapping.</span>
+<span class="s0">#</span>
+<span class="s0"># ---------------------------------------------------------------------</span>
+<span class="s0"># Licensed to PSF under a Contributor Agreement.</span>
+<span class="s0"># See https://www.python.org/psf/license for licensing details.</span>
+<span class="s0">#</span>
+<span class="s0"># ElementTree</span>
+<span class="s0"># Copyright (c) 1999-2008 by Fredrik Lundh.  All rights reserved.</span>
+<span class="s0">#</span>
+<span class="s0"># fredrik@pythonware.com</span>
+<span class="s0"># http://www.pythonware.com</span>
+<span class="s0"># --------------------------------------------------------------------</span>
+<span class="s0"># The ElementTree toolkit is</span>
+<span class="s0">#</span>
+<span class="s0"># Copyright (c) 1999-2008 by Fredrik Lundh</span>
+<span class="s0">#</span>
+<span class="s0"># By obtaining, using, and/or copying this software and/or its</span>
+<span class="s0"># associated documentation, you agree that you have read, understood,</span>
+<span class="s0"># and will comply with the following terms and conditions:</span>
+<span class="s0">#</span>
+<span class="s0"># Permission to use, copy, modify, and distribute this software and</span>
+<span class="s0"># its associated documentation for any purpose and without fee is</span>
+<span class="s0"># hereby granted, provided that the above copyright notice appears in</span>
+<span class="s0"># all copies, and that both that copyright notice and this permission</span>
+<span class="s0"># notice appear in supporting documentation, and that the name of</span>
+<span class="s0"># Secret Labs AB or the author not be used in advertising or publicity</span>
+<span class="s0"># pertaining to distribution of the software without specific, written</span>
+<span class="s0"># prior permission.</span>
+<span class="s0">#</span>
+<span class="s0"># SECRET LABS AB AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD</span>
+<span class="s0"># TO THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANT-</span>
+<span class="s0"># ABILITY AND FITNESS.  IN NO EVENT SHALL SECRET LABS AB OR THE AUTHOR</span>
+<span class="s0"># BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY</span>
+<span class="s0"># DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,</span>
+<span class="s0"># WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS</span>
+<span class="s0"># ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE</span>
+<span class="s0"># OF THIS SOFTWARE.</span>
+<span class="s0"># --------------------------------------------------------------------</span>
+<span class="s2">import </span><span class="s1">contextlib</span>
+<span class="s2">import </span><span class="s1">io</span>
+
+<span class="s2">import </span><span class="s1">xml</span><span class="s3">.</span><span class="s1">etree</span><span class="s3">.</span><span class="s1">ElementTree </span><span class="s2">as </span><span class="s1">ET</span>
+
+
+<span class="s2">def </span><span class="s1">current_global_nsmap</span><span class="s3">():</span>
+    <span class="s2">return </span><span class="s3">{</span>
+        <span class="s1">prefix</span><span class="s3">: </span><span class="s1">uri </span><span class="s2">for </span><span class="s1">uri</span><span class="s3">, </span><span class="s1">prefix </span><span class="s2">in </span><span class="s1">ET</span><span class="s3">.</span><span class="s1">_namespace_map</span><span class="s3">.</span><span class="s1">items</span><span class="s3">()</span>
+    <span class="s3">}</span>
+
+
+<span class="s2">class </span><span class="s1">IncrementalTree</span><span class="s3">(</span><span class="s1">ET</span><span class="s3">.</span><span class="s1">ElementTree</span><span class="s3">):</span>
+
+    <span class="s2">def </span><span class="s1">write</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">file_or_filename</span><span class="s3">,</span>
+        <span class="s1">encoding</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">xml_declaration</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">default_namespace</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">method</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s3">*,</span>
+        <span class="s1">short_empty_elements</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+        <span class="s1">nsmap</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">root_ns_only</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s1">minimal_ns_only</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+    <span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot;Write element tree to a file as XML. 
+ 
+        Arguments: 
+          *file_or_filename* -- file name or a file object opened for writing 
+ 
+          *encoding* -- the output encoding (default: US-ASCII) 
+ 
+          *xml_declaration* -- bool indicating if an XML declaration should be 
+                               added to the output. If None, an XML declaration 
+                               is added if encoding IS NOT either of: 
+                               US-ASCII, UTF-8, or Unicode 
+ 
+          *default_namespace* -- sets the default XML namespace (for &quot;xmlns&quot;). 
+                                 Takes precedence over any default namespace 
+                                 provided in nsmap or 
+                                 xml.etree.ElementTree.register_namespace(). 
+ 
+          *method* -- either &quot;xml&quot; (default), &quot;html, &quot;text&quot;, or &quot;c14n&quot; 
+ 
+          *short_empty_elements* -- controls the formatting of elements 
+                                    that contain no content. If True (default) 
+                                    they are emitted as a single self-closed 
+                                    tag, otherwise they are emitted as a pair 
+                                    of start/end tags 
+ 
+          *nsmap* -- a mapping of namespace prefixes to URIs. These take 
+                     precedence over any mappings registered using 
+                     xml.etree.ElementTree.register_namespace(). The 
+                     default_namespace argument, if supplied, takes precedence 
+                     over any default namespace supplied in nsmap. All supplied 
+                     namespaces will be declared on the root element, even if 
+                     unused in the document. 
+ 
+          *root_ns_only* -- bool indicating namespace declrations should only 
+                            be written on the root element.  This requires two 
+                            passes of the xml tree adding additional time to 
+                            the writing process. This is primarily meant to 
+                            mimic xml.etree.ElementTree's behaviour. 
+ 
+          *minimal_ns_only* -- bool indicating only namespaces that were used 
+                               to qualify elements or attributes should be 
+                               declared. All namespace declarations will be 
+                               written on the root element regardless of the 
+                               value of the root_ns_only arg. Requires two 
+                               passes of the xml tree adding additional time to 
+                               the writing process. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if not </span><span class="s1">method</span><span class="s3">:</span>
+            <span class="s1">method </span><span class="s3">= </span><span class="s5">&quot;xml&quot;</span>
+        <span class="s2">elif </span><span class="s1">method </span><span class="s2">not in </span><span class="s3">(</span><span class="s5">&quot;text&quot;</span><span class="s3">, </span><span class="s5">&quot;xml&quot;</span><span class="s3">, </span><span class="s5">&quot;html&quot;</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s5">&quot;unknown method %r&quot; </span><span class="s3">% </span><span class="s1">method</span><span class="s3">)</span>
+        <span class="s2">if not </span><span class="s1">encoding</span><span class="s3">:</span>
+            <span class="s1">encoding </span><span class="s3">= </span><span class="s5">&quot;us-ascii&quot;</span>
+
+        <span class="s2">with </span><span class="s1">_get_writer</span><span class="s3">(</span><span class="s1">file_or_filename</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">) </span><span class="s2">as </span><span class="s3">(</span><span class="s1">write</span><span class="s3">, </span><span class="s1">declared_encoding</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">method </span><span class="s3">== </span><span class="s5">&quot;xml&quot; </span><span class="s2">and </span><span class="s3">(</span>
+                <span class="s1">xml_declaration</span>
+                <span class="s2">or </span><span class="s3">(</span>
+                    <span class="s1">xml_declaration </span><span class="s2">is None</span>
+                    <span class="s2">and </span><span class="s1">encoding</span><span class="s3">.</span><span class="s1">lower</span><span class="s3">() != </span><span class="s5">&quot;unicode&quot;</span>
+                    <span class="s2">and </span><span class="s1">declared_encoding</span><span class="s3">.</span><span class="s1">lower</span><span class="s3">() </span><span class="s2">not in </span><span class="s3">(</span><span class="s5">&quot;utf-8&quot;</span><span class="s3">, </span><span class="s5">&quot;us-ascii&quot;</span><span class="s3">)</span>
+                <span class="s3">)</span>
+            <span class="s3">):</span>
+                <span class="s1">write</span><span class="s3">(</span><span class="s5">&quot;&lt;?xml version='1.0' encoding='%s'?&gt;</span><span class="s2">\n</span><span class="s5">&quot; </span><span class="s3">% (</span><span class="s1">declared_encoding</span><span class="s3">,))</span>
+            <span class="s2">if </span><span class="s1">method </span><span class="s3">== </span><span class="s5">&quot;text&quot;</span><span class="s3">:</span>
+                <span class="s1">ET</span><span class="s3">.</span><span class="s1">_serialize_text</span><span class="s3">(</span><span class="s1">write</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_root</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">method </span><span class="s3">== </span><span class="s5">&quot;xml&quot;</span><span class="s3">:</span>
+                    <span class="s1">is_html </span><span class="s3">= </span><span class="s2">False</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s1">is_html </span><span class="s3">= </span><span class="s2">True</span>
+                <span class="s2">if </span><span class="s1">nsmap</span><span class="s3">:</span>
+                    <span class="s2">if None in </span><span class="s1">nsmap</span><span class="s3">:</span>
+                        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                            <span class="s5">'Found None as default nsmap prefix in nsmap. '</span>
+                            <span class="s5">'Use &quot;&quot; as the default namespace prefix.'</span>
+                        <span class="s3">)</span>
+                    <span class="s1">new_nsmap </span><span class="s3">= </span><span class="s1">nsmap</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s1">new_nsmap </span><span class="s3">= {}</span>
+                <span class="s2">if </span><span class="s1">default_namespace</span><span class="s3">:</span>
+                    <span class="s1">new_nsmap</span><span class="s3">[</span><span class="s5">&quot;&quot;</span><span class="s3">] = </span><span class="s1">default_namespace</span>
+                <span class="s2">if </span><span class="s1">root_ns_only </span><span class="s2">or </span><span class="s1">minimal_ns_only</span><span class="s3">:</span>
+                    <span class="s0"># _namespaces returns a mapping of only the namespaces that</span>
+                    <span class="s0"># were used.</span>
+                    <span class="s1">new_nsmap </span><span class="s3">= </span><span class="s1">_namespaces</span><span class="s3">(</span>
+                        <span class="s1">self</span><span class="s3">.</span><span class="s1">_root</span><span class="s3">,</span>
+                        <span class="s1">default_namespace</span><span class="s3">,</span>
+                        <span class="s1">new_nsmap</span><span class="s3">,</span>
+                    <span class="s3">)</span>
+                    <span class="s2">if not </span><span class="s1">minimal_ns_only</span><span class="s3">:</span>
+                        <span class="s2">if </span><span class="s1">nsmap</span><span class="s3">:</span>
+                            <span class="s0"># We want all namespaces defined in the provided</span>
+                            <span class="s0"># nsmap to be declared regardless of whether</span>
+                            <span class="s0"># they've been used.</span>
+                            <span class="s1">new_nsmap</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">nsmap</span><span class="s3">)</span>
+                        <span class="s2">if </span><span class="s1">default_namespace</span><span class="s3">:</span>
+                            <span class="s1">new_nsmap</span><span class="s3">[</span><span class="s5">&quot;&quot;</span><span class="s3">] = </span><span class="s1">default_namespace</span>
+                <span class="s1">global_nsmap </span><span class="s3">= {</span>
+                    <span class="s1">prefix</span><span class="s3">: </span><span class="s1">uri </span><span class="s2">for </span><span class="s1">uri</span><span class="s3">, </span><span class="s1">prefix </span><span class="s2">in </span><span class="s1">ET</span><span class="s3">.</span><span class="s1">_namespace_map</span><span class="s3">.</span><span class="s1">items</span><span class="s3">()</span>
+                <span class="s3">}</span>
+                <span class="s2">if None in </span><span class="s1">global_nsmap</span><span class="s3">:</span>
+                    <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                        <span class="s5">'Found None as default nsmap prefix in nsmap registered with '</span>
+                        <span class="s5">'register_namespace. Use &quot;&quot; for the default namespace prefix.'</span>
+                    <span class="s3">)</span>
+                <span class="s1">nsmap_scope </span><span class="s3">= {}</span>
+                <span class="s1">_serialize_ns_xml</span><span class="s3">(</span>
+                    <span class="s1">write</span><span class="s3">,</span>
+                    <span class="s1">self</span><span class="s3">.</span><span class="s1">_root</span><span class="s3">,</span>
+                    <span class="s1">nsmap_scope</span><span class="s3">,</span>
+                    <span class="s1">global_nsmap</span><span class="s3">,</span>
+                    <span class="s1">is_html</span><span class="s3">=</span><span class="s1">is_html</span><span class="s3">,</span>
+                    <span class="s1">is_root</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+                    <span class="s1">short_empty_elements</span><span class="s3">=</span><span class="s1">short_empty_elements</span><span class="s3">,</span>
+                    <span class="s1">new_nsmap</span><span class="s3">=</span><span class="s1">new_nsmap</span><span class="s3">,</span>
+                <span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_make_new_ns_prefix</span><span class="s3">(</span>
+    <span class="s1">nsmap_scope</span><span class="s3">,</span>
+    <span class="s1">global_prefixes</span><span class="s3">,</span>
+    <span class="s1">local_nsmap</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">default_namespace</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s1">i </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">nsmap_scope</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">default_namespace </span><span class="s2">is not None and </span><span class="s5">&quot;&quot; </span><span class="s2">not in </span><span class="s1">nsmap_scope</span><span class="s3">:</span>
+        <span class="s0"># Keep the same numbering scheme as python which assumes the default</span>
+        <span class="s0"># namespace is present if supplied.</span>
+        <span class="s1">i </span><span class="s3">+= </span><span class="s6">1</span>
+
+    <span class="s2">while True</span><span class="s3">:</span>
+        <span class="s1">prefix </span><span class="s3">= </span><span class="s5">f&quot;ns</span><span class="s2">{</span><span class="s1">i</span><span class="s2">}</span><span class="s5">&quot;</span>
+        <span class="s2">if </span><span class="s3">(</span>
+            <span class="s1">prefix </span><span class="s2">not in </span><span class="s1">nsmap_scope</span>
+            <span class="s2">and </span><span class="s1">prefix </span><span class="s2">not in </span><span class="s1">global_prefixes</span>
+            <span class="s2">and </span><span class="s3">(</span>
+                <span class="s2">not </span><span class="s1">local_nsmap </span><span class="s2">or </span><span class="s1">prefix </span><span class="s2">not in </span><span class="s1">local_nsmap</span>
+            <span class="s3">)</span>
+        <span class="s3">):</span>
+            <span class="s2">return </span><span class="s1">prefix</span>
+        <span class="s1">i </span><span class="s3">+= </span><span class="s6">1</span>
+
+
+<span class="s2">def </span><span class="s1">_get_or_create_prefix</span><span class="s3">(</span>
+    <span class="s1">uri</span><span class="s3">,</span>
+    <span class="s1">nsmap_scope</span><span class="s3">,</span>
+    <span class="s1">global_nsmap</span><span class="s3">,</span>
+    <span class="s1">new_namespace_prefixes</span><span class="s3">,</span>
+    <span class="s1">uri_to_prefix</span><span class="s3">,</span>
+    <span class="s1">for_default_namespace_attr_prefix</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s4">&quot;&quot;&quot;Find a prefix that doesn't conflict with the ns scope or create a new prefix 
+ 
+    This function mutates nsmap_scope, global_nsmap, new_namespace_prefixes and 
+    uri_to_prefix. It is intended to keep state in _serialize_ns_xml consistent 
+    while deduplicating the house keeping code or updating these dictionaries. 
+    &quot;&quot;&quot;</span>
+    <span class="s0"># Check if we can reuse an existing (global) prefix within the current</span>
+    <span class="s0"># namespace scope. There maybe many prefixes pointing to a single URI by</span>
+    <span class="s0"># this point and we need to select a prefix that is not in use in the</span>
+    <span class="s0"># current scope.</span>
+    <span class="s2">for </span><span class="s1">global_prefix</span><span class="s3">, </span><span class="s1">global_uri </span><span class="s2">in </span><span class="s1">global_nsmap</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+        <span class="s2">if </span><span class="s1">uri </span><span class="s3">== </span><span class="s1">global_uri </span><span class="s2">and </span><span class="s1">global_prefix </span><span class="s2">not in </span><span class="s1">nsmap_scope</span><span class="s3">:</span>
+            <span class="s1">prefix </span><span class="s3">= </span><span class="s1">global_prefix</span>
+            <span class="s2">break</span>
+    <span class="s2">else</span><span class="s3">:  </span><span class="s0"># no break</span>
+        <span class="s0"># We couldn't find a suitable existing prefix for this namespace scope,</span>
+        <span class="s0"># let's create a new one.</span>
+        <span class="s1">prefix </span><span class="s3">= </span><span class="s1">_make_new_ns_prefix</span><span class="s3">(</span><span class="s1">nsmap_scope</span><span class="s3">, </span><span class="s1">global_prefixes</span><span class="s3">=</span><span class="s1">global_nsmap</span><span class="s3">)</span>
+        <span class="s1">global_nsmap</span><span class="s3">[</span><span class="s1">prefix</span><span class="s3">] = </span><span class="s1">uri</span>
+    <span class="s1">nsmap_scope</span><span class="s3">[</span><span class="s1">prefix</span><span class="s3">] = </span><span class="s1">uri</span>
+    <span class="s2">if not </span><span class="s1">for_default_namespace_attr_prefix</span><span class="s3">:</span>
+        <span class="s0"># Don't override the actual default namespace prefix</span>
+        <span class="s1">uri_to_prefix</span><span class="s3">[</span><span class="s1">uri</span><span class="s3">] = </span><span class="s1">prefix</span>
+    <span class="s2">if </span><span class="s1">prefix </span><span class="s3">!= </span><span class="s5">&quot;xml&quot;</span><span class="s3">:</span>
+        <span class="s1">new_namespace_prefixes</span><span class="s3">.</span><span class="s1">add</span><span class="s3">(</span><span class="s1">prefix</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">prefix</span>
+
+
+<span class="s2">def </span><span class="s1">_find_default_namespace_attr_prefix</span><span class="s3">(</span>
+    <span class="s1">default_namespace</span><span class="s3">,</span>
+    <span class="s1">nsmap</span><span class="s3">,</span>
+    <span class="s1">local_nsmap</span><span class="s3">,</span>
+    <span class="s1">global_prefixes</span><span class="s3">,</span>
+    <span class="s1">provided_default_namespace</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s0"># Search the provided nsmap for any prefixes for this uri that aren't the</span>
+    <span class="s0"># default namespace &quot;&quot;</span>
+    <span class="s2">for </span><span class="s1">prefix</span><span class="s3">, </span><span class="s1">uri </span><span class="s2">in </span><span class="s1">nsmap</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+        <span class="s2">if </span><span class="s1">uri </span><span class="s3">== </span><span class="s1">default_namespace </span><span class="s2">and </span><span class="s1">prefix </span><span class="s3">!= </span><span class="s5">&quot;&quot;</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">prefix</span>
+
+    <span class="s2">for </span><span class="s1">prefix</span><span class="s3">, </span><span class="s1">uri </span><span class="s2">in </span><span class="s1">local_nsmap</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+        <span class="s2">if </span><span class="s1">uri </span><span class="s3">== </span><span class="s1">default_namespace </span><span class="s2">and </span><span class="s1">prefix </span><span class="s3">!= </span><span class="s5">&quot;&quot;</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">prefix</span>
+
+    <span class="s0"># _namespace_map is a 1:1 mapping of uri -&gt; prefix</span>
+    <span class="s1">prefix </span><span class="s3">= </span><span class="s1">ET</span><span class="s3">.</span><span class="s1">_namespace_map</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">default_namespace</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">prefix </span><span class="s2">and </span><span class="s1">prefix </span><span class="s2">not in </span><span class="s1">nsmap</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">prefix</span>
+
+    <span class="s2">return </span><span class="s1">_make_new_ns_prefix</span><span class="s3">(</span>
+        <span class="s1">nsmap</span><span class="s3">,</span>
+        <span class="s1">global_prefixes</span><span class="s3">,</span>
+        <span class="s1">local_nsmap</span><span class="s3">,</span>
+        <span class="s1">provided_default_namespace</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">process_attribs</span><span class="s3">(</span>
+    <span class="s1">elem</span><span class="s3">,</span>
+    <span class="s1">is_nsmap_scope_changed</span><span class="s3">,</span>
+    <span class="s1">default_ns_attr_prefix</span><span class="s3">,</span>
+    <span class="s1">nsmap_scope</span><span class="s3">,</span>
+    <span class="s1">global_nsmap</span><span class="s3">,</span>
+    <span class="s1">new_namespace_prefixes</span><span class="s3">,</span>
+    <span class="s1">uri_to_prefix</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s1">item_parts </span><span class="s3">= []</span>
+    <span class="s2">for </span><span class="s1">k</span><span class="s3">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">elem</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">k</span><span class="s3">, </span><span class="s1">ET</span><span class="s3">.</span><span class="s1">QName</span><span class="s3">):</span>
+            <span class="s1">k </span><span class="s3">= </span><span class="s1">k</span><span class="s3">.</span><span class="s1">text</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">k</span><span class="s3">[:</span><span class="s6">1</span><span class="s3">] == </span><span class="s5">&quot;{&quot;</span><span class="s3">:</span>
+                <span class="s1">uri_and_name </span><span class="s3">= </span><span class="s1">k</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:].</span><span class="s1">rsplit</span><span class="s3">(</span><span class="s5">&quot;}&quot;</span><span class="s3">, </span><span class="s6">1</span><span class="s3">)</span>
+                <span class="s2">try</span><span class="s3">:</span>
+                    <span class="s1">prefix </span><span class="s3">= </span><span class="s1">uri_to_prefix</span><span class="s3">[</span><span class="s1">uri_and_name</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]]</span>
+                <span class="s2">except </span><span class="s1">KeyError</span><span class="s3">:</span>
+                    <span class="s2">if not </span><span class="s1">is_nsmap_scope_changed</span><span class="s3">:</span>
+                        <span class="s0"># We're about to mutate the these dicts so</span>
+                        <span class="s0"># let's copy them first. We don't have to</span>
+                        <span class="s0"># recompute other mappings as we're looking up</span>
+                        <span class="s0"># or creating a new prefix</span>
+                        <span class="s1">nsmap_scope </span><span class="s3">= </span><span class="s1">nsmap_scope</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+                        <span class="s1">uri_to_prefix </span><span class="s3">= </span><span class="s1">uri_to_prefix</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+                        <span class="s1">is_nsmap_scope_changed </span><span class="s3">= </span><span class="s2">True</span>
+                    <span class="s1">prefix </span><span class="s3">= </span><span class="s1">_get_or_create_prefix</span><span class="s3">(</span>
+                        <span class="s1">uri_and_name</span><span class="s3">[</span><span class="s6">0</span><span class="s3">],</span>
+                        <span class="s1">nsmap_scope</span><span class="s3">,</span>
+                        <span class="s1">global_nsmap</span><span class="s3">,</span>
+                        <span class="s1">new_namespace_prefixes</span><span class="s3">,</span>
+                        <span class="s1">uri_to_prefix</span><span class="s3">,</span>
+                    <span class="s3">)</span>
+
+                <span class="s2">if not </span><span class="s1">prefix</span><span class="s3">:</span>
+                    <span class="s2">if </span><span class="s1">default_ns_attr_prefix</span><span class="s3">:</span>
+                        <span class="s1">prefix </span><span class="s3">= </span><span class="s1">default_ns_attr_prefix</span>
+                    <span class="s2">else</span><span class="s3">:</span>
+                        <span class="s2">for </span><span class="s1">prefix</span><span class="s3">, </span><span class="s1">known_uri </span><span class="s2">in </span><span class="s1">nsmap_scope</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+                            <span class="s2">if </span><span class="s1">known_uri </span><span class="s3">== </span><span class="s1">uri_and_name</span><span class="s3">[</span><span class="s6">0</span><span class="s3">] </span><span class="s2">and </span><span class="s1">prefix </span><span class="s3">!= </span><span class="s5">&quot;&quot;</span><span class="s3">:</span>
+                                <span class="s1">default_ns_attr_prefix </span><span class="s3">= </span><span class="s1">prefix</span>
+                                <span class="s2">break</span>
+                        <span class="s2">else</span><span class="s3">:  </span><span class="s0"># no break</span>
+                            <span class="s2">if not </span><span class="s1">is_nsmap_scope_changed</span><span class="s3">:</span>
+                                <span class="s0"># We're about to mutate the these dicts so</span>
+                                <span class="s0"># let's copy them first. We don't have to</span>
+                                <span class="s0"># recompute other mappings as we're looking up</span>
+                                <span class="s0"># or creating a new prefix</span>
+                                <span class="s1">nsmap_scope </span><span class="s3">= </span><span class="s1">nsmap_scope</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+                                <span class="s1">uri_to_prefix </span><span class="s3">= </span><span class="s1">uri_to_prefix</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+                                <span class="s1">is_nsmap_scope_changed </span><span class="s3">= </span><span class="s2">True</span>
+                            <span class="s1">prefix </span><span class="s3">= </span><span class="s1">_get_or_create_prefix</span><span class="s3">(</span>
+                                <span class="s1">uri_and_name</span><span class="s3">[</span><span class="s6">0</span><span class="s3">],</span>
+                                <span class="s1">nsmap_scope</span><span class="s3">,</span>
+                                <span class="s1">global_nsmap</span><span class="s3">,</span>
+                                <span class="s1">new_namespace_prefixes</span><span class="s3">,</span>
+                                <span class="s1">uri_to_prefix</span><span class="s3">,</span>
+                                <span class="s1">for_default_namespace_attr_prefix</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+                            <span class="s3">)</span>
+                            <span class="s1">default_ns_attr_prefix </span><span class="s3">= </span><span class="s1">prefix</span>
+                <span class="s1">k </span><span class="s3">= </span><span class="s5">f&quot;</span><span class="s2">{</span><span class="s1">prefix</span><span class="s2">}</span><span class="s5">:</span><span class="s2">{</span><span class="s1">uri_and_name</span><span class="s3">[</span><span class="s6">1</span><span class="s3">]</span><span class="s2">}</span><span class="s5">&quot;</span>
+        <span class="s2">except </span><span class="s1">TypeError</span><span class="s3">:</span>
+            <span class="s1">ET</span><span class="s3">.</span><span class="s1">_raise_serialization_error</span><span class="s3">(</span><span class="s1">k</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">v</span><span class="s3">, </span><span class="s1">ET</span><span class="s3">.</span><span class="s1">QName</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">v</span><span class="s3">.</span><span class="s1">text</span><span class="s3">[:</span><span class="s6">1</span><span class="s3">] != </span><span class="s5">&quot;{&quot;</span><span class="s3">:</span>
+                <span class="s1">v </span><span class="s3">= </span><span class="s1">v</span><span class="s3">.</span><span class="s1">text</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">uri_and_name </span><span class="s3">= </span><span class="s1">v</span><span class="s3">.</span><span class="s1">text</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:].</span><span class="s1">rsplit</span><span class="s3">(</span><span class="s5">&quot;}&quot;</span><span class="s3">, </span><span class="s6">1</span><span class="s3">)</span>
+                <span class="s2">try</span><span class="s3">:</span>
+                    <span class="s1">prefix </span><span class="s3">= </span><span class="s1">uri_to_prefix</span><span class="s3">[</span><span class="s1">uri_and_name</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]]</span>
+                <span class="s2">except </span><span class="s1">KeyError</span><span class="s3">:</span>
+                    <span class="s2">if not </span><span class="s1">is_nsmap_scope_changed</span><span class="s3">:</span>
+                        <span class="s0"># We're about to mutate the these dicts so</span>
+                        <span class="s0"># let's copy them first. We don't have to</span>
+                        <span class="s0"># recompute other mappings as we're looking up</span>
+                        <span class="s0"># or creating a new prefix</span>
+                        <span class="s1">nsmap_scope </span><span class="s3">= </span><span class="s1">nsmap_scope</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+                        <span class="s1">uri_to_prefix </span><span class="s3">= </span><span class="s1">uri_to_prefix</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+                        <span class="s1">is_nsmap_scope_changed </span><span class="s3">= </span><span class="s2">True</span>
+                    <span class="s1">prefix </span><span class="s3">= </span><span class="s1">_get_or_create_prefix</span><span class="s3">(</span>
+                        <span class="s1">uri_and_name</span><span class="s3">[</span><span class="s6">0</span><span class="s3">],</span>
+                        <span class="s1">nsmap_scope</span><span class="s3">,</span>
+                        <span class="s1">global_nsmap</span><span class="s3">,</span>
+                        <span class="s1">new_namespace_prefixes</span><span class="s3">,</span>
+                        <span class="s1">uri_to_prefix</span><span class="s3">,</span>
+                    <span class="s3">)</span>
+                <span class="s1">v </span><span class="s3">= </span><span class="s5">f&quot;</span><span class="s2">{</span><span class="s1">prefix</span><span class="s2">}</span><span class="s5">:</span><span class="s2">{</span><span class="s1">uri_and_name</span><span class="s3">[</span><span class="s6">1</span><span class="s3">]</span><span class="s2">}</span><span class="s5">&quot;</span>
+        <span class="s1">item_parts</span><span class="s3">.</span><span class="s1">append</span><span class="s3">((</span><span class="s1">k</span><span class="s3">, </span><span class="s1">v</span><span class="s3">))</span>
+    <span class="s2">return </span><span class="s1">item_parts</span><span class="s3">, </span><span class="s1">default_ns_attr_prefix</span><span class="s3">, </span><span class="s1">nsmap_scope</span>
+
+
+<span class="s2">def </span><span class="s1">write_elem_start</span><span class="s3">(</span>
+    <span class="s1">write</span><span class="s3">,</span>
+    <span class="s1">elem</span><span class="s3">,</span>
+    <span class="s1">nsmap_scope</span><span class="s3">,</span>
+    <span class="s1">global_nsmap</span><span class="s3">,</span>
+    <span class="s1">short_empty_elements</span><span class="s3">,</span>
+    <span class="s1">is_html</span><span class="s3">,</span>
+    <span class="s1">is_root</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+    <span class="s1">uri_to_prefix</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">default_ns_attr_prefix</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">new_nsmap</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">**</span><span class="s1">kwargs</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s4">&quot;&quot;&quot;Write the opening tag (including self closing) and element text. 
+ 
+    Refer to _serialize_ns_xml for description of arguments. 
+ 
+    nsmap_scope should be an empty dictionary on first call. All nsmap prefixes 
+    must be strings with the default namespace prefix represented by &quot;&quot;. 
+ 
+    eg. 
+    - &lt;foo attr1=&quot;one&quot;&gt;      (returns tag = 'foo') 
+    - &lt;foo attr1=&quot;one&quot;&gt;text  (returns tag = 'foo') 
+    - &lt;foo attr1=&quot;one&quot; /&gt;    (returns tag = None) 
+ 
+    Returns: 
+        tag: 
+            The tag name to be closed or None if no closing required. 
+        nsmap_scope: 
+            The current nsmap after any prefix to uri additions from this 
+            element. This is the input dict if unmodified or an updated copy. 
+        default_ns_attr_prefix: 
+            The prefix for the default namespace to use with attrs. 
+        uri_to_prefix: 
+            The current uri to prefix map after any uri to prefix additions 
+            from this element. This is the input dict if unmodified or an 
+            updated copy. 
+        next_remains_root: 
+            A bool indicating if the child element(s) should be treated as 
+            their own roots. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">tag </span><span class="s3">= </span><span class="s1">elem</span><span class="s3">.</span><span class="s1">tag</span>
+    <span class="s1">text </span><span class="s3">= </span><span class="s1">elem</span><span class="s3">.</span><span class="s1">text</span>
+
+    <span class="s2">if </span><span class="s1">tag </span><span class="s2">is </span><span class="s1">ET</span><span class="s3">.</span><span class="s1">Comment</span><span class="s3">:</span>
+        <span class="s1">write</span><span class="s3">(</span><span class="s5">&quot;&lt;!--%s--&gt;&quot; </span><span class="s3">% </span><span class="s1">text</span><span class="s3">)</span>
+        <span class="s1">tag </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s1">next_remains_root </span><span class="s3">= </span><span class="s2">False</span>
+    <span class="s2">elif </span><span class="s1">tag </span><span class="s2">is </span><span class="s1">ET</span><span class="s3">.</span><span class="s1">ProcessingInstruction</span><span class="s3">:</span>
+        <span class="s1">write</span><span class="s3">(</span><span class="s5">&quot;&lt;?%s?&gt;&quot; </span><span class="s3">% </span><span class="s1">text</span><span class="s3">)</span>
+        <span class="s1">tag </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s1">next_remains_root </span><span class="s3">= </span><span class="s2">False</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">new_nsmap</span><span class="s3">:</span>
+            <span class="s1">is_nsmap_scope_changed </span><span class="s3">= </span><span class="s2">True</span>
+            <span class="s1">nsmap_scope </span><span class="s3">= </span><span class="s1">nsmap_scope</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+            <span class="s1">nsmap_scope</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">new_nsmap</span><span class="s3">)</span>
+            <span class="s1">new_namespace_prefixes </span><span class="s3">= </span><span class="s1">set</span><span class="s3">(</span><span class="s1">new_nsmap</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">())</span>
+            <span class="s1">new_namespace_prefixes</span><span class="s3">.</span><span class="s1">discard</span><span class="s3">(</span><span class="s5">&quot;xml&quot;</span><span class="s3">)</span>
+            <span class="s0"># We need to recompute the uri to prefixes</span>
+            <span class="s1">uri_to_prefix </span><span class="s3">= </span><span class="s2">None</span>
+            <span class="s1">default_ns_attr_prefix </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">is_nsmap_scope_changed </span><span class="s3">= </span><span class="s2">False</span>
+            <span class="s1">new_namespace_prefixes </span><span class="s3">= </span><span class="s1">set</span><span class="s3">()</span>
+
+        <span class="s2">if </span><span class="s1">uri_to_prefix </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s2">if None in </span><span class="s1">nsmap_scope</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                    <span class="s5">'Found None as a namespace prefix. Use &quot;&quot; as the default namespace prefix.'</span>
+                <span class="s3">)</span>
+            <span class="s1">uri_to_prefix </span><span class="s3">= {</span><span class="s1">uri</span><span class="s3">: </span><span class="s1">prefix </span><span class="s2">for </span><span class="s1">prefix</span><span class="s3">, </span><span class="s1">uri </span><span class="s2">in </span><span class="s1">nsmap_scope</span><span class="s3">.</span><span class="s1">items</span><span class="s3">()}</span>
+            <span class="s2">if </span><span class="s5">&quot;&quot; </span><span class="s2">in </span><span class="s1">nsmap_scope</span><span class="s3">:</span>
+                <span class="s0"># There may be multiple prefixes for the default namespace but</span>
+                <span class="s0"># we want to make sure we preferentially use &quot;&quot; (for elements)</span>
+                <span class="s1">uri_to_prefix</span><span class="s3">[</span><span class="s1">nsmap_scope</span><span class="s3">[</span><span class="s5">&quot;&quot;</span><span class="s3">]] = </span><span class="s5">&quot;&quot;</span>
+
+        <span class="s2">if </span><span class="s1">tag </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s0"># tag supression where tag is set to None</span>
+            <span class="s0"># Don't change is_root so namespaces can be passed down</span>
+            <span class="s1">next_remains_root </span><span class="s3">= </span><span class="s1">is_root</span>
+            <span class="s2">if </span><span class="s1">text</span><span class="s3">:</span>
+                <span class="s1">write</span><span class="s3">(</span><span class="s1">ET</span><span class="s3">.</span><span class="s1">_escape_cdata</span><span class="s3">(</span><span class="s1">text</span><span class="s3">))</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">next_remains_root </span><span class="s3">= </span><span class="s2">False</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">tag</span><span class="s3">, </span><span class="s1">ET</span><span class="s3">.</span><span class="s1">QName</span><span class="s3">):</span>
+                <span class="s1">tag </span><span class="s3">= </span><span class="s1">tag</span><span class="s3">.</span><span class="s1">text</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s0"># These splits / fully qualified tag creationg are the</span>
+                <span class="s0"># bottleneck in this implementation vs the python</span>
+                <span class="s0"># implementation.</span>
+                <span class="s0"># The following split takes ~42ns with no uri and ~85ns if a</span>
+                <span class="s0"># prefix is present. If the uri was present, we then need to</span>
+                <span class="s0"># look up a prefix (~14ns) and create the fully qualified</span>
+                <span class="s0"># string (~41ns).  This gives a total of ~140ns where a uri is</span>
+                <span class="s0"># present.</span>
+                <span class="s0"># Python's implementation needs to preprocess the tree to</span>
+                <span class="s0"># create a dict of qname -&gt; tag by traversing the tree which</span>
+                <span class="s0"># takes a bit of extra time but it quickly makes that back by</span>
+                <span class="s0"># only having to do a dictionary look up (~14ns) for each tag /</span>
+                <span class="s0"># attrname vs our splitting (~140ns).</span>
+                <span class="s0"># So here we have the flexibility of being able to redefine the</span>
+                <span class="s0"># uri a prefix points to midway through serialisation at the</span>
+                <span class="s0"># expense of performance (~10% slower for a 1mb file on my</span>
+                <span class="s0"># machine).</span>
+                <span class="s2">if </span><span class="s1">tag</span><span class="s3">[:</span><span class="s6">1</span><span class="s3">] == </span><span class="s5">&quot;{&quot;</span><span class="s3">:</span>
+                    <span class="s1">uri_and_name </span><span class="s3">= </span><span class="s1">tag</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:].</span><span class="s1">rsplit</span><span class="s3">(</span><span class="s5">&quot;}&quot;</span><span class="s3">, </span><span class="s6">1</span><span class="s3">)</span>
+                    <span class="s2">try</span><span class="s3">:</span>
+                        <span class="s1">prefix </span><span class="s3">= </span><span class="s1">uri_to_prefix</span><span class="s3">[</span><span class="s1">uri_and_name</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]]</span>
+                    <span class="s2">except </span><span class="s1">KeyError</span><span class="s3">:</span>
+                        <span class="s2">if not </span><span class="s1">is_nsmap_scope_changed</span><span class="s3">:</span>
+                            <span class="s0"># We're about to mutate the these dicts so let's</span>
+                            <span class="s0"># copy them first. We don't have to recompute other</span>
+                            <span class="s0"># mappings as we're looking up or creating a new</span>
+                            <span class="s0"># prefix</span>
+                            <span class="s1">nsmap_scope </span><span class="s3">= </span><span class="s1">nsmap_scope</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+                            <span class="s1">uri_to_prefix </span><span class="s3">= </span><span class="s1">uri_to_prefix</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+                            <span class="s1">is_nsmap_scope_changed </span><span class="s3">= </span><span class="s2">True</span>
+                        <span class="s1">prefix </span><span class="s3">= </span><span class="s1">_get_or_create_prefix</span><span class="s3">(</span>
+                            <span class="s1">uri_and_name</span><span class="s3">[</span><span class="s6">0</span><span class="s3">],</span>
+                            <span class="s1">nsmap_scope</span><span class="s3">,</span>
+                            <span class="s1">global_nsmap</span><span class="s3">,</span>
+                            <span class="s1">new_namespace_prefixes</span><span class="s3">,</span>
+                            <span class="s1">uri_to_prefix</span><span class="s3">,</span>
+                        <span class="s3">)</span>
+                    <span class="s2">if </span><span class="s1">prefix</span><span class="s3">:</span>
+                        <span class="s1">tag </span><span class="s3">= </span><span class="s5">f&quot;</span><span class="s2">{</span><span class="s1">prefix</span><span class="s2">}</span><span class="s5">:</span><span class="s2">{</span><span class="s1">uri_and_name</span><span class="s3">[</span><span class="s6">1</span><span class="s3">]</span><span class="s2">}</span><span class="s5">&quot;</span>
+                    <span class="s2">else</span><span class="s3">:</span>
+                        <span class="s1">tag </span><span class="s3">= </span><span class="s1">uri_and_name</span><span class="s3">[</span><span class="s6">1</span><span class="s3">]</span>
+                <span class="s2">elif </span><span class="s5">&quot;&quot; </span><span class="s2">in </span><span class="s1">nsmap_scope</span><span class="s3">:</span>
+                    <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                        <span class="s5">&quot;cannot use non-qualified names with default_namespace option&quot;</span>
+                    <span class="s3">)</span>
+            <span class="s2">except </span><span class="s1">TypeError</span><span class="s3">:</span>
+                <span class="s1">ET</span><span class="s3">.</span><span class="s1">_raise_serialization_error</span><span class="s3">(</span><span class="s1">tag</span><span class="s3">)</span>
+
+            <span class="s1">write</span><span class="s3">(</span><span class="s5">&quot;&lt;&quot; </span><span class="s3">+ </span><span class="s1">tag</span><span class="s3">)</span>
+
+            <span class="s2">if </span><span class="s1">elem</span><span class="s3">.</span><span class="s1">attrib</span><span class="s3">:</span>
+                <span class="s1">item_parts</span><span class="s3">, </span><span class="s1">default_ns_attr_prefix</span><span class="s3">, </span><span class="s1">nsmap_scope </span><span class="s3">= </span><span class="s1">process_attribs</span><span class="s3">(</span>
+                    <span class="s1">elem</span><span class="s3">,</span>
+                    <span class="s1">is_nsmap_scope_changed</span><span class="s3">,</span>
+                    <span class="s1">default_ns_attr_prefix</span><span class="s3">,</span>
+                    <span class="s1">nsmap_scope</span><span class="s3">,</span>
+                    <span class="s1">global_nsmap</span><span class="s3">,</span>
+                    <span class="s1">new_namespace_prefixes</span><span class="s3">,</span>
+                    <span class="s1">uri_to_prefix</span><span class="s3">,</span>
+                <span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">item_parts </span><span class="s3">= []</span>
+            <span class="s2">if </span><span class="s1">new_namespace_prefixes</span><span class="s3">:</span>
+                <span class="s1">ns_attrs </span><span class="s3">= []</span>
+                <span class="s2">for </span><span class="s1">k </span><span class="s2">in </span><span class="s1">sorted</span><span class="s3">(</span><span class="s1">new_namespace_prefixes</span><span class="s3">):</span>
+                    <span class="s1">v </span><span class="s3">= </span><span class="s1">nsmap_scope</span><span class="s3">[</span><span class="s1">k</span><span class="s3">]</span>
+                    <span class="s2">if </span><span class="s1">k</span><span class="s3">:</span>
+                        <span class="s1">k </span><span class="s3">= </span><span class="s5">&quot;xmlns:&quot; </span><span class="s3">+ </span><span class="s1">k</span>
+                    <span class="s2">else</span><span class="s3">:</span>
+                        <span class="s1">k </span><span class="s3">= </span><span class="s5">&quot;xmlns&quot;</span>
+                    <span class="s1">ns_attrs</span><span class="s3">.</span><span class="s1">append</span><span class="s3">((</span><span class="s1">k</span><span class="s3">, </span><span class="s1">v</span><span class="s3">))</span>
+                <span class="s2">if </span><span class="s1">is_html</span><span class="s3">:</span>
+                    <span class="s1">write</span><span class="s3">(</span><span class="s5">&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">([</span><span class="s5">f' </span><span class="s2">{</span><span class="s1">k</span><span class="s2">}</span><span class="s5">=&quot;</span><span class="s2">{</span><span class="s1">ET</span><span class="s3">.</span><span class="s1">_escape_attrib_html</span><span class="s3">(</span><span class="s1">v</span><span class="s3">)</span><span class="s2">}</span><span class="s5">&quot;' </span><span class="s2">for </span><span class="s1">k</span><span class="s3">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">ns_attrs</span><span class="s3">]))</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s1">write</span><span class="s3">(</span><span class="s5">&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">([</span><span class="s5">f' </span><span class="s2">{</span><span class="s1">k</span><span class="s2">}</span><span class="s5">=&quot;</span><span class="s2">{</span><span class="s1">ET</span><span class="s3">.</span><span class="s1">_escape_attrib</span><span class="s3">(</span><span class="s1">v</span><span class="s3">)</span><span class="s2">}</span><span class="s5">&quot;' </span><span class="s2">for </span><span class="s1">k</span><span class="s3">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">ns_attrs</span><span class="s3">]))</span>
+            <span class="s2">if </span><span class="s1">item_parts</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">is_html</span><span class="s3">:</span>
+                    <span class="s1">write</span><span class="s3">(</span><span class="s5">&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">([</span><span class="s5">f' </span><span class="s2">{</span><span class="s1">k</span><span class="s2">}</span><span class="s5">=&quot;</span><span class="s2">{</span><span class="s1">ET</span><span class="s3">.</span><span class="s1">_escape_attrib_html</span><span class="s3">(</span><span class="s1">v</span><span class="s3">)</span><span class="s2">}</span><span class="s5">&quot;' </span><span class="s2">for </span><span class="s1">k</span><span class="s3">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">item_parts</span><span class="s3">]))</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s1">write</span><span class="s3">(</span><span class="s5">&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">([</span><span class="s5">f' </span><span class="s2">{</span><span class="s1">k</span><span class="s2">}</span><span class="s5">=&quot;</span><span class="s2">{</span><span class="s1">ET</span><span class="s3">.</span><span class="s1">_escape_attrib</span><span class="s3">(</span><span class="s1">v</span><span class="s3">)</span><span class="s2">}</span><span class="s5">&quot;' </span><span class="s2">for </span><span class="s1">k</span><span class="s3">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">item_parts</span><span class="s3">]))</span>
+            <span class="s2">if </span><span class="s1">is_html</span><span class="s3">:</span>
+                <span class="s1">write</span><span class="s3">(</span><span class="s5">&quot;&gt;&quot;</span><span class="s3">)</span>
+                <span class="s1">ltag </span><span class="s3">= </span><span class="s1">tag</span><span class="s3">.</span><span class="s1">lower</span><span class="s3">()</span>
+                <span class="s2">if </span><span class="s1">text</span><span class="s3">:</span>
+                    <span class="s2">if </span><span class="s1">ltag </span><span class="s3">== </span><span class="s5">&quot;script&quot; </span><span class="s2">or </span><span class="s1">ltag </span><span class="s3">== </span><span class="s5">&quot;style&quot;</span><span class="s3">:</span>
+                        <span class="s1">write</span><span class="s3">(</span><span class="s1">text</span><span class="s3">)</span>
+                    <span class="s2">else</span><span class="s3">:</span>
+                        <span class="s1">write</span><span class="s3">(</span><span class="s1">ET</span><span class="s3">.</span><span class="s1">_escape_cdata</span><span class="s3">(</span><span class="s1">text</span><span class="s3">))</span>
+                <span class="s2">if </span><span class="s1">ltag </span><span class="s2">in </span><span class="s1">ET</span><span class="s3">.</span><span class="s1">HTML_EMPTY</span><span class="s3">:</span>
+                    <span class="s1">tag </span><span class="s3">= </span><span class="s2">None</span>
+            <span class="s2">elif </span><span class="s1">text </span><span class="s2">or </span><span class="s1">len</span><span class="s3">(</span><span class="s1">elem</span><span class="s3">) </span><span class="s2">or not </span><span class="s1">short_empty_elements</span><span class="s3">:</span>
+                <span class="s1">write</span><span class="s3">(</span><span class="s5">&quot;&gt;&quot;</span><span class="s3">)</span>
+                <span class="s2">if </span><span class="s1">text</span><span class="s3">:</span>
+                    <span class="s1">write</span><span class="s3">(</span><span class="s1">ET</span><span class="s3">.</span><span class="s1">_escape_cdata</span><span class="s3">(</span><span class="s1">text</span><span class="s3">))</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">tag </span><span class="s3">= </span><span class="s2">None</span>
+                <span class="s1">write</span><span class="s3">(</span><span class="s5">&quot; /&gt;&quot;</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s3">(</span>
+        <span class="s1">tag</span><span class="s3">,</span>
+        <span class="s1">nsmap_scope</span><span class="s3">,</span>
+        <span class="s1">default_ns_attr_prefix</span><span class="s3">,</span>
+        <span class="s1">uri_to_prefix</span><span class="s3">,</span>
+        <span class="s1">next_remains_root</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_serialize_ns_xml</span><span class="s3">(</span>
+    <span class="s1">write</span><span class="s3">,</span>
+    <span class="s1">elem</span><span class="s3">,</span>
+    <span class="s1">nsmap_scope</span><span class="s3">,</span>
+    <span class="s1">global_nsmap</span><span class="s3">,</span>
+    <span class="s1">short_empty_elements</span><span class="s3">,</span>
+    <span class="s1">is_html</span><span class="s3">,</span>
+    <span class="s1">is_root</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+    <span class="s1">uri_to_prefix</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">default_ns_attr_prefix</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">new_nsmap</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">**</span><span class="s1">kwargs</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s4">&quot;&quot;&quot;Serialize an element or tree using 'write' for output. 
+ 
+    Args: 
+        write: 
+            A function to write the xml to its destination. 
+        elem: 
+            The element to serialize. 
+        nsmap_scope: 
+            The current prefix to uri mapping for this element. This should be 
+            an empty dictionary for the root element. Additional namespaces are 
+            progressively added using the new_nsmap arg. 
+        global_nsmap: 
+            A dict copy of the globally registered _namespace_map in uri to 
+            prefix form 
+        short_empty_elements: 
+          Controls the formatting of elements that contain no content. If True 
+          (default) they are emitted as a single self-closed tag, otherwise 
+          they are emitted as a pair of start/end tags. 
+        is_html: 
+            Set to True to serialize as HTML otherwise XML. 
+        is_root: 
+            Boolean indicating if this is a root element. 
+        uri_to_prefix: 
+            Current state of the mapping of uri to prefix. 
+        default_ns_attr_prefix: 
+        new_nsmap: 
+            New prefix -&gt; uri mapping to be applied to this element. 
+    &quot;&quot;&quot;</span>
+    <span class="s3">(</span>
+        <span class="s1">tag</span><span class="s3">,</span>
+        <span class="s1">nsmap_scope</span><span class="s3">,</span>
+        <span class="s1">default_ns_attr_prefix</span><span class="s3">,</span>
+        <span class="s1">uri_to_prefix</span><span class="s3">,</span>
+        <span class="s1">next_remains_root</span><span class="s3">,</span>
+    <span class="s3">) = </span><span class="s1">write_elem_start</span><span class="s3">(</span>
+        <span class="s1">write</span><span class="s3">,</span>
+        <span class="s1">elem</span><span class="s3">,</span>
+        <span class="s1">nsmap_scope</span><span class="s3">,</span>
+        <span class="s1">global_nsmap</span><span class="s3">,</span>
+        <span class="s1">short_empty_elements</span><span class="s3">,</span>
+        <span class="s1">is_html</span><span class="s3">,</span>
+        <span class="s1">is_root</span><span class="s3">,</span>
+        <span class="s1">uri_to_prefix</span><span class="s3">,</span>
+        <span class="s1">default_ns_attr_prefix</span><span class="s3">,</span>
+        <span class="s1">new_nsmap</span><span class="s3">=</span><span class="s1">new_nsmap</span><span class="s3">,</span>
+    <span class="s3">)</span>
+    <span class="s2">for </span><span class="s1">e </span><span class="s2">in </span><span class="s1">elem</span><span class="s3">:</span>
+        <span class="s1">_serialize_ns_xml</span><span class="s3">(</span>
+            <span class="s1">write</span><span class="s3">,</span>
+            <span class="s1">e</span><span class="s3">,</span>
+            <span class="s1">nsmap_scope</span><span class="s3">,</span>
+            <span class="s1">global_nsmap</span><span class="s3">,</span>
+            <span class="s1">short_empty_elements</span><span class="s3">,</span>
+            <span class="s1">is_html</span><span class="s3">,</span>
+            <span class="s1">next_remains_root</span><span class="s3">,</span>
+            <span class="s1">uri_to_prefix</span><span class="s3">,</span>
+            <span class="s1">default_ns_attr_prefix</span><span class="s3">,</span>
+            <span class="s1">new_nsmap</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">tag</span><span class="s3">:</span>
+        <span class="s1">write</span><span class="s3">(</span><span class="s5">f&quot;&lt;/</span><span class="s2">{</span><span class="s1">tag</span><span class="s2">}</span><span class="s5">&gt;&quot;</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">elem</span><span class="s3">.</span><span class="s1">tail</span><span class="s3">:</span>
+        <span class="s1">write</span><span class="s3">(</span><span class="s1">ET</span><span class="s3">.</span><span class="s1">_escape_cdata</span><span class="s3">(</span><span class="s1">elem</span><span class="s3">.</span><span class="s1">tail</span><span class="s3">))</span>
+
+
+<span class="s2">def </span><span class="s1">_qnames_iter</span><span class="s3">(</span><span class="s1">elem</span><span class="s3">):</span>
+    <span class="s4">&quot;&quot;&quot;Iterate through all the qualified names in elem&quot;&quot;&quot;</span>
+    <span class="s1">seen_el_qnames </span><span class="s3">= </span><span class="s1">set</span><span class="s3">()</span>
+    <span class="s1">seen_other_qnames </span><span class="s3">= </span><span class="s1">set</span><span class="s3">()</span>
+    <span class="s2">for </span><span class="s1">this_elem </span><span class="s2">in </span><span class="s1">elem</span><span class="s3">.</span><span class="s1">iter</span><span class="s3">():</span>
+        <span class="s1">tag </span><span class="s3">= </span><span class="s1">this_elem</span><span class="s3">.</span><span class="s1">tag</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">tag</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">tag </span><span class="s2">not in </span><span class="s1">seen_el_qnames</span><span class="s3">:</span>
+                <span class="s1">seen_el_qnames</span><span class="s3">.</span><span class="s1">add</span><span class="s3">(</span><span class="s1">tag</span><span class="s3">)</span>
+                <span class="s2">yield </span><span class="s1">tag</span><span class="s3">, </span><span class="s2">True</span>
+        <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">tag</span><span class="s3">, </span><span class="s1">ET</span><span class="s3">.</span><span class="s1">QName</span><span class="s3">):</span>
+            <span class="s1">tag </span><span class="s3">= </span><span class="s1">tag</span><span class="s3">.</span><span class="s1">text</span>
+            <span class="s2">if </span><span class="s1">tag </span><span class="s2">not in </span><span class="s1">seen_el_qnames</span><span class="s3">:</span>
+                <span class="s1">seen_el_qnames</span><span class="s3">.</span><span class="s1">add</span><span class="s3">(</span><span class="s1">tag</span><span class="s3">)</span>
+                <span class="s2">yield </span><span class="s1">tag</span><span class="s3">, </span><span class="s2">True</span>
+        <span class="s2">elif </span><span class="s3">(</span>
+            <span class="s1">tag </span><span class="s2">is not None</span>
+            <span class="s2">and </span><span class="s1">tag </span><span class="s2">is not </span><span class="s1">ET</span><span class="s3">.</span><span class="s1">ProcessingInstruction</span>
+            <span class="s2">and </span><span class="s1">tag </span><span class="s2">is not </span><span class="s1">ET</span><span class="s3">.</span><span class="s1">Comment</span>
+        <span class="s3">):</span>
+            <span class="s1">ET</span><span class="s3">.</span><span class="s1">_raise_serialization_error</span><span class="s3">(</span><span class="s1">tag</span><span class="s3">)</span>
+
+        <span class="s2">for </span><span class="s1">key</span><span class="s3">, </span><span class="s1">value </span><span class="s2">in </span><span class="s1">this_elem</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s1">ET</span><span class="s3">.</span><span class="s1">QName</span><span class="s3">):</span>
+                <span class="s1">key </span><span class="s3">= </span><span class="s1">key</span><span class="s3">.</span><span class="s1">text</span>
+            <span class="s2">if </span><span class="s1">key </span><span class="s2">not in </span><span class="s1">seen_other_qnames</span><span class="s3">:</span>
+                <span class="s1">seen_other_qnames</span><span class="s3">.</span><span class="s1">add</span><span class="s3">(</span><span class="s1">key</span><span class="s3">)</span>
+                <span class="s2">yield </span><span class="s1">key</span><span class="s3">, </span><span class="s2">False</span>
+
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">value</span><span class="s3">, </span><span class="s1">ET</span><span class="s3">.</span><span class="s1">QName</span><span class="s3">):</span>
+                <span class="s2">if </span><span class="s1">value</span><span class="s3">.</span><span class="s1">text </span><span class="s2">not in </span><span class="s1">seen_other_qnames</span><span class="s3">:</span>
+                    <span class="s1">seen_other_qnames</span><span class="s3">.</span><span class="s1">add</span><span class="s3">(</span><span class="s1">value</span><span class="s3">.</span><span class="s1">text</span><span class="s3">)</span>
+                    <span class="s2">yield </span><span class="s1">value</span><span class="s3">.</span><span class="s1">text</span><span class="s3">, </span><span class="s2">False</span>
+
+        <span class="s1">text </span><span class="s3">= </span><span class="s1">this_elem</span><span class="s3">.</span><span class="s1">text</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">text</span><span class="s3">, </span><span class="s1">ET</span><span class="s3">.</span><span class="s1">QName</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">text</span><span class="s3">.</span><span class="s1">text </span><span class="s2">not in </span><span class="s1">seen_other_qnames</span><span class="s3">:</span>
+                <span class="s1">seen_other_qnames</span><span class="s3">.</span><span class="s1">add</span><span class="s3">(</span><span class="s1">text</span><span class="s3">.</span><span class="s1">text</span><span class="s3">)</span>
+                <span class="s2">yield </span><span class="s1">text</span><span class="s3">.</span><span class="s1">text</span><span class="s3">, </span><span class="s2">False</span>
+
+
+<span class="s2">def </span><span class="s1">_namespaces</span><span class="s3">(</span>
+    <span class="s1">elem</span><span class="s3">,</span>
+    <span class="s1">default_namespace</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">nsmap</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s4">&quot;&quot;&quot;Find all namespaces used in the document and return a prefix to uri map&quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">nsmap </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">nsmap </span><span class="s3">= {}</span>
+
+    <span class="s1">out_nsmap </span><span class="s3">= {}</span>
+
+    <span class="s1">seen_uri_to_prefix </span><span class="s3">= {}</span>
+    <span class="s0"># Multiple prefixes may be present for a single uri. This will select the</span>
+    <span class="s0"># last prefix found in nsmap for a given uri.</span>
+    <span class="s1">local_prefix_map </span><span class="s3">= {</span><span class="s1">uri</span><span class="s3">: </span><span class="s1">prefix </span><span class="s2">for </span><span class="s1">prefix</span><span class="s3">, </span><span class="s1">uri </span><span class="s2">in </span><span class="s1">nsmap</span><span class="s3">.</span><span class="s1">items</span><span class="s3">()}</span>
+    <span class="s2">if </span><span class="s1">default_namespace </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s1">local_prefix_map</span><span class="s3">[</span><span class="s1">default_namespace</span><span class="s3">] = </span><span class="s5">&quot;&quot;</span>
+    <span class="s2">elif </span><span class="s5">&quot;&quot; </span><span class="s2">in </span><span class="s1">nsmap</span><span class="s3">:</span>
+        <span class="s0"># but we make sure the default prefix always take precedence</span>
+        <span class="s1">local_prefix_map</span><span class="s3">[</span><span class="s1">nsmap</span><span class="s3">[</span><span class="s5">&quot;&quot;</span><span class="s3">]] = </span><span class="s5">&quot;&quot;</span>
+
+    <span class="s1">global_prefixes </span><span class="s3">= </span><span class="s1">set</span><span class="s3">(</span><span class="s1">ET</span><span class="s3">.</span><span class="s1">_namespace_map</span><span class="s3">.</span><span class="s1">values</span><span class="s3">())</span>
+    <span class="s1">has_unqual_el </span><span class="s3">= </span><span class="s2">False</span>
+    <span class="s1">default_namespace_attr_prefix </span><span class="s3">= </span><span class="s2">None</span>
+    <span class="s2">for </span><span class="s1">qname</span><span class="s3">, </span><span class="s1">is_el </span><span class="s2">in </span><span class="s1">_qnames_iter</span><span class="s3">(</span><span class="s1">elem</span><span class="s3">):</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">qname</span><span class="s3">[:</span><span class="s6">1</span><span class="s3">] == </span><span class="s5">&quot;{&quot;</span><span class="s3">:</span>
+                <span class="s1">uri_and_name </span><span class="s3">= </span><span class="s1">qname</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:].</span><span class="s1">rsplit</span><span class="s3">(</span><span class="s5">&quot;}&quot;</span><span class="s3">, </span><span class="s6">1</span><span class="s3">)</span>
+
+                <span class="s1">prefix </span><span class="s3">= </span><span class="s1">seen_uri_to_prefix</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">uri_and_name</span><span class="s3">[</span><span class="s6">0</span><span class="s3">])</span>
+                <span class="s2">if </span><span class="s1">prefix </span><span class="s2">is None</span><span class="s3">:</span>
+                    <span class="s1">prefix </span><span class="s3">= </span><span class="s1">local_prefix_map</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">uri_and_name</span><span class="s3">[</span><span class="s6">0</span><span class="s3">])</span>
+                    <span class="s2">if </span><span class="s1">prefix </span><span class="s2">is None or </span><span class="s1">prefix </span><span class="s2">in </span><span class="s1">out_nsmap</span><span class="s3">:</span>
+                        <span class="s1">prefix </span><span class="s3">= </span><span class="s1">ET</span><span class="s3">.</span><span class="s1">_namespace_map</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">uri_and_name</span><span class="s3">[</span><span class="s6">0</span><span class="s3">])</span>
+                        <span class="s2">if </span><span class="s1">prefix </span><span class="s2">is None or </span><span class="s1">prefix </span><span class="s2">in </span><span class="s1">out_nsmap</span><span class="s3">:</span>
+                            <span class="s1">prefix </span><span class="s3">= </span><span class="s1">_make_new_ns_prefix</span><span class="s3">(</span>
+                                <span class="s1">out_nsmap</span><span class="s3">,</span>
+                                <span class="s1">global_prefixes</span><span class="s3">,</span>
+                                <span class="s1">nsmap</span><span class="s3">,</span>
+                                <span class="s1">default_namespace</span><span class="s3">,</span>
+                            <span class="s3">)</span>
+                    <span class="s2">if </span><span class="s1">prefix </span><span class="s2">or </span><span class="s1">is_el</span><span class="s3">:</span>
+                        <span class="s1">out_nsmap</span><span class="s3">[</span><span class="s1">prefix</span><span class="s3">] = </span><span class="s1">uri_and_name</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]</span>
+                        <span class="s1">seen_uri_to_prefix</span><span class="s3">[</span><span class="s1">uri_and_name</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]] = </span><span class="s1">prefix</span>
+
+                <span class="s2">if not </span><span class="s1">is_el </span><span class="s2">and not </span><span class="s1">prefix </span><span class="s2">and not </span><span class="s1">default_namespace_attr_prefix</span><span class="s3">:</span>
+                    <span class="s0"># Find the alternative prefix to use with non-element</span>
+                    <span class="s0"># names</span>
+                    <span class="s1">default_namespace_attr_prefix </span><span class="s3">= </span><span class="s1">_find_default_namespace_attr_prefix</span><span class="s3">(</span>
+                        <span class="s1">uri_and_name</span><span class="s3">[</span><span class="s6">0</span><span class="s3">],</span>
+                        <span class="s1">out_nsmap</span><span class="s3">,</span>
+                        <span class="s1">nsmap</span><span class="s3">,</span>
+                        <span class="s1">global_prefixes</span><span class="s3">,</span>
+                        <span class="s1">default_namespace</span><span class="s3">,</span>
+                    <span class="s3">)</span>
+                    <span class="s1">out_nsmap</span><span class="s3">[</span><span class="s1">default_namespace_attr_prefix</span><span class="s3">] = </span><span class="s1">uri_and_name</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]</span>
+                    <span class="s0"># Don't add this uri to prefix mapping as it might override</span>
+                    <span class="s0"># the uri -&gt; &quot;&quot; default mapping. We'll fix this up at the</span>
+                    <span class="s0"># end of the fn.</span>
+                    <span class="s0"># local_prefix_map[uri_and_name[0]] = default_namespace_attr_prefix</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">is_el</span><span class="s3">:</span>
+                    <span class="s1">has_unqual_el </span><span class="s3">= </span><span class="s2">True</span>
+        <span class="s2">except </span><span class="s1">TypeError</span><span class="s3">:</span>
+            <span class="s1">ET</span><span class="s3">.</span><span class="s1">_raise_serialization_error</span><span class="s3">(</span><span class="s1">qname</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s5">&quot;&quot; </span><span class="s2">in </span><span class="s1">out_nsmap </span><span class="s2">and </span><span class="s1">has_unqual_el</span><span class="s3">:</span>
+        <span class="s0"># FIXME: can this be handled in XML 1.0?</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+            <span class="s5">&quot;cannot use non-qualified names with default_namespace option&quot;</span>
+        <span class="s3">)</span>
+
+    <span class="s0"># The xml prefix doesn't need to be declared but may have been used to</span>
+    <span class="s0"># prefix names. Let's remove it if it has been used</span>
+    <span class="s1">out_nsmap</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">(</span><span class="s5">&quot;xml&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">out_nsmap</span>
+
+
+<span class="s2">def </span><span class="s1">tostring</span><span class="s3">(</span>
+    <span class="s1">element</span><span class="s3">,</span>
+    <span class="s1">encoding</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">method</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">*,</span>
+    <span class="s1">xml_declaration</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">default_namespace</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">short_empty_elements</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">nsmap</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">root_ns_only</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+    <span class="s1">minimal_ns_only</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+    <span class="s1">tree_cls</span><span class="s3">=</span><span class="s1">IncrementalTree</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s4">&quot;&quot;&quot;Generate string representation of XML element. 
+ 
+    All subelements are included.  If encoding is &quot;unicode&quot;, a string 
+    is returned. Otherwise a bytestring is returned. 
+ 
+    *element* is an Element instance, *encoding* is an optional output 
+    encoding defaulting to US-ASCII, *method* is an optional output which can 
+    be one of &quot;xml&quot; (default), &quot;html&quot;, &quot;text&quot; or &quot;c14n&quot;, *default_namespace* 
+    sets the default XML namespace (for &quot;xmlns&quot;). 
+ 
+    Returns an (optionally) encoded string containing the XML data. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">stream </span><span class="s3">= </span><span class="s1">io</span><span class="s3">.</span><span class="s1">StringIO</span><span class="s3">() </span><span class="s2">if </span><span class="s1">encoding </span><span class="s3">== </span><span class="s5">&quot;unicode&quot; </span><span class="s2">else </span><span class="s1">io</span><span class="s3">.</span><span class="s1">BytesIO</span><span class="s3">()</span>
+    <span class="s1">tree_cls</span><span class="s3">(</span><span class="s1">element</span><span class="s3">).</span><span class="s1">write</span><span class="s3">(</span>
+        <span class="s1">stream</span><span class="s3">,</span>
+        <span class="s1">encoding</span><span class="s3">,</span>
+        <span class="s1">xml_declaration</span><span class="s3">=</span><span class="s1">xml_declaration</span><span class="s3">,</span>
+        <span class="s1">default_namespace</span><span class="s3">=</span><span class="s1">default_namespace</span><span class="s3">,</span>
+        <span class="s1">method</span><span class="s3">=</span><span class="s1">method</span><span class="s3">,</span>
+        <span class="s1">short_empty_elements</span><span class="s3">=</span><span class="s1">short_empty_elements</span><span class="s3">,</span>
+        <span class="s1">nsmap</span><span class="s3">=</span><span class="s1">nsmap</span><span class="s3">,</span>
+        <span class="s1">root_ns_only</span><span class="s3">=</span><span class="s1">root_ns_only</span><span class="s3">,</span>
+        <span class="s1">minimal_ns_only</span><span class="s3">=</span><span class="s1">minimal_ns_only</span><span class="s3">,</span>
+    <span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">getvalue</span><span class="s3">()</span>
+
+
+<span class="s2">def </span><span class="s1">tostringlist</span><span class="s3">(</span>
+    <span class="s1">element</span><span class="s3">,</span>
+    <span class="s1">encoding</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">method</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">*,</span>
+    <span class="s1">xml_declaration</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">default_namespace</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">short_empty_elements</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">nsmap</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">root_ns_only</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+    <span class="s1">minimal_ns_only</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+    <span class="s1">tree_cls</span><span class="s3">=</span><span class="s1">IncrementalTree</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s1">lst </span><span class="s3">= []</span>
+    <span class="s1">stream </span><span class="s3">= </span><span class="s1">ET</span><span class="s3">.</span><span class="s1">_ListDataStream</span><span class="s3">(</span><span class="s1">lst</span><span class="s3">)</span>
+    <span class="s1">tree_cls</span><span class="s3">(</span><span class="s1">element</span><span class="s3">).</span><span class="s1">write</span><span class="s3">(</span>
+        <span class="s1">stream</span><span class="s3">,</span>
+        <span class="s1">encoding</span><span class="s3">,</span>
+        <span class="s1">xml_declaration</span><span class="s3">=</span><span class="s1">xml_declaration</span><span class="s3">,</span>
+        <span class="s1">default_namespace</span><span class="s3">=</span><span class="s1">default_namespace</span><span class="s3">,</span>
+        <span class="s1">method</span><span class="s3">=</span><span class="s1">method</span><span class="s3">,</span>
+        <span class="s1">short_empty_elements</span><span class="s3">=</span><span class="s1">short_empty_elements</span><span class="s3">,</span>
+        <span class="s1">nsmap</span><span class="s3">=</span><span class="s1">nsmap</span><span class="s3">,</span>
+        <span class="s1">root_ns_only</span><span class="s3">=</span><span class="s1">root_ns_only</span><span class="s3">,</span>
+        <span class="s1">minimal_ns_only</span><span class="s3">=</span><span class="s1">minimal_ns_only</span><span class="s3">,</span>
+    <span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">lst</span>
+
+
+<span class="s2">def </span><span class="s1">compat_tostring</span><span class="s3">(</span>
+    <span class="s1">element</span><span class="s3">,</span>
+    <span class="s1">encoding</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">method</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">*,</span>
+    <span class="s1">xml_declaration</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">default_namespace</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">short_empty_elements</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">nsmap</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">root_ns_only</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">minimal_ns_only</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+    <span class="s1">tree_cls</span><span class="s3">=</span><span class="s1">IncrementalTree</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s4">&quot;&quot;&quot;tostring with options that produce the same results as xml.etree.ElementTree.tostring 
+ 
+    root_ns_only=True is a bit slower than False as it needs to traverse the 
+    tree one more time to collect all the namespaces. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">return </span><span class="s1">tostring</span><span class="s3">(</span>
+        <span class="s1">element</span><span class="s3">,</span>
+        <span class="s1">encoding</span><span class="s3">=</span><span class="s1">encoding</span><span class="s3">,</span>
+        <span class="s1">method</span><span class="s3">=</span><span class="s1">method</span><span class="s3">,</span>
+        <span class="s1">xml_declaration</span><span class="s3">=</span><span class="s1">xml_declaration</span><span class="s3">,</span>
+        <span class="s1">default_namespace</span><span class="s3">=</span><span class="s1">default_namespace</span><span class="s3">,</span>
+        <span class="s1">short_empty_elements</span><span class="s3">=</span><span class="s1">short_empty_elements</span><span class="s3">,</span>
+        <span class="s1">nsmap</span><span class="s3">=</span><span class="s1">nsmap</span><span class="s3">,</span>
+        <span class="s1">root_ns_only</span><span class="s3">=</span><span class="s1">root_ns_only</span><span class="s3">,</span>
+        <span class="s1">minimal_ns_only</span><span class="s3">=</span><span class="s1">minimal_ns_only</span><span class="s3">,</span>
+        <span class="s1">tree_cls</span><span class="s3">=</span><span class="s1">tree_cls</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+
+<span class="s0"># --------------------------------------------------------------------</span>
+<span class="s0"># serialization support</span>
+
+<span class="s3">@</span><span class="s1">contextlib</span><span class="s3">.</span><span class="s1">contextmanager</span>
+<span class="s2">def </span><span class="s1">_get_writer</span><span class="s3">(</span><span class="s1">file_or_filename</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">):</span>
+    <span class="s0"># Copied from Python 3.12</span>
+    <span class="s0"># returns text write method and release all resources after using</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s1">write </span><span class="s3">= </span><span class="s1">file_or_filename</span><span class="s3">.</span><span class="s1">write</span>
+    <span class="s2">except </span><span class="s1">AttributeError</span><span class="s3">:</span>
+        <span class="s0"># file_or_filename is a file name</span>
+        <span class="s2">if </span><span class="s1">encoding</span><span class="s3">.</span><span class="s1">lower</span><span class="s3">() == </span><span class="s5">&quot;unicode&quot;</span><span class="s3">:</span>
+            <span class="s1">encoding </span><span class="s3">= </span><span class="s5">&quot;utf-8&quot;</span>
+        <span class="s2">with </span><span class="s1">open</span><span class="s3">(</span><span class="s1">file_or_filename</span><span class="s3">, </span><span class="s5">&quot;w&quot;</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">=</span><span class="s1">encoding</span><span class="s3">,</span>
+                  <span class="s1">errors</span><span class="s3">=</span><span class="s5">&quot;xmlcharrefreplace&quot;</span><span class="s3">) </span><span class="s2">as </span><span class="s1">file</span><span class="s3">:</span>
+            <span class="s2">yield </span><span class="s1">file</span><span class="s3">.</span><span class="s1">write</span><span class="s3">, </span><span class="s1">encoding</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s0"># file_or_filename is a file-like object</span>
+        <span class="s0"># encoding determines if it is a text or binary writer</span>
+        <span class="s2">if </span><span class="s1">encoding</span><span class="s3">.</span><span class="s1">lower</span><span class="s3">() == </span><span class="s5">&quot;unicode&quot;</span><span class="s3">:</span>
+            <span class="s0"># use a text writer as is</span>
+            <span class="s2">yield </span><span class="s1">write</span><span class="s3">, </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">file_or_filename</span><span class="s3">, </span><span class="s5">&quot;encoding&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">) </span><span class="s2">or </span><span class="s5">&quot;utf-8&quot;</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s0"># wrap a binary writer with TextIOWrapper</span>
+            <span class="s2">with </span><span class="s1">contextlib</span><span class="s3">.</span><span class="s1">ExitStack</span><span class="s3">() </span><span class="s2">as </span><span class="s1">stack</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">file_or_filename</span><span class="s3">, </span><span class="s1">io</span><span class="s3">.</span><span class="s1">BufferedIOBase</span><span class="s3">):</span>
+                    <span class="s1">file </span><span class="s3">= </span><span class="s1">file_or_filename</span>
+                <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">file_or_filename</span><span class="s3">, </span><span class="s1">io</span><span class="s3">.</span><span class="s1">RawIOBase</span><span class="s3">):</span>
+                    <span class="s1">file </span><span class="s3">= </span><span class="s1">io</span><span class="s3">.</span><span class="s1">BufferedWriter</span><span class="s3">(</span><span class="s1">file_or_filename</span><span class="s3">)</span>
+                    <span class="s0"># Keep the original file open when the BufferedWriter is</span>
+                    <span class="s0"># destroyed</span>
+                    <span class="s1">stack</span><span class="s3">.</span><span class="s1">callback</span><span class="s3">(</span><span class="s1">file</span><span class="s3">.</span><span class="s1">detach</span><span class="s3">)</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s0"># This is to handle passed objects that aren't in the</span>
+                    <span class="s0"># IOBase hierarchy, but just have a write method</span>
+                    <span class="s1">file </span><span class="s3">= </span><span class="s1">io</span><span class="s3">.</span><span class="s1">BufferedIOBase</span><span class="s3">()</span>
+                    <span class="s1">file</span><span class="s3">.</span><span class="s1">writable </span><span class="s3">= </span><span class="s2">lambda</span><span class="s3">: </span><span class="s2">True</span>
+                    <span class="s1">file</span><span class="s3">.</span><span class="s1">write </span><span class="s3">= </span><span class="s1">write</span>
+                    <span class="s2">try</span><span class="s3">:</span>
+                        <span class="s0"># TextIOWrapper uses this methods to determine</span>
+                        <span class="s0"># if BOM (for UTF-16, etc) should be added</span>
+                        <span class="s1">file</span><span class="s3">.</span><span class="s1">seekable </span><span class="s3">= </span><span class="s1">file_or_filename</span><span class="s3">.</span><span class="s1">seekable</span>
+                        <span class="s1">file</span><span class="s3">.</span><span class="s1">tell </span><span class="s3">= </span><span class="s1">file_or_filename</span><span class="s3">.</span><span class="s1">tell</span>
+                    <span class="s2">except </span><span class="s1">AttributeError</span><span class="s3">:</span>
+                        <span class="s2">pass</span>
+                <span class="s1">file </span><span class="s3">= </span><span class="s1">io</span><span class="s3">.</span><span class="s1">TextIOWrapper</span><span class="s3">(</span><span class="s1">file</span><span class="s3">,</span>
+                                        <span class="s1">encoding</span><span class="s3">=</span><span class="s1">encoding</span><span class="s3">,</span>
+                                        <span class="s1">errors</span><span class="s3">=</span><span class="s5">&quot;xmlcharrefreplace&quot;</span><span class="s3">,</span>
+                                        <span class="s1">newline</span><span class="s3">=</span><span class="s5">&quot;</span><span class="s2">\n</span><span class="s5">&quot;</span><span class="s3">)</span>
+                <span class="s0"># Keep the original file open when the TextIOWrapper is</span>
+                <span class="s0"># destroyed</span>
+                <span class="s1">stack</span><span class="s3">.</span><span class="s1">callback</span><span class="s3">(</span><span class="s1">file</span><span class="s3">.</span><span class="s1">detach</span><span class="s3">)</span>
+                <span class="s2">yield </span><span class="s1">file</span><span class="s3">.</span><span class="s1">write</span><span class="s3">, </span><span class="s1">encoding</span>
+</pre>
+</body>
+</html>

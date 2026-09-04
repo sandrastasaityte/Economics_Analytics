@@ -1,0 +1,1069 @@
+<html>
+<head>
+<title>test_ujson.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #5f826b; font-style: italic;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+.s7 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_ujson.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">calendar</span>
+<span class="s0">import </span><span class="s1">datetime</span>
+<span class="s0">import </span><span class="s1">decimal</span>
+<span class="s0">import </span><span class="s1">json</span>
+<span class="s0">import </span><span class="s1">locale</span>
+<span class="s0">import </span><span class="s1">math</span>
+<span class="s0">import </span><span class="s1">re</span>
+<span class="s0">import </span><span class="s1">time</span>
+
+<span class="s0">import </span><span class="s1">dateutil</span>
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">import </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_libs</span><span class="s2">.</span><span class="s1">json </span><span class="s0">as </span><span class="s1">ujson</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">compat </span><span class="s0">import </span><span class="s1">IS64</span>
+
+<span class="s0">from </span><span class="s1">pandas </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">DataFrame</span><span class="s2">,</span>
+    <span class="s1">DatetimeIndex</span><span class="s2">,</span>
+    <span class="s1">Index</span><span class="s2">,</span>
+    <span class="s1">NaT</span><span class="s2">,</span>
+    <span class="s1">PeriodIndex</span><span class="s2">,</span>
+    <span class="s1">Series</span><span class="s2">,</span>
+    <span class="s1">Timedelta</span><span class="s2">,</span>
+    <span class="s1">Timestamp</span><span class="s2">,</span>
+    <span class="s1">date_range</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">import </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_testing </span><span class="s0">as </span><span class="s1">tm</span>
+
+
+<span class="s0">def </span><span class="s1">_clean_dict</span><span class="s2">(</span><span class="s1">d</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Sanitize dictionary for JSON by converting all keys to strings. 
+ 
+    Parameters 
+    ---------- 
+    d : dict 
+        The dictionary to convert. 
+ 
+    Returns 
+    ------- 
+    cleaned_dict : dict 
+    &quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s2">{</span><span class="s1">str</span><span class="s2">(</span><span class="s1">k</span><span class="s2">): </span><span class="s1">v </span><span class="s0">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">v </span><span class="s0">in </span><span class="s1">d</span><span class="s2">.</span><span class="s1">items</span><span class="s2">()}</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">fixture</span><span class="s2">(</span>
+    <span class="s1">params</span><span class="s2">=[</span><span class="s0">None</span><span class="s2">, </span><span class="s4">&quot;split&quot;</span><span class="s2">, </span><span class="s4">&quot;records&quot;</span><span class="s2">, </span><span class="s4">&quot;values&quot;</span><span class="s2">, </span><span class="s4">&quot;index&quot;</span><span class="s2">]  </span><span class="s5"># Column indexed by default.</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">orient</span><span class="s2">(</span><span class="s1">request</span><span class="s2">):</span>
+    <span class="s0">return </span><span class="s1">request</span><span class="s2">.</span><span class="s1">param</span>
+
+
+<span class="s0">class </span><span class="s1">TestUltraJSONTests</span><span class="s2">:</span>
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span><span class="s0">not </span><span class="s1">IS64</span><span class="s2">, </span><span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;not compliant on 32-bit, xref #15865&quot;</span><span class="s2">)</span>
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+        <span class="s4">&quot;value, double_precision&quot;</span><span class="s2">,</span>
+        <span class="s2">[</span>
+            <span class="s2">(</span><span class="s4">&quot;1337.1337&quot;</span><span class="s2">, </span><span class="s6">15</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">&quot;0.95&quot;</span><span class="s2">, </span><span class="s6">1</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">&quot;0.94&quot;</span><span class="s2">, </span><span class="s6">1</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">&quot;1.95&quot;</span><span class="s2">, </span><span class="s6">1</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">&quot;-1.95&quot;</span><span class="s2">, </span><span class="s6">1</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">&quot;0.995&quot;</span><span class="s2">, </span><span class="s6">2</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">&quot;0.9995&quot;</span><span class="s2">, </span><span class="s6">3</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">&quot;0.99999999999999944&quot;</span><span class="s2">, </span><span class="s6">15</span><span class="s2">),</span>
+        <span class="s2">],</span>
+    <span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_encode_decimal</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">, </span><span class="s1">double_precision</span><span class="s2">):</span>
+        <span class="s1">sut </span><span class="s2">= </span><span class="s1">decimal</span><span class="s2">.</span><span class="s1">Decimal</span><span class="s2">(</span><span class="s1">value</span><span class="s2">)</span>
+        <span class="s1">encoded </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">sut</span><span class="s2">, </span><span class="s1">double_precision</span><span class="s2">=</span><span class="s1">double_precision</span><span class="s2">)</span>
+        <span class="s1">decoded </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">encoded</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">decoded </span><span class="s2">== </span><span class="s1">value</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;ensure_ascii&quot;</span><span class="s2">, [</span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_encode_string_conversion</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">ensure_ascii</span><span class="s2">):</span>
+        <span class="s1">string_input </span><span class="s2">= </span><span class="s4">&quot;A string </span><span class="s0">\\ </span><span class="s4">/ </span><span class="s0">\b \f \n \r \t </span><span class="s4">&lt;/script&gt; &amp;&quot;</span>
+        <span class="s1">not_html_encoded </span><span class="s2">= </span><span class="s4">'&quot;A string </span><span class="s0">\\\\ \\</span><span class="s4">/ </span><span class="s0">\\</span><span class="s4">b </span><span class="s0">\\</span><span class="s4">f </span><span class="s0">\\</span><span class="s4">n </span><span class="s0">\\</span><span class="s4">r </span><span class="s0">\\</span><span class="s4">t &lt;</span><span class="s0">\\</span><span class="s4">/script&gt; &amp;&quot;'</span>
+        <span class="s1">html_encoded </span><span class="s2">= (</span>
+            <span class="s4">'&quot;A string </span><span class="s0">\\\\ \\</span><span class="s4">/ </span><span class="s0">\\</span><span class="s4">b </span><span class="s0">\\</span><span class="s4">f </span><span class="s0">\\</span><span class="s4">n </span><span class="s0">\\</span><span class="s4">r </span><span class="s0">\\</span><span class="s4">t </span><span class="s0">\\</span><span class="s4">u003c</span><span class="s0">\\</span><span class="s4">/script</span><span class="s0">\\</span><span class="s4">u003e </span><span class="s0">\\</span><span class="s4">u0026&quot;'</span>
+        <span class="s2">)</span>
+
+        <span class="s0">def </span><span class="s1">helper</span><span class="s2">(</span><span class="s1">expected_output</span><span class="s2">, **</span><span class="s1">encode_kwargs</span><span class="s2">):</span>
+            <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span>
+                <span class="s1">string_input</span><span class="s2">, </span><span class="s1">ensure_ascii</span><span class="s2">=</span><span class="s1">ensure_ascii</span><span class="s2">, **</span><span class="s1">encode_kwargs</span>
+            <span class="s2">)</span>
+
+            <span class="s0">assert </span><span class="s1">output </span><span class="s2">== </span><span class="s1">expected_output</span>
+            <span class="s0">assert </span><span class="s1">string_input </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+            <span class="s0">assert </span><span class="s1">string_input </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+
+        <span class="s5"># Default behavior assumes encode_html_chars=False.</span>
+        <span class="s1">helper</span><span class="s2">(</span><span class="s1">not_html_encoded</span><span class="s2">)</span>
+
+        <span class="s5"># Make sure explicit encode_html_chars=False works.</span>
+        <span class="s1">helper</span><span class="s2">(</span><span class="s1">not_html_encoded</span><span class="s2">, </span><span class="s1">encode_html_chars</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+
+        <span class="s5"># Make sure explicit encode_html_chars=True does the encoding.</span>
+        <span class="s1">helper</span><span class="s2">(</span><span class="s1">html_encoded</span><span class="s2">, </span><span class="s1">encode_html_chars</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+        <span class="s4">&quot;long_number&quot;</span><span class="s2">, [-</span><span class="s6">4342969734183514</span><span class="s2">, -</span><span class="s6">12345678901234.56789012</span><span class="s2">, -</span><span class="s6">528656961.4399388</span><span class="s2">]</span>
+    <span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_double_long_numbers</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">long_number</span><span class="s2">):</span>
+        <span class="s1">sut </span><span class="s2">= {</span><span class="s4">&quot;a&quot;</span><span class="s2">: </span><span class="s1">long_number</span><span class="s2">}</span>
+        <span class="s1">encoded </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">sut</span><span class="s2">, </span><span class="s1">double_precision</span><span class="s2">=</span><span class="s6">15</span><span class="s2">)</span>
+
+        <span class="s1">decoded </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">encoded</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">sut </span><span class="s2">== </span><span class="s1">decoded</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_non_c_locale</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">lc_category </span><span class="s2">= </span><span class="s1">locale</span><span class="s2">.</span><span class="s1">LC_NUMERIC</span>
+
+        <span class="s5"># We just need one of these locales to work.</span>
+        <span class="s0">for </span><span class="s1">new_locale </span><span class="s0">in </span><span class="s2">(</span><span class="s4">&quot;it_IT.UTF-8&quot;</span><span class="s2">, </span><span class="s4">&quot;Italian_Italy&quot;</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s1">tm</span><span class="s2">.</span><span class="s1">can_set_locale</span><span class="s2">(</span><span class="s1">new_locale</span><span class="s2">, </span><span class="s1">lc_category</span><span class="s2">):</span>
+                <span class="s0">with </span><span class="s1">tm</span><span class="s2">.</span><span class="s1">set_locale</span><span class="s2">(</span><span class="s1">new_locale</span><span class="s2">, </span><span class="s1">lc_category</span><span class="s2">):</span>
+                    <span class="s0">assert </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s6">4.78e60</span><span class="s2">)) == </span><span class="s6">4.78e60</span>
+                    <span class="s0">assert </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s4">&quot;4.78&quot;</span><span class="s2">, </span><span class="s1">precise_float</span><span class="s2">=</span><span class="s0">True</span><span class="s2">) == </span><span class="s6">4.78</span>
+                <span class="s0">break</span>
+
+    <span class="s0">def </span><span class="s1">test_decimal_decode_test_precise</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">sut </span><span class="s2">= {</span><span class="s4">&quot;a&quot;</span><span class="s2">: </span><span class="s6">4.56</span><span class="s2">}</span>
+        <span class="s1">encoded </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">sut</span><span class="s2">)</span>
+        <span class="s1">decoded </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">encoded</span><span class="s2">, </span><span class="s1">precise_float</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">sut </span><span class="s2">== </span><span class="s1">decoded</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_double_tiny_exponential</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">num </span><span class="s2">= </span><span class="s6">1e-40</span>
+        <span class="s0">assert </span><span class="s1">num </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">num</span><span class="s2">))</span>
+        <span class="s1">num </span><span class="s2">= </span><span class="s6">1e-100</span>
+        <span class="s0">assert </span><span class="s1">num </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">num</span><span class="s2">))</span>
+        <span class="s1">num </span><span class="s2">= -</span><span class="s6">1e-45</span>
+        <span class="s0">assert </span><span class="s1">num </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">num</span><span class="s2">))</span>
+        <span class="s1">num </span><span class="s2">= -</span><span class="s6">1e-145</span>
+        <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">allclose</span><span class="s2">(</span><span class="s1">num</span><span class="s2">, </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">num</span><span class="s2">)))</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;unicode_key&quot;</span><span class="s2">, [</span><span class="s4">&quot;key1&quot;</span><span class="s2">, </span><span class="s4">&quot;بن&quot;</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_encode_dict_with_unicode_keys</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">unicode_key</span><span class="s2">):</span>
+        <span class="s1">unicode_dict </span><span class="s2">= {</span><span class="s1">unicode_key</span><span class="s2">: </span><span class="s4">&quot;value1&quot;</span><span class="s2">}</span>
+        <span class="s0">assert </span><span class="s1">unicode_dict </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">unicode_dict</span><span class="s2">))</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;double_input&quot;</span><span class="s2">, [</span><span class="s1">math</span><span class="s2">.</span><span class="s1">pi</span><span class="s2">, -</span><span class="s1">math</span><span class="s2">.</span><span class="s1">pi</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_encode_double_conversion</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">double_input</span><span class="s2">):</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">double_input</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">round</span><span class="s2">(</span><span class="s1">double_input</span><span class="s2">, </span><span class="s6">5</span><span class="s2">) == </span><span class="s1">round</span><span class="s2">(</span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">), </span><span class="s6">5</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">round</span><span class="s2">(</span><span class="s1">double_input</span><span class="s2">, </span><span class="s6">5</span><span class="s2">) == </span><span class="s1">round</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">), </span><span class="s6">5</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_with_decimal</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">decimal_input </span><span class="s2">= </span><span class="s6">1.0</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">decimal_input</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">output </span><span class="s2">== </span><span class="s4">&quot;1.0&quot;</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_array_of_nested_arrays</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">nested_input </span><span class="s2">= [[[[]]]] * </span><span class="s6">20</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">nested_input</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">nested_input </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">nested_input </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_array_of_doubles</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">doubles_input </span><span class="s2">= [</span><span class="s6">31337.31337</span><span class="s2">, </span><span class="s6">31337.31337</span><span class="s2">, </span><span class="s6">31337.31337</span><span class="s2">, </span><span class="s6">31337.31337</span><span class="s2">] * </span><span class="s6">10</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">doubles_input</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">doubles_input </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">doubles_input </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_double_precision</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">double_input </span><span class="s2">= </span><span class="s6">30.012345678901234</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">double_input</span><span class="s2">, </span><span class="s1">double_precision</span><span class="s2">=</span><span class="s6">15</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">double_input </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">double_input </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+
+        <span class="s0">for </span><span class="s1">double_precision </span><span class="s0">in </span><span class="s2">(</span><span class="s6">3</span><span class="s2">, </span><span class="s6">9</span><span class="s2">):</span>
+            <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">double_input</span><span class="s2">, </span><span class="s1">double_precision</span><span class="s2">=</span><span class="s1">double_precision</span><span class="s2">)</span>
+            <span class="s1">rounded_input </span><span class="s2">= </span><span class="s1">round</span><span class="s2">(</span><span class="s1">double_input</span><span class="s2">, </span><span class="s1">double_precision</span><span class="s2">)</span>
+
+            <span class="s0">assert </span><span class="s1">rounded_input </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+            <span class="s0">assert </span><span class="s1">rounded_input </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+        <span class="s4">&quot;invalid_val&quot;</span><span class="s2">,</span>
+        <span class="s2">[</span>
+            <span class="s6">20</span><span class="s2">,</span>
+            <span class="s2">-</span><span class="s6">1</span><span class="s2">,</span>
+            <span class="s4">&quot;9&quot;</span><span class="s2">,</span>
+            <span class="s0">None</span><span class="s2">,</span>
+        <span class="s2">],</span>
+    <span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_invalid_double_precision</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">invalid_val</span><span class="s2">):</span>
+        <span class="s1">double_input </span><span class="s2">= </span><span class="s6">30.12345678901234567890</span>
+        <span class="s1">expected_exception </span><span class="s2">= </span><span class="s1">ValueError </span><span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">invalid_val</span><span class="s2">, </span><span class="s1">int</span><span class="s2">) </span><span class="s0">else </span><span class="s1">TypeError</span>
+        <span class="s1">msg </span><span class="s2">= (</span>
+            <span class="s4">r&quot;Invalid value '.*' for option 'double_precision', max is '15'|&quot;</span>
+            <span class="s4">r&quot;an integer is required \(got type |&quot;</span>
+            <span class="s4">r&quot;object cannot be interpreted as an integer&quot;</span>
+        <span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">expected_exception</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">msg</span><span class="s2">):</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">double_input</span><span class="s2">, </span><span class="s1">double_precision</span><span class="s2">=</span><span class="s1">invalid_val</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_string_conversion2</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">string_input </span><span class="s2">= </span><span class="s4">&quot;A string </span><span class="s0">\\ </span><span class="s4">/ </span><span class="s0">\b \f \n \r \t</span><span class="s4">&quot;</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">string_input</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">string_input </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">string_input </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">output </span><span class="s2">== </span><span class="s4">'&quot;A string </span><span class="s0">\\\\ \\</span><span class="s4">/ </span><span class="s0">\\</span><span class="s4">b </span><span class="s0">\\</span><span class="s4">f </span><span class="s0">\\</span><span class="s4">n </span><span class="s0">\\</span><span class="s4">r </span><span class="s0">\\</span><span class="s4">t&quot;'</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+        <span class="s4">&quot;unicode_input&quot;</span><span class="s2">,</span>
+        <span class="s2">[</span><span class="s4">&quot;Räksmörgås اسامة بن محمد بن عوض بن لادن&quot;</span><span class="s2">, </span><span class="s4">&quot;</span><span class="s0">\xe6\x97\xa5\xd1\x88</span><span class="s4">&quot;</span><span class="s2">],</span>
+    <span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_encode_unicode_conversion</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">unicode_input</span><span class="s2">):</span>
+        <span class="s1">enc </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">unicode_input</span><span class="s2">)</span>
+        <span class="s1">dec </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">enc</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">enc </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">dumps</span><span class="s2">(</span><span class="s1">unicode_input</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">dec </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">enc</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_control_escaping</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">escaped_input </span><span class="s2">= </span><span class="s4">&quot;</span><span class="s0">\x19</span><span class="s4">&quot;</span>
+        <span class="s1">enc </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">escaped_input</span><span class="s2">)</span>
+        <span class="s1">dec </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">enc</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">escaped_input </span><span class="s2">== </span><span class="s1">dec</span>
+        <span class="s0">assert </span><span class="s1">enc </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">dumps</span><span class="s2">(</span><span class="s1">escaped_input</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_unicode_surrogate_pair</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">surrogate_input </span><span class="s2">= </span><span class="s4">&quot;</span><span class="s0">\xf0\x90\x8d\x86</span><span class="s4">&quot;</span>
+        <span class="s1">enc </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">surrogate_input</span><span class="s2">)</span>
+        <span class="s1">dec </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">enc</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">enc </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">dumps</span><span class="s2">(</span><span class="s1">surrogate_input</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">dec </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">enc</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_unicode_4bytes_utf8</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">four_bytes_input </span><span class="s2">= </span><span class="s4">&quot;</span><span class="s0">\xf0\x91\x80\xb0</span><span class="s4">TRAILINGNORMAL&quot;</span>
+        <span class="s1">enc </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">four_bytes_input</span><span class="s2">)</span>
+        <span class="s1">dec </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">enc</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">enc </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">dumps</span><span class="s2">(</span><span class="s1">four_bytes_input</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">dec </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">enc</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_unicode_4bytes_utf8highest</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">four_bytes_input </span><span class="s2">= </span><span class="s4">&quot;</span><span class="s0">\xf3\xbf\xbf\xbf</span><span class="s4">TRAILINGNORMAL&quot;</span>
+        <span class="s1">enc </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">four_bytes_input</span><span class="s2">)</span>
+
+        <span class="s1">dec </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">enc</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">enc </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">dumps</span><span class="s2">(</span><span class="s1">four_bytes_input</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">dec </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">enc</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_unicode_error</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">string </span><span class="s2">= </span><span class="s4">&quot;'</span><span class="s0">\udac0</span><span class="s4">'&quot;</span>
+        <span class="s1">msg </span><span class="s2">= (</span>
+            <span class="s4">r&quot;'utf-8' codec can't encode character '\\udac0' &quot;</span>
+            <span class="s4">r&quot;in position 1: surrogates not allowed&quot;</span>
+        <span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">UnicodeEncodeError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">msg</span><span class="s2">):</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">([</span><span class="s1">string</span><span class="s2">])</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_array_in_array</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">arr_in_arr_input </span><span class="s2">= [[[[]]]]</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">arr_in_arr_input</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">arr_in_arr_input </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">output </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">dumps</span><span class="s2">(</span><span class="s1">arr_in_arr_input</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">arr_in_arr_input </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+        <span class="s4">&quot;num_input&quot;</span><span class="s2">,</span>
+        <span class="s2">[</span>
+            <span class="s6">31337</span><span class="s2">,</span>
+            <span class="s2">-</span><span class="s6">31337</span><span class="s2">,  </span><span class="s5"># Negative number.</span>
+            <span class="s2">-</span><span class="s6">9223372036854775808</span><span class="s2">,  </span><span class="s5"># Large negative number.</span>
+        <span class="s2">],</span>
+    <span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_encode_num_conversion</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">num_input</span><span class="s2">):</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">num_input</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">num_input </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">output </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">dumps</span><span class="s2">(</span><span class="s1">num_input</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">num_input </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_list_conversion</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">list_input </span><span class="s2">= [</span><span class="s6">1</span><span class="s2">, </span><span class="s6">2</span><span class="s2">, </span><span class="s6">3</span><span class="s2">, </span><span class="s6">4</span><span class="s2">]</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">list_input</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">list_input </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">list_input </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_dict_conversion</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">dict_input </span><span class="s2">= {</span><span class="s4">&quot;k1&quot;</span><span class="s2">: </span><span class="s6">1</span><span class="s2">, </span><span class="s4">&quot;k2&quot;</span><span class="s2">: </span><span class="s6">2</span><span class="s2">, </span><span class="s4">&quot;k3&quot;</span><span class="s2">: </span><span class="s6">3</span><span class="s2">, </span><span class="s4">&quot;k4&quot;</span><span class="s2">: </span><span class="s6">4</span><span class="s2">}</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">dict_input</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">dict_input </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">dict_input </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;builtin_value&quot;</span><span class="s2">, [</span><span class="s0">None</span><span class="s2">, </span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_encode_builtin_values_conversion</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">builtin_value</span><span class="s2">):</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">builtin_value</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">builtin_value </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">output </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">dumps</span><span class="s2">(</span><span class="s1">builtin_value</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">builtin_value </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_datetime_conversion</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">datetime_input </span><span class="s2">= </span><span class="s1">datetime</span><span class="s2">.</span><span class="s1">datetime</span><span class="s2">.</span><span class="s1">fromtimestamp</span><span class="s2">(</span><span class="s1">time</span><span class="s2">.</span><span class="s1">time</span><span class="s2">())</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">datetime_input</span><span class="s2">, </span><span class="s1">date_unit</span><span class="s2">=</span><span class="s4">&quot;s&quot;</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">calendar</span><span class="s2">.</span><span class="s1">timegm</span><span class="s2">(</span><span class="s1">datetime_input</span><span class="s2">.</span><span class="s1">utctimetuple</span><span class="s2">())</span>
+
+        <span class="s0">assert </span><span class="s1">int</span><span class="s2">(</span><span class="s1">expected</span><span class="s2">) == </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">int</span><span class="s2">(</span><span class="s1">expected</span><span class="s2">) == </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_date_conversion</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">date_input </span><span class="s2">= </span><span class="s1">datetime</span><span class="s2">.</span><span class="s1">date</span><span class="s2">.</span><span class="s1">fromtimestamp</span><span class="s2">(</span><span class="s1">time</span><span class="s2">.</span><span class="s1">time</span><span class="s2">())</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">date_input</span><span class="s2">, </span><span class="s1">date_unit</span><span class="s2">=</span><span class="s4">&quot;s&quot;</span><span class="s2">)</span>
+
+        <span class="s1">tup </span><span class="s2">= (</span><span class="s1">date_input</span><span class="s2">.</span><span class="s1">year</span><span class="s2">, </span><span class="s1">date_input</span><span class="s2">.</span><span class="s1">month</span><span class="s2">, </span><span class="s1">date_input</span><span class="s2">.</span><span class="s1">day</span><span class="s2">, </span><span class="s6">0</span><span class="s2">, </span><span class="s6">0</span><span class="s2">, </span><span class="s6">0</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">calendar</span><span class="s2">.</span><span class="s1">timegm</span><span class="s2">(</span><span class="s1">tup</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">int</span><span class="s2">(</span><span class="s1">expected</span><span class="s2">) == </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">int</span><span class="s2">(</span><span class="s1">expected</span><span class="s2">) == </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+        <span class="s4">&quot;test&quot;</span><span class="s2">,</span>
+        <span class="s2">[</span><span class="s1">datetime</span><span class="s2">.</span><span class="s1">time</span><span class="s2">(), </span><span class="s1">datetime</span><span class="s2">.</span><span class="s1">time</span><span class="s2">(</span><span class="s6">1</span><span class="s2">, </span><span class="s6">2</span><span class="s2">, </span><span class="s6">3</span><span class="s2">), </span><span class="s1">datetime</span><span class="s2">.</span><span class="s1">time</span><span class="s2">(</span><span class="s6">10</span><span class="s2">, </span><span class="s6">12</span><span class="s2">, </span><span class="s6">15</span><span class="s2">, </span><span class="s6">343243</span><span class="s2">)],</span>
+    <span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_encode_time_conversion_basic</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">test</span><span class="s2">):</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">test</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s4">f'&quot;</span><span class="s0">{</span><span class="s1">test</span><span class="s2">.</span><span class="s1">isoformat</span><span class="s2">()</span><span class="s0">}</span><span class="s4">&quot;'</span>
+        <span class="s0">assert </span><span class="s1">expected </span><span class="s2">== </span><span class="s1">output</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_time_conversion_pytz</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># see gh-11473: to_json segfaults with timezone-aware datetimes</span>
+        <span class="s1">pytz </span><span class="s2">= </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">importorskip</span><span class="s2">(</span><span class="s4">&quot;pytz&quot;</span><span class="s2">)</span>
+        <span class="s1">test </span><span class="s2">= </span><span class="s1">datetime</span><span class="s2">.</span><span class="s1">time</span><span class="s2">(</span><span class="s6">10</span><span class="s2">, </span><span class="s6">12</span><span class="s2">, </span><span class="s6">15</span><span class="s2">, </span><span class="s6">343243</span><span class="s2">, </span><span class="s1">pytz</span><span class="s2">.</span><span class="s1">utc</span><span class="s2">)</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">test</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s4">f'&quot;</span><span class="s0">{</span><span class="s1">test</span><span class="s2">.</span><span class="s1">isoformat</span><span class="s2">()</span><span class="s0">}</span><span class="s4">&quot;'</span>
+        <span class="s0">assert </span><span class="s1">expected </span><span class="s2">== </span><span class="s1">output</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_time_conversion_dateutil</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># see gh-11473: to_json segfaults with timezone-aware datetimes</span>
+        <span class="s1">test </span><span class="s2">= </span><span class="s1">datetime</span><span class="s2">.</span><span class="s1">time</span><span class="s2">(</span><span class="s6">10</span><span class="s2">, </span><span class="s6">12</span><span class="s2">, </span><span class="s6">15</span><span class="s2">, </span><span class="s6">343243</span><span class="s2">, </span><span class="s1">dateutil</span><span class="s2">.</span><span class="s1">tz</span><span class="s2">.</span><span class="s1">tzutc</span><span class="s2">())</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">test</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s4">f'&quot;</span><span class="s0">{</span><span class="s1">test</span><span class="s2">.</span><span class="s1">isoformat</span><span class="s2">()</span><span class="s0">}</span><span class="s4">&quot;'</span>
+        <span class="s0">assert </span><span class="s1">expected </span><span class="s2">== </span><span class="s1">output</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+        <span class="s4">&quot;decoded_input&quot;</span><span class="s2">, [</span><span class="s1">NaT</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">datetime64</span><span class="s2">(</span><span class="s4">&quot;NaT&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">inf</span><span class="s2">, -</span><span class="s1">np</span><span class="s2">.</span><span class="s1">inf</span><span class="s2">]</span>
+    <span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_encode_as_null</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">decoded_input</span><span class="s2">):</span>
+        <span class="s0">assert </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">decoded_input</span><span class="s2">) == </span><span class="s4">&quot;null&quot;</span><span class="s2">, </span><span class="s4">&quot;Expected null&quot;</span>
+
+    <span class="s0">def </span><span class="s1">test_datetime_units</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">val </span><span class="s2">= </span><span class="s1">datetime</span><span class="s2">.</span><span class="s1">datetime</span><span class="s2">(</span><span class="s6">2013</span><span class="s2">, </span><span class="s6">8</span><span class="s2">, </span><span class="s6">17</span><span class="s2">, </span><span class="s6">21</span><span class="s2">, </span><span class="s6">17</span><span class="s2">, </span><span class="s6">12</span><span class="s2">, </span><span class="s6">215504</span><span class="s2">)</span>
+        <span class="s1">stamp </span><span class="s2">= </span><span class="s1">Timestamp</span><span class="s2">(</span><span class="s1">val</span><span class="s2">).</span><span class="s1">as_unit</span><span class="s2">(</span><span class="s4">&quot;ns&quot;</span><span class="s2">)</span>
+
+        <span class="s1">roundtrip </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">val</span><span class="s2">, </span><span class="s1">date_unit</span><span class="s2">=</span><span class="s4">&quot;s&quot;</span><span class="s2">))</span>
+        <span class="s0">assert </span><span class="s1">roundtrip </span><span class="s2">== </span><span class="s1">stamp</span><span class="s2">.</span><span class="s1">_value </span><span class="s2">// </span><span class="s6">10</span><span class="s2">**</span><span class="s6">9</span>
+
+        <span class="s1">roundtrip </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">val</span><span class="s2">, </span><span class="s1">date_unit</span><span class="s2">=</span><span class="s4">&quot;ms&quot;</span><span class="s2">))</span>
+        <span class="s0">assert </span><span class="s1">roundtrip </span><span class="s2">== </span><span class="s1">stamp</span><span class="s2">.</span><span class="s1">_value </span><span class="s2">// </span><span class="s6">10</span><span class="s2">**</span><span class="s6">6</span>
+
+        <span class="s1">roundtrip </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">val</span><span class="s2">, </span><span class="s1">date_unit</span><span class="s2">=</span><span class="s4">&quot;us&quot;</span><span class="s2">))</span>
+        <span class="s0">assert </span><span class="s1">roundtrip </span><span class="s2">== </span><span class="s1">stamp</span><span class="s2">.</span><span class="s1">_value </span><span class="s2">// </span><span class="s6">10</span><span class="s2">**</span><span class="s6">3</span>
+
+        <span class="s1">roundtrip </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">val</span><span class="s2">, </span><span class="s1">date_unit</span><span class="s2">=</span><span class="s4">&quot;ns&quot;</span><span class="s2">))</span>
+        <span class="s0">assert </span><span class="s1">roundtrip </span><span class="s2">== </span><span class="s1">stamp</span><span class="s2">.</span><span class="s1">_value</span>
+
+        <span class="s1">msg </span><span class="s2">= </span><span class="s4">&quot;Invalid value 'foo' for option 'date_unit'&quot;</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">msg</span><span class="s2">):</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">val</span><span class="s2">, </span><span class="s1">date_unit</span><span class="s2">=</span><span class="s4">&quot;foo&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_to_utf8</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">unencoded </span><span class="s2">= </span><span class="s4">&quot;</span><span class="s0">\xe6\x97\xa5\xd1\x88</span><span class="s4">&quot;</span>
+
+        <span class="s1">enc </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">unencoded</span><span class="s2">, </span><span class="s1">ensure_ascii</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+        <span class="s1">dec </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">enc</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">enc </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">dumps</span><span class="s2">(</span><span class="s1">unencoded</span><span class="s2">, </span><span class="s1">ensure_ascii</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">dec </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">enc</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_decode_from_unicode</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">unicode_input </span><span class="s2">= </span><span class="s4">'{&quot;obj&quot;: 31337}'</span>
+
+        <span class="s1">dec1 </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">unicode_input</span><span class="s2">)</span>
+        <span class="s1">dec2 </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">unicode_input</span><span class="s2">))</span>
+
+        <span class="s0">assert </span><span class="s1">dec1 </span><span class="s2">== </span><span class="s1">dec2</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_recursion_max</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># 8 is the max recursion depth</span>
+
+        <span class="s0">class </span><span class="s1">O2</span><span class="s2">:</span>
+            <span class="s1">member </span><span class="s2">= </span><span class="s6">0</span>
+
+        <span class="s0">class </span><span class="s1">O1</span><span class="s2">:</span>
+            <span class="s1">member </span><span class="s2">= </span><span class="s6">0</span>
+
+        <span class="s1">decoded_input </span><span class="s2">= </span><span class="s1">O1</span><span class="s2">()</span>
+        <span class="s1">decoded_input</span><span class="s2">.</span><span class="s1">member </span><span class="s2">= </span><span class="s1">O2</span><span class="s2">()</span>
+        <span class="s1">decoded_input</span><span class="s2">.</span><span class="s1">member</span><span class="s2">.</span><span class="s1">member </span><span class="s2">= </span><span class="s1">decoded_input</span>
+
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">OverflowError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s4">&quot;Maximum recursion level reached&quot;</span><span class="s2">):</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">decoded_input</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_decode_jibberish</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">jibberish </span><span class="s2">= </span><span class="s4">&quot;fdsa sda v9sa fdsa&quot;</span>
+        <span class="s1">msg </span><span class="s2">= </span><span class="s4">&quot;Unexpected character found when decoding 'false'&quot;</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">msg</span><span class="s2">):</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">jibberish</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+        <span class="s4">&quot;broken_json&quot;</span><span class="s2">,</span>
+        <span class="s2">[</span>
+            <span class="s4">&quot;[&quot;</span><span class="s2">,  </span><span class="s5"># Broken array start.</span>
+            <span class="s4">&quot;{&quot;</span><span class="s2">,  </span><span class="s5"># Broken object start.</span>
+            <span class="s4">&quot;]&quot;</span><span class="s2">,  </span><span class="s5"># Broken array end.</span>
+            <span class="s4">&quot;}&quot;</span><span class="s2">,  </span><span class="s5"># Broken object end.</span>
+        <span class="s2">],</span>
+    <span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_decode_broken_json</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">broken_json</span><span class="s2">):</span>
+        <span class="s1">msg </span><span class="s2">= </span><span class="s4">&quot;Expected object or value&quot;</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">msg</span><span class="s2">):</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">broken_json</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;too_big_char&quot;</span><span class="s2">, [</span><span class="s4">&quot;[&quot;</span><span class="s2">, </span><span class="s4">&quot;{&quot;</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_decode_depth_too_big</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">too_big_char</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s4">&quot;Reached object decoding depth limit&quot;</span><span class="s2">):</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">too_big_char </span><span class="s2">* (</span><span class="s6">1024 </span><span class="s2">* </span><span class="s6">1024</span><span class="s2">))</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+        <span class="s4">&quot;bad_string&quot;</span><span class="s2">,</span>
+        <span class="s2">[</span>
+            <span class="s4">'&quot;TESTING'</span><span class="s2">,  </span><span class="s5"># Unterminated.</span>
+            <span class="s4">'&quot;TESTING</span><span class="s0">\\</span><span class="s4">&quot;'</span><span class="s2">,  </span><span class="s5"># Unterminated escape.</span>
+            <span class="s4">&quot;tru&quot;</span><span class="s2">,  </span><span class="s5"># Broken True.</span>
+            <span class="s4">&quot;fa&quot;</span><span class="s2">,  </span><span class="s5"># Broken False.</span>
+            <span class="s4">&quot;n&quot;</span><span class="s2">,  </span><span class="s5"># Broken None.</span>
+        <span class="s2">],</span>
+    <span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_decode_bad_string</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">bad_string</span><span class="s2">):</span>
+        <span class="s1">msg </span><span class="s2">= (</span>
+            <span class="s4">&quot;Unexpected character found when decoding|&quot;</span>
+            <span class="s4">&quot;Unmatched ''</span><span class="s0">\&quot;</span><span class="s4">' when when decoding 'string'&quot;</span>
+        <span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">msg</span><span class="s2">):</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">bad_string</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+        <span class="s4">&quot;broken_json, err_msg&quot;</span><span class="s2">,</span>
+        <span class="s2">[</span>
+            <span class="s2">(</span>
+                <span class="s4">'{{1337:&quot;&quot;}}'</span><span class="s2">,</span>
+                <span class="s4">&quot;Key name of object must be 'string' when decoding 'object'&quot;</span><span class="s2">,</span>
+            <span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'{{&quot;key&quot;:&quot;}'</span><span class="s2">, </span><span class="s4">&quot;Unmatched ''</span><span class="s0">\&quot;</span><span class="s4">' when when decoding 'string'&quot;</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">&quot;[[[true&quot;</span><span class="s2">, </span><span class="s4">&quot;Unexpected character found when decoding array value (2)&quot;</span><span class="s2">),</span>
+        <span class="s2">],</span>
+    <span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_decode_broken_json_leak</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">broken_json</span><span class="s2">, </span><span class="s1">err_msg</span><span class="s2">):</span>
+        <span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s6">1000</span><span class="s2">):</span>
+            <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">re</span><span class="s2">.</span><span class="s1">escape</span><span class="s2">(</span><span class="s1">err_msg</span><span class="s2">)):</span>
+                <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">broken_json</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+        <span class="s4">&quot;invalid_dict&quot;</span><span class="s2">,</span>
+        <span class="s2">[</span>
+            <span class="s4">&quot;{{{{31337}}}}&quot;</span><span class="s2">,  </span><span class="s5"># No key.</span>
+            <span class="s4">'{{{{&quot;key&quot;:}}}}'</span><span class="s2">,  </span><span class="s5"># No value.</span>
+            <span class="s4">'{{{{&quot;key&quot;}}}}'</span><span class="s2">,  </span><span class="s5"># No colon or value.</span>
+        <span class="s2">],</span>
+    <span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_decode_invalid_dict</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">invalid_dict</span><span class="s2">):</span>
+        <span class="s1">msg </span><span class="s2">= (</span>
+            <span class="s4">&quot;Key name of object must be 'string' when decoding 'object'|&quot;</span>
+            <span class="s4">&quot;No ':' found when decoding object value|&quot;</span>
+            <span class="s4">&quot;Expected object or value&quot;</span>
+        <span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">msg</span><span class="s2">):</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">invalid_dict</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;numeric_int_as_str&quot;</span><span class="s2">, [</span><span class="s4">&quot;31337&quot;</span><span class="s2">, </span><span class="s4">&quot;-31337&quot;</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_decode_numeric_int</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">numeric_int_as_str</span><span class="s2">):</span>
+        <span class="s0">assert </span><span class="s1">int</span><span class="s2">(</span><span class="s1">numeric_int_as_str</span><span class="s2">) == </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">numeric_int_as_str</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_null_character</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">wrapped_input </span><span class="s2">= </span><span class="s4">&quot;31337 </span><span class="s0">\x00 </span><span class="s4">1337&quot;</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">wrapped_input</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">wrapped_input </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">output </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">dumps</span><span class="s2">(</span><span class="s1">wrapped_input</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">wrapped_input </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+
+        <span class="s1">alone_input </span><span class="s2">= </span><span class="s4">&quot;</span><span class="s0">\x00</span><span class="s4">&quot;</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">alone_input</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">alone_input </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">output </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">dumps</span><span class="s2">(</span><span class="s1">alone_input</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">alone_input </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s4">'&quot;  </span><span class="s0">\\</span><span class="s4">u0000</span><span class="s0">\\</span><span class="s4">r</span><span class="s0">\\</span><span class="s4">n &quot;' </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s4">&quot;  </span><span class="s0">\u0000\r\n </span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_decode_null_character</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">wrapped_input </span><span class="s2">= </span><span class="s4">'&quot;31337 </span><span class="s0">\\</span><span class="s4">u0000 31337&quot;'</span>
+        <span class="s0">assert </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">wrapped_input</span><span class="s2">) == </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">wrapped_input</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_list_long_conversion</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">long_input </span><span class="s2">= [</span>
+            <span class="s6">9223372036854775807</span><span class="s2">,</span>
+            <span class="s6">9223372036854775807</span><span class="s2">,</span>
+            <span class="s6">9223372036854775807</span><span class="s2">,</span>
+            <span class="s6">9223372036854775807</span><span class="s2">,</span>
+            <span class="s6">9223372036854775807</span><span class="s2">,</span>
+            <span class="s6">9223372036854775807</span><span class="s2">,</span>
+        <span class="s2">]</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">long_input</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">long_input </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">long_input </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;long_input&quot;</span><span class="s2">, [</span><span class="s6">9223372036854775807</span><span class="s2">, </span><span class="s6">18446744073709551615</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_encode_long_conversion</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">long_input</span><span class="s2">):</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">long_input</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">long_input </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">output </span><span class="s2">== </span><span class="s1">json</span><span class="s2">.</span><span class="s1">dumps</span><span class="s2">(</span><span class="s1">long_input</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">long_input </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;bigNum&quot;</span><span class="s2">, [</span><span class="s6">2</span><span class="s2">**</span><span class="s6">64</span><span class="s2">, -(</span><span class="s6">2</span><span class="s2">**</span><span class="s6">63</span><span class="s2">) - </span><span class="s6">1</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_dumps_ints_larger_than_maxsize</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">bigNum</span><span class="s2">):</span>
+        <span class="s1">encoding </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">bigNum</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">str</span><span class="s2">(</span><span class="s1">bigNum</span><span class="s2">) == </span><span class="s1">encoding</span>
+
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span>
+            <span class="s1">ValueError</span><span class="s2">,</span>
+            <span class="s1">match</span><span class="s2">=</span><span class="s4">&quot;Value is too big|Value is too small&quot;</span><span class="s2">,</span>
+        <span class="s2">):</span>
+            <span class="s0">assert </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">encoding</span><span class="s2">) == </span><span class="s1">bigNum</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+        <span class="s4">&quot;int_exp&quot;</span><span class="s2">, [</span><span class="s4">&quot;1337E40&quot;</span><span class="s2">, </span><span class="s4">&quot;1.337E40&quot;</span><span class="s2">, </span><span class="s4">&quot;1337E+9&quot;</span><span class="s2">, </span><span class="s4">&quot;1.337e+40&quot;</span><span class="s2">, </span><span class="s4">&quot;1.337E-4&quot;</span><span class="s2">]</span>
+    <span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_decode_numeric_int_exp</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">int_exp</span><span class="s2">):</span>
+        <span class="s0">assert </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">int_exp</span><span class="s2">) == </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">int_exp</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_loads_non_str_bytes_raises</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">msg </span><span class="s2">= </span><span class="s4">&quot;a bytes-like object is required, not 'NoneType'&quot;</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">msg</span><span class="s2">):</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s0">None</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;val&quot;</span><span class="s2">, [</span><span class="s6">3590016419</span><span class="s2">, </span><span class="s6">2</span><span class="s2">**</span><span class="s6">31</span><span class="s2">, </span><span class="s6">2</span><span class="s2">**</span><span class="s6">32</span><span class="s2">, (</span><span class="s6">2</span><span class="s2">**</span><span class="s6">32</span><span class="s2">) - </span><span class="s6">1</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_decode_number_with_32bit_sign_bit</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">val</span><span class="s2">):</span>
+        <span class="s5"># Test that numbers that fit within 32 bits but would have the</span>
+        <span class="s5"># sign bit set (2**31 &lt;= x &lt; 2**32) are decoded properly.</span>
+        <span class="s1">doc </span><span class="s2">= </span><span class="s4">f'</span><span class="s0">{{</span><span class="s4">&quot;id&quot;: </span><span class="s0">{</span><span class="s1">val</span><span class="s0">}}}</span><span class="s4">'</span>
+        <span class="s0">assert </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">doc</span><span class="s2">)[</span><span class="s4">&quot;id&quot;</span><span class="s2">] == </span><span class="s1">val</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_big_escape</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># Make sure no Exception is raised.</span>
+        <span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s6">10</span><span class="s2">):</span>
+            <span class="s1">base </span><span class="s2">= </span><span class="s4">&quot;</span><span class="s0">\u00e5</span><span class="s4">&quot;</span><span class="s2">.</span><span class="s1">encode</span><span class="s2">()</span>
+            <span class="s1">escape_input </span><span class="s2">= </span><span class="s1">base </span><span class="s2">* </span><span class="s6">1024 </span><span class="s2">* </span><span class="s6">1024 </span><span class="s2">* </span><span class="s6">2</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">escape_input</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_decode_big_escape</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># Make sure no Exception is raised.</span>
+        <span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s6">10</span><span class="s2">):</span>
+            <span class="s1">base </span><span class="s2">= </span><span class="s4">&quot;</span><span class="s0">\u00e5</span><span class="s4">&quot;</span><span class="s2">.</span><span class="s1">encode</span><span class="s2">()</span>
+            <span class="s1">quote </span><span class="s2">= </span><span class="s7">b'&quot;'</span>
+
+            <span class="s1">escape_input </span><span class="s2">= </span><span class="s1">quote </span><span class="s2">+ (</span><span class="s1">base </span><span class="s2">* </span><span class="s6">1024 </span><span class="s2">* </span><span class="s6">1024 </span><span class="s2">* </span><span class="s6">2</span><span class="s2">) + </span><span class="s1">quote</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">escape_input</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_to_dict</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">d </span><span class="s2">= {</span><span class="s4">&quot;key&quot;</span><span class="s2">: </span><span class="s6">31337</span><span class="s2">}</span>
+
+        <span class="s0">class </span><span class="s1">DictTest</span><span class="s2">:</span>
+            <span class="s0">def </span><span class="s1">toDict</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+                <span class="s0">return </span><span class="s1">d</span>
+
+        <span class="s1">o </span><span class="s2">= </span><span class="s1">DictTest</span><span class="s2">()</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">o</span><span class="s2">)</span>
+
+        <span class="s1">dec </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">dec </span><span class="s2">== </span><span class="s1">d</span>
+
+    <span class="s0">def </span><span class="s1">test_default_handler</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">class </span><span class="s1">_TestObject</span><span class="s2">:</span>
+            <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">val</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">val </span><span class="s2">= </span><span class="s1">val</span>
+
+            <span class="s2">@</span><span class="s1">property</span>
+            <span class="s0">def </span><span class="s1">recursive_attr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+                <span class="s0">return </span><span class="s1">_TestObject</span><span class="s2">(</span><span class="s4">&quot;recursive_attr&quot;</span><span class="s2">)</span>
+
+            <span class="s0">def </span><span class="s1">__str__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+                <span class="s0">return </span><span class="s1">str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">val</span><span class="s2">)</span>
+
+        <span class="s1">msg </span><span class="s2">= </span><span class="s4">&quot;Maximum recursion level reached&quot;</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">OverflowError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">msg</span><span class="s2">):</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">_TestObject</span><span class="s2">(</span><span class="s4">&quot;foo&quot;</span><span class="s2">))</span>
+        <span class="s0">assert </span><span class="s4">'&quot;foo&quot;' </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">_TestObject</span><span class="s2">(</span><span class="s4">&quot;foo&quot;</span><span class="s2">), </span><span class="s1">default_handler</span><span class="s2">=</span><span class="s1">str</span><span class="s2">)</span>
+
+        <span class="s0">def </span><span class="s1">my_handler</span><span class="s2">(</span><span class="s1">_</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s4">&quot;foobar&quot;</span>
+
+        <span class="s0">assert </span><span class="s4">'&quot;foobar&quot;' </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span>
+            <span class="s1">_TestObject</span><span class="s2">(</span><span class="s4">&quot;foo&quot;</span><span class="s2">), </span><span class="s1">default_handler</span><span class="s2">=</span><span class="s1">my_handler</span>
+        <span class="s2">)</span>
+
+        <span class="s0">def </span><span class="s1">my_handler_raises</span><span class="s2">(</span><span class="s1">_</span><span class="s2">):</span>
+            <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span><span class="s4">&quot;I raise for anything&quot;</span><span class="s2">)</span>
+
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s4">&quot;I raise for anything&quot;</span><span class="s2">):</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">_TestObject</span><span class="s2">(</span><span class="s4">&quot;foo&quot;</span><span class="s2">), </span><span class="s1">default_handler</span><span class="s2">=</span><span class="s1">my_handler_raises</span><span class="s2">)</span>
+
+        <span class="s0">def </span><span class="s1">my_int_handler</span><span class="s2">(</span><span class="s1">_</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s6">42</span>
+
+        <span class="s0">assert </span><span class="s2">(</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span>
+                <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">_TestObject</span><span class="s2">(</span><span class="s4">&quot;foo&quot;</span><span class="s2">), </span><span class="s1">default_handler</span><span class="s2">=</span><span class="s1">my_int_handler</span><span class="s2">)</span>
+            <span class="s2">)</span>
+            <span class="s2">== </span><span class="s6">42</span>
+        <span class="s2">)</span>
+
+        <span class="s0">def </span><span class="s1">my_obj_handler</span><span class="s2">(</span><span class="s1">_</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">datetime</span><span class="s2">.</span><span class="s1">datetime</span><span class="s2">(</span><span class="s6">2013</span><span class="s2">, </span><span class="s6">2</span><span class="s2">, </span><span class="s6">3</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">datetime</span><span class="s2">.</span><span class="s1">datetime</span><span class="s2">(</span><span class="s6">2013</span><span class="s2">, </span><span class="s6">2</span><span class="s2">, </span><span class="s6">3</span><span class="s2">))</span>
+        <span class="s2">) == </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">_TestObject</span><span class="s2">(</span><span class="s4">&quot;foo&quot;</span><span class="s2">), </span><span class="s1">default_handler</span><span class="s2">=</span><span class="s1">my_obj_handler</span><span class="s2">)</span>
+        <span class="s2">)</span>
+
+        <span class="s1">obj_list </span><span class="s2">= [</span><span class="s1">_TestObject</span><span class="s2">(</span><span class="s4">&quot;foo&quot;</span><span class="s2">), </span><span class="s1">_TestObject</span><span class="s2">(</span><span class="s4">&quot;bar&quot;</span><span class="s2">)]</span>
+        <span class="s0">assert </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">json</span><span class="s2">.</span><span class="s1">dumps</span><span class="s2">(</span><span class="s1">obj_list</span><span class="s2">, </span><span class="s1">default</span><span class="s2">=</span><span class="s1">str</span><span class="s2">)) == </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">obj_list</span><span class="s2">, </span><span class="s1">default_handler</span><span class="s2">=</span><span class="s1">str</span><span class="s2">)</span>
+        <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_object</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">class </span><span class="s1">_TestObject</span><span class="s2">:</span>
+            <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">_c</span><span class="s2">, </span><span class="s1">d</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">a </span><span class="s2">= </span><span class="s1">a</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">b </span><span class="s2">= </span><span class="s1">b</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">_c </span><span class="s2">= </span><span class="s1">_c</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">d </span><span class="s2">= </span><span class="s1">d</span>
+
+            <span class="s0">def </span><span class="s1">e</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+                <span class="s0">return </span><span class="s6">5</span>
+
+        <span class="s5"># JSON keys should be all non-callable non-underscore attributes, see GH-42768</span>
+        <span class="s1">test_object </span><span class="s2">= </span><span class="s1">_TestObject</span><span class="s2">(</span><span class="s1">a</span><span class="s2">=</span><span class="s6">1</span><span class="s2">, </span><span class="s1">b</span><span class="s2">=</span><span class="s6">2</span><span class="s2">, </span><span class="s1">_c</span><span class="s2">=</span><span class="s6">3</span><span class="s2">, </span><span class="s1">d</span><span class="s2">=</span><span class="s6">4</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">test_object</span><span class="s2">)) == {</span>
+            <span class="s4">&quot;a&quot;</span><span class="s2">: </span><span class="s6">1</span><span class="s2">,</span>
+            <span class="s4">&quot;b&quot;</span><span class="s2">: </span><span class="s6">2</span><span class="s2">,</span>
+            <span class="s4">&quot;d&quot;</span><span class="s2">: </span><span class="s6">4</span><span class="s2">,</span>
+        <span class="s2">}</span>
+
+    <span class="s0">def </span><span class="s1">test_ujson__name__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># GH 52898</span>
+        <span class="s0">assert </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">__name__ </span><span class="s2">== </span><span class="s4">&quot;pandas._libs.json&quot;</span>
+
+
+<span class="s0">class </span><span class="s1">TestNumpyJSONTests</span><span class="s2">:</span>
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;bool_input&quot;</span><span class="s2">, [</span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_bool</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">bool_input</span><span class="s2">):</span>
+        <span class="s1">b </span><span class="s2">= </span><span class="s1">bool</span><span class="s2">(</span><span class="s1">bool_input</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">b</span><span class="s2">)) == </span><span class="s1">b</span>
+
+    <span class="s0">def </span><span class="s1">test_bool_array</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">bool_array </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span>
+            <span class="s2">[</span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">, </span><span class="s0">True</span><span class="s2">, </span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">, </span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">, </span><span class="s0">False</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">bool</span>
+        <span class="s2">)</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">bool_array</span><span class="s2">)), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">bool</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">bool_array</span><span class="s2">, </span><span class="s1">output</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_int</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">any_int_numpy_dtype</span><span class="s2">):</span>
+        <span class="s1">klass </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s1">any_int_numpy_dtype</span><span class="s2">).</span><span class="s1">type</span>
+        <span class="s1">num </span><span class="s2">= </span><span class="s1">klass</span><span class="s2">(</span><span class="s6">1</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">klass</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">num</span><span class="s2">))) == </span><span class="s1">num</span>
+
+    <span class="s0">def </span><span class="s1">test_int_array</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">any_int_numpy_dtype</span><span class="s2">):</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s6">100</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">int</span><span class="s2">)</span>
+        <span class="s1">arr_input </span><span class="s2">= </span><span class="s1">arr</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">any_int_numpy_dtype</span><span class="s2">)</span>
+
+        <span class="s1">arr_output </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">arr_input</span><span class="s2">)), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">any_int_numpy_dtype</span>
+        <span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">arr_input</span><span class="s2">, </span><span class="s1">arr_output</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_int_max</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">any_int_numpy_dtype</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">any_int_numpy_dtype </span><span class="s0">in </span><span class="s2">(</span><span class="s4">&quot;int64&quot;</span><span class="s2">, </span><span class="s4">&quot;uint64&quot;</span><span class="s2">) </span><span class="s0">and not </span><span class="s1">IS64</span><span class="s2">:</span>
+            <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span><span class="s4">&quot;Cannot test 64-bit integer on 32-bit platform&quot;</span><span class="s2">)</span>
+
+        <span class="s1">klass </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s1">any_int_numpy_dtype</span><span class="s2">).</span><span class="s1">type</span>
+
+        <span class="s5"># uint64 max will always overflow,</span>
+        <span class="s5"># as it's encoded to signed.</span>
+        <span class="s0">if </span><span class="s1">any_int_numpy_dtype </span><span class="s2">== </span><span class="s4">&quot;uint64&quot;</span><span class="s2">:</span>
+            <span class="s1">num </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">iinfo</span><span class="s2">(</span><span class="s4">&quot;int64&quot;</span><span class="s2">).</span><span class="s1">max</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">num </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">iinfo</span><span class="s2">(</span><span class="s1">any_int_numpy_dtype</span><span class="s2">).</span><span class="s1">max</span>
+
+        <span class="s0">assert </span><span class="s1">klass</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">num</span><span class="s2">))) == </span><span class="s1">num</span>
+
+    <span class="s0">def </span><span class="s1">test_float</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">float_numpy_dtype</span><span class="s2">):</span>
+        <span class="s1">klass </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s1">float_numpy_dtype</span><span class="s2">).</span><span class="s1">type</span>
+        <span class="s1">num </span><span class="s2">= </span><span class="s1">klass</span><span class="s2">(</span><span class="s6">256.2013</span><span class="s2">)</span>
+
+        <span class="s0">assert </span><span class="s1">klass</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">num</span><span class="s2">))) == </span><span class="s1">num</span>
+
+    <span class="s0">def </span><span class="s1">test_float_array</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">float_numpy_dtype</span><span class="s2">):</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s6">12.5</span><span class="s2">, </span><span class="s6">185.72</span><span class="s2">, </span><span class="s6">1.7322</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">float</span><span class="s2">)</span>
+        <span class="s1">float_input </span><span class="s2">= </span><span class="s1">arr</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">float_numpy_dtype</span><span class="s2">)</span>
+
+        <span class="s1">float_output </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">float_input</span><span class="s2">, </span><span class="s1">double_precision</span><span class="s2">=</span><span class="s6">15</span><span class="s2">)),</span>
+            <span class="s1">dtype</span><span class="s2">=</span><span class="s1">float_numpy_dtype</span><span class="s2">,</span>
+        <span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_almost_equal</span><span class="s2">(</span><span class="s1">float_input</span><span class="s2">, </span><span class="s1">float_output</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_float_max</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">float_numpy_dtype</span><span class="s2">):</span>
+        <span class="s1">klass </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s1">float_numpy_dtype</span><span class="s2">).</span><span class="s1">type</span>
+        <span class="s1">num </span><span class="s2">= </span><span class="s1">klass</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">finfo</span><span class="s2">(</span><span class="s1">float_numpy_dtype</span><span class="s2">).</span><span class="s1">max </span><span class="s2">/ </span><span class="s6">10</span><span class="s2">)</span>
+
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_almost_equal</span><span class="s2">(</span>
+            <span class="s1">klass</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">num</span><span class="s2">, </span><span class="s1">double_precision</span><span class="s2">=</span><span class="s6">15</span><span class="s2">))), </span><span class="s1">num</span>
+        <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_array_basic</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s6">96</span><span class="s2">)</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">arr</span><span class="s2">.</span><span class="s1">reshape</span><span class="s2">((</span><span class="s6">2</span><span class="s2">, </span><span class="s6">2</span><span class="s2">, </span><span class="s6">2</span><span class="s2">, </span><span class="s6">2</span><span class="s2">, </span><span class="s6">3</span><span class="s2">, </span><span class="s6">2</span><span class="s2">))</span>
+
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span>
+            <span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">))), </span><span class="s1">arr</span>
+        <span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;shape&quot;</span><span class="s2">, [(</span><span class="s6">10</span><span class="s2">, </span><span class="s6">10</span><span class="s2">), (</span><span class="s6">5</span><span class="s2">, </span><span class="s6">5</span><span class="s2">, </span><span class="s6">4</span><span class="s2">), (</span><span class="s6">100</span><span class="s2">, </span><span class="s6">1</span><span class="s2">)])</span>
+    <span class="s0">def </span><span class="s1">test_array_reshaped</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">):</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s6">100</span><span class="s2">)</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">arr</span><span class="s2">.</span><span class="s1">reshape</span><span class="s2">(</span><span class="s1">shape</span><span class="s2">)</span>
+
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span>
+            <span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">))), </span><span class="s1">arr</span>
+        <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_array_list</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">arr_list </span><span class="s2">= [</span>
+            <span class="s4">&quot;a&quot;</span><span class="s2">,</span>
+            <span class="s2">[],</span>
+            <span class="s2">{},</span>
+            <span class="s2">{},</span>
+            <span class="s2">[],</span>
+            <span class="s6">42</span><span class="s2">,</span>
+            <span class="s6">97.8</span><span class="s2">,</span>
+            <span class="s2">[</span><span class="s4">&quot;a&quot;</span><span class="s2">, </span><span class="s4">&quot;b&quot;</span><span class="s2">],</span>
+            <span class="s2">{</span><span class="s4">&quot;key&quot;</span><span class="s2">: </span><span class="s4">&quot;val&quot;</span><span class="s2">},</span>
+        <span class="s2">]</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">arr_list</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">object</span><span class="s2">)</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">)), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">object</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">arr</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_array_float</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">dtype </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float32</span>
+
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s6">100.202</span><span class="s2">, </span><span class="s6">200.202</span><span class="s2">, </span><span class="s6">1</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">arr</span><span class="s2">.</span><span class="s1">reshape</span><span class="s2">((</span><span class="s6">5</span><span class="s2">, </span><span class="s6">5</span><span class="s2">, </span><span class="s6">4</span><span class="s2">))</span>
+
+        <span class="s1">arr_out </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">)), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_almost_equal</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">arr_out</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_0d_array</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># gh-18878</span>
+        <span class="s1">msg </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">escape</span><span class="s2">(</span>
+            <span class="s4">&quot;array(1) (numpy-scalar) is not JSON serializable at the moment&quot;</span>
+        <span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">msg</span><span class="s2">):</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s6">1</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">test_array_long_double</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">msg </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">compile</span><span class="s2">(</span>
+            <span class="s4">&quot;1234.5.* </span><span class="s0">\\</span><span class="s4">(numpy-scalar</span><span class="s0">\\</span><span class="s4">) is not JSON serializable at the moment&quot;</span>
+        <span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">msg</span><span class="s2">):</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">longdouble</span><span class="s2">(</span><span class="s6">1234.5</span><span class="s2">))</span>
+
+
+<span class="s0">class </span><span class="s1">TestPandasJSONTests</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">test_dataframe</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">orient</span><span class="s2">):</span>
+        <span class="s1">dtype </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span>
+
+        <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span>
+            <span class="s2">[[</span><span class="s6">1</span><span class="s2">, </span><span class="s6">2</span><span class="s2">, </span><span class="s6">3</span><span class="s2">], [</span><span class="s6">4</span><span class="s2">, </span><span class="s6">5</span><span class="s2">, </span><span class="s6">6</span><span class="s2">]],</span>
+            <span class="s1">index</span><span class="s2">=[</span><span class="s4">&quot;a&quot;</span><span class="s2">, </span><span class="s4">&quot;b&quot;</span><span class="s2">],</span>
+            <span class="s1">columns</span><span class="s2">=[</span><span class="s4">&quot;x&quot;</span><span class="s2">, </span><span class="s4">&quot;y&quot;</span><span class="s2">, </span><span class="s4">&quot;z&quot;</span><span class="s2">],</span>
+            <span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">,</span>
+        <span class="s2">)</span>
+        <span class="s1">encode_kwargs </span><span class="s2">= {} </span><span class="s0">if </span><span class="s1">orient </span><span class="s0">is None else </span><span class="s2">{</span><span class="s4">&quot;orient&quot;</span><span class="s2">: </span><span class="s1">orient</span><span class="s2">}</span>
+        <span class="s0">assert </span><span class="s2">(</span><span class="s1">df</span><span class="s2">.</span><span class="s1">dtypes </span><span class="s2">== </span><span class="s1">dtype</span><span class="s2">).</span><span class="s1">all</span><span class="s2">()</span>
+
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, **</span><span class="s1">encode_kwargs</span><span class="s2">))</span>
+        <span class="s0">assert </span><span class="s2">(</span><span class="s1">df</span><span class="s2">.</span><span class="s1">dtypes </span><span class="s2">== </span><span class="s1">dtype</span><span class="s2">).</span><span class="s1">all</span><span class="s2">()</span>
+
+        <span class="s5"># Ensure proper DataFrame initialization.</span>
+        <span class="s0">if </span><span class="s1">orient </span><span class="s2">== </span><span class="s4">&quot;split&quot;</span><span class="s2">:</span>
+            <span class="s1">dec </span><span class="s2">= </span><span class="s1">_clean_dict</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+            <span class="s1">output </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(**</span><span class="s1">dec</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">output </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+
+        <span class="s5"># Corrections to enable DataFrame comparison.</span>
+        <span class="s0">if </span><span class="s1">orient </span><span class="s2">== </span><span class="s4">&quot;values&quot;</span><span class="s2">:</span>
+            <span class="s1">df</span><span class="s2">.</span><span class="s1">columns </span><span class="s2">= [</span><span class="s6">0</span><span class="s2">, </span><span class="s6">1</span><span class="s2">, </span><span class="s6">2</span><span class="s2">]</span>
+            <span class="s1">df</span><span class="s2">.</span><span class="s1">index </span><span class="s2">= [</span><span class="s6">0</span><span class="s2">, </span><span class="s6">1</span><span class="s2">]</span>
+        <span class="s0">elif </span><span class="s1">orient </span><span class="s2">== </span><span class="s4">&quot;records&quot;</span><span class="s2">:</span>
+            <span class="s1">df</span><span class="s2">.</span><span class="s1">index </span><span class="s2">= [</span><span class="s6">0</span><span class="s2">, </span><span class="s6">1</span><span class="s2">]</span>
+        <span class="s0">elif </span><span class="s1">orient </span><span class="s2">== </span><span class="s4">&quot;index&quot;</span><span class="s2">:</span>
+            <span class="s1">df </span><span class="s2">= </span><span class="s1">df</span><span class="s2">.</span><span class="s1">transpose</span><span class="s2">()</span>
+
+        <span class="s0">assert </span><span class="s2">(</span><span class="s1">df</span><span class="s2">.</span><span class="s1">dtypes </span><span class="s2">== </span><span class="s1">dtype</span><span class="s2">).</span><span class="s1">all</span><span class="s2">()</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_frame_equal</span><span class="s2">(</span><span class="s1">output</span><span class="s2">, </span><span class="s1">df</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_dataframe_nested</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">orient</span><span class="s2">):</span>
+        <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span>
+            <span class="s2">[[</span><span class="s6">1</span><span class="s2">, </span><span class="s6">2</span><span class="s2">, </span><span class="s6">3</span><span class="s2">], [</span><span class="s6">4</span><span class="s2">, </span><span class="s6">5</span><span class="s2">, </span><span class="s6">6</span><span class="s2">]], </span><span class="s1">index</span><span class="s2">=[</span><span class="s4">&quot;a&quot;</span><span class="s2">, </span><span class="s4">&quot;b&quot;</span><span class="s2">], </span><span class="s1">columns</span><span class="s2">=[</span><span class="s4">&quot;x&quot;</span><span class="s2">, </span><span class="s4">&quot;y&quot;</span><span class="s2">, </span><span class="s4">&quot;z&quot;</span><span class="s2">]</span>
+        <span class="s2">)</span>
+
+        <span class="s1">nested </span><span class="s2">= {</span><span class="s4">&quot;df1&quot;</span><span class="s2">: </span><span class="s1">df</span><span class="s2">, </span><span class="s4">&quot;df2&quot;</span><span class="s2">: </span><span class="s1">df</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()}</span>
+        <span class="s1">kwargs </span><span class="s2">= {} </span><span class="s0">if </span><span class="s1">orient </span><span class="s0">is None else </span><span class="s2">{</span><span class="s4">&quot;orient&quot;</span><span class="s2">: </span><span class="s1">orient</span><span class="s2">}</span>
+
+        <span class="s1">exp </span><span class="s2">= {</span>
+            <span class="s4">&quot;df1&quot;</span><span class="s2">: </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)),</span>
+            <span class="s4">&quot;df2&quot;</span><span class="s2">: </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)),</span>
+        <span class="s2">}</span>
+        <span class="s0">assert </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">nested</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)) == </span><span class="s1">exp</span>
+
+    <span class="s0">def </span><span class="s1">test_series</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">orient</span><span class="s2">):</span>
+        <span class="s1">dtype </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span>
+        <span class="s1">s </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span>
+            <span class="s2">[</span><span class="s6">10</span><span class="s2">, </span><span class="s6">20</span><span class="s2">, </span><span class="s6">30</span><span class="s2">, </span><span class="s6">40</span><span class="s2">, </span><span class="s6">50</span><span class="s2">, </span><span class="s6">60</span><span class="s2">],</span>
+            <span class="s1">name</span><span class="s2">=</span><span class="s4">&quot;series&quot;</span><span class="s2">,</span>
+            <span class="s1">index</span><span class="s2">=[</span><span class="s6">6</span><span class="s2">, </span><span class="s6">7</span><span class="s2">, </span><span class="s6">8</span><span class="s2">, </span><span class="s6">9</span><span class="s2">, </span><span class="s6">10</span><span class="s2">, </span><span class="s6">15</span><span class="s2">],</span>
+            <span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">,</span>
+        <span class="s2">).</span><span class="s1">sort_values</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">s</span><span class="s2">.</span><span class="s1">dtype </span><span class="s2">== </span><span class="s1">dtype</span>
+
+        <span class="s1">encode_kwargs </span><span class="s2">= {} </span><span class="s0">if </span><span class="s1">orient </span><span class="s0">is None else </span><span class="s2">{</span><span class="s4">&quot;orient&quot;</span><span class="s2">: </span><span class="s1">orient</span><span class="s2">}</span>
+
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">s</span><span class="s2">, **</span><span class="s1">encode_kwargs</span><span class="s2">))</span>
+        <span class="s0">assert </span><span class="s1">s</span><span class="s2">.</span><span class="s1">dtype </span><span class="s2">== </span><span class="s1">dtype</span>
+
+        <span class="s0">if </span><span class="s1">orient </span><span class="s2">== </span><span class="s4">&quot;split&quot;</span><span class="s2">:</span>
+            <span class="s1">dec </span><span class="s2">= </span><span class="s1">_clean_dict</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+            <span class="s1">output </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(**</span><span class="s1">dec</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">output </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">output</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">orient </span><span class="s0">in </span><span class="s2">(</span><span class="s0">None</span><span class="s2">, </span><span class="s4">&quot;index&quot;</span><span class="s2">):</span>
+            <span class="s1">s</span><span class="s2">.</span><span class="s1">name </span><span class="s2">= </span><span class="s0">None</span>
+            <span class="s1">output </span><span class="s2">= </span><span class="s1">output</span><span class="s2">.</span><span class="s1">sort_values</span><span class="s2">()</span>
+            <span class="s1">s</span><span class="s2">.</span><span class="s1">index </span><span class="s2">= [</span><span class="s4">&quot;6&quot;</span><span class="s2">, </span><span class="s4">&quot;7&quot;</span><span class="s2">, </span><span class="s4">&quot;8&quot;</span><span class="s2">, </span><span class="s4">&quot;9&quot;</span><span class="s2">, </span><span class="s4">&quot;10&quot;</span><span class="s2">, </span><span class="s4">&quot;15&quot;</span><span class="s2">]</span>
+        <span class="s0">elif </span><span class="s1">orient </span><span class="s0">in </span><span class="s2">(</span><span class="s4">&quot;records&quot;</span><span class="s2">, </span><span class="s4">&quot;values&quot;</span><span class="s2">):</span>
+            <span class="s1">s</span><span class="s2">.</span><span class="s1">name </span><span class="s2">= </span><span class="s0">None</span>
+            <span class="s1">s</span><span class="s2">.</span><span class="s1">index </span><span class="s2">= [</span><span class="s6">0</span><span class="s2">, </span><span class="s6">1</span><span class="s2">, </span><span class="s6">2</span><span class="s2">, </span><span class="s6">3</span><span class="s2">, </span><span class="s6">4</span><span class="s2">, </span><span class="s6">5</span><span class="s2">]</span>
+
+        <span class="s0">assert </span><span class="s1">s</span><span class="s2">.</span><span class="s1">dtype </span><span class="s2">== </span><span class="s1">dtype</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_series_equal</span><span class="s2">(</span><span class="s1">output</span><span class="s2">, </span><span class="s1">s</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_series_nested</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">orient</span><span class="s2">):</span>
+        <span class="s1">s </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span>
+            <span class="s2">[</span><span class="s6">10</span><span class="s2">, </span><span class="s6">20</span><span class="s2">, </span><span class="s6">30</span><span class="s2">, </span><span class="s6">40</span><span class="s2">, </span><span class="s6">50</span><span class="s2">, </span><span class="s6">60</span><span class="s2">], </span><span class="s1">name</span><span class="s2">=</span><span class="s4">&quot;series&quot;</span><span class="s2">, </span><span class="s1">index</span><span class="s2">=[</span><span class="s6">6</span><span class="s2">, </span><span class="s6">7</span><span class="s2">, </span><span class="s6">8</span><span class="s2">, </span><span class="s6">9</span><span class="s2">, </span><span class="s6">10</span><span class="s2">, </span><span class="s6">15</span><span class="s2">]</span>
+        <span class="s2">).</span><span class="s1">sort_values</span><span class="s2">()</span>
+        <span class="s1">nested </span><span class="s2">= {</span><span class="s4">&quot;s1&quot;</span><span class="s2">: </span><span class="s1">s</span><span class="s2">, </span><span class="s4">&quot;s2&quot;</span><span class="s2">: </span><span class="s1">s</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()}</span>
+        <span class="s1">kwargs </span><span class="s2">= {} </span><span class="s0">if </span><span class="s1">orient </span><span class="s0">is None else </span><span class="s2">{</span><span class="s4">&quot;orient&quot;</span><span class="s2">: </span><span class="s1">orient</span><span class="s2">}</span>
+
+        <span class="s1">exp </span><span class="s2">= {</span>
+            <span class="s4">&quot;s1&quot;</span><span class="s2">: </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">s</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)),</span>
+            <span class="s4">&quot;s2&quot;</span><span class="s2">: </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">s</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)),</span>
+        <span class="s2">}</span>
+        <span class="s0">assert </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">nested</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)) == </span><span class="s1">exp</span>
+
+    <span class="s0">def </span><span class="s1">test_index</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">i </span><span class="s2">= </span><span class="s1">Index</span><span class="s2">([</span><span class="s6">23</span><span class="s2">, </span><span class="s6">45</span><span class="s2">, </span><span class="s6">18</span><span class="s2">, </span><span class="s6">98</span><span class="s2">, </span><span class="s6">43</span><span class="s2">, </span><span class="s6">11</span><span class="s2">], </span><span class="s1">name</span><span class="s2">=</span><span class="s4">&quot;index&quot;</span><span class="s2">)</span>
+
+        <span class="s5"># Column indexed.</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">Index</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">i</span><span class="s2">)), </span><span class="s1">name</span><span class="s2">=</span><span class="s4">&quot;index&quot;</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">i</span><span class="s2">, </span><span class="s1">output</span><span class="s2">)</span>
+
+        <span class="s1">dec </span><span class="s2">= </span><span class="s1">_clean_dict</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">i</span><span class="s2">, </span><span class="s1">orient</span><span class="s2">=</span><span class="s4">&quot;split&quot;</span><span class="s2">)))</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">Index</span><span class="s2">(**</span><span class="s1">dec</span><span class="s2">)</span>
+
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">i</span><span class="s2">, </span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">i</span><span class="s2">.</span><span class="s1">name </span><span class="s2">== </span><span class="s1">output</span><span class="s2">.</span><span class="s1">name</span>
+
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">i</span><span class="s2">, </span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">i</span><span class="s2">.</span><span class="s1">name </span><span class="s2">== </span><span class="s1">output</span><span class="s2">.</span><span class="s1">name</span>
+
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">Index</span><span class="s2">(</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">i</span><span class="s2">, </span><span class="s1">orient</span><span class="s2">=</span><span class="s4">&quot;values&quot;</span><span class="s2">)), </span><span class="s1">name</span><span class="s2">=</span><span class="s4">&quot;index&quot;</span>
+        <span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">i</span><span class="s2">, </span><span class="s1">output</span><span class="s2">)</span>
+
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">Index</span><span class="s2">(</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">i</span><span class="s2">, </span><span class="s1">orient</span><span class="s2">=</span><span class="s4">&quot;records&quot;</span><span class="s2">)), </span><span class="s1">name</span><span class="s2">=</span><span class="s4">&quot;index&quot;</span>
+        <span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">i</span><span class="s2">, </span><span class="s1">output</span><span class="s2">)</span>
+
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">Index</span><span class="s2">(</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">i</span><span class="s2">, </span><span class="s1">orient</span><span class="s2">=</span><span class="s4">&quot;index&quot;</span><span class="s2">)), </span><span class="s1">name</span><span class="s2">=</span><span class="s4">&quot;index&quot;</span>
+        <span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">i</span><span class="s2">, </span><span class="s1">output</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_datetime_index</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">date_unit </span><span class="s2">= </span><span class="s4">&quot;ns&quot;</span>
+
+        <span class="s5"># freq doesn't round-trip</span>
+        <span class="s1">rng </span><span class="s2">= </span><span class="s1">DatetimeIndex</span><span class="s2">(</span>
+            <span class="s1">list</span><span class="s2">(</span><span class="s1">date_range</span><span class="s2">(</span><span class="s4">&quot;1/1/2000&quot;</span><span class="s2">, </span><span class="s1">periods</span><span class="s2">=</span><span class="s6">20</span><span class="s2">, </span><span class="s1">unit</span><span class="s2">=</span><span class="s4">&quot;ns&quot;</span><span class="s2">)), </span><span class="s1">freq</span><span class="s2">=</span><span class="s0">None</span>
+        <span class="s2">)</span>
+        <span class="s1">encoded </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">rng</span><span class="s2">, </span><span class="s1">date_unit</span><span class="s2">=</span><span class="s1">date_unit</span><span class="s2">)</span>
+
+        <span class="s1">decoded </span><span class="s2">= </span><span class="s1">DatetimeIndex</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">encoded</span><span class="s2">)))</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">rng</span><span class="s2">, </span><span class="s1">decoded</span><span class="s2">)</span>
+
+        <span class="s1">ts </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">default_rng</span><span class="s2">(</span><span class="s6">2</span><span class="s2">).</span><span class="s1">standard_normal</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">rng</span><span class="s2">)), </span><span class="s1">index</span><span class="s2">=</span><span class="s1">rng</span><span class="s2">)</span>
+        <span class="s1">decoded </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">ts</span><span class="s2">, </span><span class="s1">date_unit</span><span class="s2">=</span><span class="s1">date_unit</span><span class="s2">)))</span>
+
+        <span class="s1">idx_values </span><span class="s2">= </span><span class="s1">decoded</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">values</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+        <span class="s1">decoded</span><span class="s2">.</span><span class="s1">index </span><span class="s2">= </span><span class="s1">DatetimeIndex</span><span class="s2">(</span><span class="s1">idx_values</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_series_equal</span><span class="s2">(</span><span class="s1">ts</span><span class="s2">, </span><span class="s1">decoded</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+        <span class="s4">&quot;invalid_arr&quot;</span><span class="s2">,</span>
+        <span class="s2">[</span>
+            <span class="s4">&quot;[31337,]&quot;</span><span class="s2">,  </span><span class="s5"># Trailing comma.</span>
+            <span class="s4">&quot;[,31337]&quot;</span><span class="s2">,  </span><span class="s5"># Leading comma.</span>
+            <span class="s4">&quot;[]]&quot;</span><span class="s2">,  </span><span class="s5"># Unmatched bracket.</span>
+            <span class="s4">&quot;[,]&quot;</span><span class="s2">,  </span><span class="s5"># Only comma.</span>
+        <span class="s2">],</span>
+    <span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_decode_invalid_array</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">invalid_arr</span><span class="s2">):</span>
+        <span class="s1">msg </span><span class="s2">= (</span>
+            <span class="s4">&quot;Expected object or value|Trailing data|&quot;</span>
+            <span class="s4">&quot;Unexpected character found when decoding array value&quot;</span>
+        <span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">msg</span><span class="s2">):</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">invalid_arr</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;arr&quot;</span><span class="s2">, [[], [</span><span class="s6">31337</span><span class="s2">]])</span>
+    <span class="s0">def </span><span class="s1">test_decode_array</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">arr</span><span class="s2">):</span>
+        <span class="s0">assert </span><span class="s1">arr </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">))</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;extreme_num&quot;</span><span class="s2">, [</span><span class="s6">9223372036854775807</span><span class="s2">, -</span><span class="s6">9223372036854775808</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_decode_extreme_numbers</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">extreme_num</span><span class="s2">):</span>
+        <span class="s0">assert </span><span class="s1">extreme_num </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">extreme_num</span><span class="s2">))</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;too_extreme_num&quot;</span><span class="s2">, [</span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s6">2</span><span class="s2">**</span><span class="s6">64</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s2">-(</span><span class="s6">2</span><span class="s2">**</span><span class="s6">63</span><span class="s2">) - </span><span class="s6">1</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_decode_too_extreme_numbers</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">too_extreme_num</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span>
+            <span class="s1">ValueError</span><span class="s2">,</span>
+            <span class="s1">match</span><span class="s2">=</span><span class="s4">&quot;Value is too big|Value is too small&quot;</span><span class="s2">,</span>
+        <span class="s2">):</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">too_extreme_num</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_decode_with_trailing_whitespaces</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">assert </span><span class="s2">{} == </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s4">&quot;{}</span><span class="s0">\n\t </span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_decode_with_trailing_non_whitespaces</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s4">&quot;Trailing data&quot;</span><span class="s2">):</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s4">&quot;{}</span><span class="s0">\n\t </span><span class="s4">a&quot;</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;value&quot;</span><span class="s2">, [</span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s6">2</span><span class="s2">**</span><span class="s6">64</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s2">-(</span><span class="s6">2</span><span class="s2">**</span><span class="s6">63</span><span class="s2">) - </span><span class="s6">1</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_decode_array_with_big_int</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span>
+            <span class="s1">ValueError</span><span class="s2">,</span>
+            <span class="s1">match</span><span class="s2">=</span><span class="s4">&quot;Value is too big|Value is too small&quot;</span><span class="s2">,</span>
+        <span class="s2">):</span>
+            <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">value</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+        <span class="s4">&quot;float_number&quot;</span><span class="s2">,</span>
+        <span class="s2">[</span>
+            <span class="s6">1.1234567893</span><span class="s2">,</span>
+            <span class="s6">1.234567893</span><span class="s2">,</span>
+            <span class="s6">1.34567893</span><span class="s2">,</span>
+            <span class="s6">1.4567893</span><span class="s2">,</span>
+            <span class="s6">1.567893</span><span class="s2">,</span>
+            <span class="s6">1.67893</span><span class="s2">,</span>
+            <span class="s6">1.7893</span><span class="s2">,</span>
+            <span class="s6">1.893</span><span class="s2">,</span>
+            <span class="s6">1.3</span><span class="s2">,</span>
+        <span class="s2">],</span>
+    <span class="s2">)</span>
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;sign&quot;</span><span class="s2">, [-</span><span class="s6">1</span><span class="s2">, </span><span class="s6">1</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_decode_floating_point</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">sign</span><span class="s2">, </span><span class="s1">float_number</span><span class="s2">):</span>
+        <span class="s1">float_number </span><span class="s2">*= </span><span class="s1">sign</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_almost_equal</span><span class="s2">(</span>
+            <span class="s1">float_number</span><span class="s2">, </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">float_number</span><span class="s2">)), </span><span class="s1">rtol</span><span class="s2">=</span><span class="s6">1e-15</span>
+        <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_big_set</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">s </span><span class="s2">= </span><span class="s1">set</span><span class="s2">(</span><span class="s1">range</span><span class="s2">(</span><span class="s6">100000</span><span class="s2">))</span>
+        <span class="s5"># Make sure no Exception is raised.</span>
+        <span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">s</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_empty_set</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">assert </span><span class="s4">&quot;[]&quot; </span><span class="s2">== </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">set</span><span class="s2">())</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_set</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">s </span><span class="s2">= {</span><span class="s6">1</span><span class="s2">, </span><span class="s6">2</span><span class="s2">, </span><span class="s6">3</span><span class="s2">, </span><span class="s6">4</span><span class="s2">, </span><span class="s6">5</span><span class="s2">, </span><span class="s6">6</span><span class="s2">, </span><span class="s6">7</span><span class="s2">, </span><span class="s6">8</span><span class="s2">, </span><span class="s6">9</span><span class="s2">}</span>
+        <span class="s1">enc </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">s</span><span class="s2">)</span>
+        <span class="s1">dec </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_loads</span><span class="s2">(</span><span class="s1">enc</span><span class="s2">)</span>
+
+        <span class="s0">for </span><span class="s1">v </span><span class="s0">in </span><span class="s1">dec</span><span class="s2">:</span>
+            <span class="s0">assert </span><span class="s1">v </span><span class="s0">in </span><span class="s1">s</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+        <span class="s4">&quot;td&quot;</span><span class="s2">,</span>
+        <span class="s2">[</span>
+            <span class="s1">Timedelta</span><span class="s2">(</span><span class="s1">days</span><span class="s2">=</span><span class="s6">366</span><span class="s2">),</span>
+            <span class="s1">Timedelta</span><span class="s2">(</span><span class="s1">days</span><span class="s2">=-</span><span class="s6">1</span><span class="s2">),</span>
+            <span class="s1">Timedelta</span><span class="s2">(</span><span class="s1">hours</span><span class="s2">=</span><span class="s6">13</span><span class="s2">, </span><span class="s1">minutes</span><span class="s2">=</span><span class="s6">5</span><span class="s2">, </span><span class="s1">seconds</span><span class="s2">=</span><span class="s6">5</span><span class="s2">),</span>
+            <span class="s1">Timedelta</span><span class="s2">(</span><span class="s1">hours</span><span class="s2">=</span><span class="s6">13</span><span class="s2">, </span><span class="s1">minutes</span><span class="s2">=</span><span class="s6">20</span><span class="s2">, </span><span class="s1">seconds</span><span class="s2">=</span><span class="s6">30</span><span class="s2">),</span>
+            <span class="s1">Timedelta</span><span class="s2">(</span><span class="s1">days</span><span class="s2">=-</span><span class="s6">1</span><span class="s2">, </span><span class="s1">nanoseconds</span><span class="s2">=</span><span class="s6">5</span><span class="s2">),</span>
+            <span class="s1">Timedelta</span><span class="s2">(</span><span class="s1">nanoseconds</span><span class="s2">=</span><span class="s6">1</span><span class="s2">),</span>
+            <span class="s1">Timedelta</span><span class="s2">(</span><span class="s1">microseconds</span><span class="s2">=</span><span class="s6">1</span><span class="s2">, </span><span class="s1">nanoseconds</span><span class="s2">=</span><span class="s6">1</span><span class="s2">),</span>
+            <span class="s1">Timedelta</span><span class="s2">(</span><span class="s1">milliseconds</span><span class="s2">=</span><span class="s6">1</span><span class="s2">, </span><span class="s1">microseconds</span><span class="s2">=</span><span class="s6">1</span><span class="s2">, </span><span class="s1">nanoseconds</span><span class="s2">=</span><span class="s6">1</span><span class="s2">),</span>
+            <span class="s1">Timedelta</span><span class="s2">(</span><span class="s1">milliseconds</span><span class="s2">=</span><span class="s6">999</span><span class="s2">, </span><span class="s1">microseconds</span><span class="s2">=</span><span class="s6">999</span><span class="s2">, </span><span class="s1">nanoseconds</span><span class="s2">=</span><span class="s6">999</span><span class="s2">),</span>
+        <span class="s2">],</span>
+    <span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_encode_timedelta_iso</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">td</span><span class="s2">):</span>
+        <span class="s5"># GH 28256</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">ujson</span><span class="s2">.</span><span class="s1">ujson_dumps</span><span class="s2">(</span><span class="s1">td</span><span class="s2">, </span><span class="s1">iso_dates</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s4">f'&quot;</span><span class="s0">{</span><span class="s1">td</span><span class="s2">.</span><span class="s1">isoformat</span><span class="s2">()</span><span class="s0">}</span><span class="s4">&quot;'</span>
+
+        <span class="s0">assert </span><span class="s1">result </span><span class="s2">== </span><span class="s1">expected</span>
+
+    <span class="s0">def </span><span class="s1">test_encode_periodindex</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># GH 46683</span>
+        <span class="s1">p </span><span class="s2">= </span><span class="s1">PeriodIndex</span><span class="s2">([</span><span class="s4">&quot;2022-04-06&quot;</span><span class="s2">, </span><span class="s4">&quot;2022-04-07&quot;</span><span class="s2">], </span><span class="s1">freq</span><span class="s2">=</span><span class="s4">&quot;D&quot;</span><span class="s2">)</span>
+        <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span><span class="s1">index</span><span class="s2">=</span><span class="s1">p</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">df</span><span class="s2">.</span><span class="s1">to_json</span><span class="s2">() == </span><span class="s4">&quot;{}&quot;</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,703 @@
+<html>
+<head>
+<title>parquet.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+parquet.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;parquet compat&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">import </span><span class="s1">io</span>
+<span class="s2">import </span><span class="s1">json</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s3">,</span>
+    <span class="s1">Any</span><span class="s3">,</span>
+    <span class="s1">Literal</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">warnings </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">catch_warnings</span><span class="s3">,</span>
+    <span class="s1">filterwarnings</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs </span><span class="s2">import </span><span class="s1">lib</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">compat</span><span class="s3">.</span><span class="s1">_optional </span><span class="s2">import </span><span class="s1">import_optional_dependency</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">errors </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">AbstractMethodError</span><span class="s3">,</span>
+    <span class="s1">Pandas4Warning</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">_decorators </span><span class="s2">import </span><span class="s1">set_module</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">_validators </span><span class="s2">import </span><span class="s1">check_dtype_backend</span>
+
+<span class="s2">from </span><span class="s1">pandas </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">DataFrame</span><span class="s3">,</span>
+    <span class="s1">get_option</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">_util </span><span class="s2">import </span><span class="s1">arrow_table_to_pandas</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">common </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">IOHandles</span><span class="s3">,</span>
+    <span class="s1">get_handle</span><span class="s3">,</span>
+    <span class="s1">is_fsspec_url</span><span class="s3">,</span>
+    <span class="s1">is_url</span><span class="s3">,</span>
+    <span class="s1">stringify_path</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_typing </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">DtypeBackend</span><span class="s3">,</span>
+        <span class="s1">FilePath</span><span class="s3">,</span>
+        <span class="s1">ParquetCompressionOptions</span><span class="s3">,</span>
+        <span class="s1">ReadBuffer</span><span class="s3">,</span>
+        <span class="s1">StorageOptions</span><span class="s3">,</span>
+        <span class="s1">WriteBuffer</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">get_engine</span><span class="s3">(</span><span class="s1">engine</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; BaseImpl</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot;return our implementation&quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">engine </span><span class="s3">== </span><span class="s4">&quot;auto&quot;</span><span class="s3">:</span>
+        <span class="s1">engine </span><span class="s3">= </span><span class="s1">get_option</span><span class="s3">(</span><span class="s4">&quot;io.parquet.engine&quot;</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">engine </span><span class="s3">== </span><span class="s4">&quot;auto&quot;</span><span class="s3">:</span>
+        <span class="s5"># try engines in this order</span>
+        <span class="s1">engine_classes </span><span class="s3">= [</span><span class="s1">PyArrowImpl</span><span class="s3">, </span><span class="s1">FastParquetImpl</span><span class="s3">]</span>
+
+        <span class="s1">error_msgs </span><span class="s3">= </span><span class="s4">&quot;&quot;</span>
+        <span class="s2">for </span><span class="s1">engine_class </span><span class="s2">in </span><span class="s1">engine_classes</span><span class="s3">:</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">engine_class</span><span class="s3">()</span>
+            <span class="s2">except </span><span class="s1">ImportError </span><span class="s2">as </span><span class="s1">err</span><span class="s3">:</span>
+                <span class="s1">error_msgs </span><span class="s3">+= </span><span class="s4">&quot;</span><span class="s2">\n </span><span class="s4">- &quot; </span><span class="s3">+ </span><span class="s1">str</span><span class="s3">(</span><span class="s1">err</span><span class="s3">)</span>
+
+        <span class="s2">raise </span><span class="s1">ImportError</span><span class="s3">(</span>
+            <span class="s4">&quot;Unable to find a usable engine; &quot;</span>
+            <span class="s4">&quot;tried using: 'pyarrow', 'fastparquet'.</span><span class="s2">\n</span><span class="s4">&quot;</span>
+            <span class="s4">&quot;A suitable version of &quot;</span>
+            <span class="s4">&quot;pyarrow or fastparquet is required for parquet &quot;</span>
+            <span class="s4">&quot;support.</span><span class="s2">\n</span><span class="s4">&quot;</span>
+            <span class="s4">&quot;Trying to import the above resulted in these errors:&quot;</span>
+            <span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">error_msgs</span><span class="s2">}</span><span class="s4">&quot;</span>
+        <span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">engine </span><span class="s3">== </span><span class="s4">&quot;pyarrow&quot;</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">PyArrowImpl</span><span class="s3">()</span>
+    <span class="s2">elif </span><span class="s1">engine </span><span class="s3">== </span><span class="s4">&quot;fastparquet&quot;</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">FastParquetImpl</span><span class="s3">()</span>
+
+    <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;engine must be one of 'pyarrow', 'fastparquet'&quot;</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_get_path_or_handle</span><span class="s3">(</span>
+    <span class="s1">path</span><span class="s3">: </span><span class="s1">FilePath </span><span class="s3">| </span><span class="s1">ReadBuffer</span><span class="s3">[</span><span class="s1">bytes</span><span class="s3">] | </span><span class="s1">WriteBuffer</span><span class="s3">[</span><span class="s1">bytes</span><span class="s3">],</span>
+    <span class="s1">fs</span><span class="s3">: </span><span class="s1">Any</span><span class="s3">,</span>
+    <span class="s1">storage_options</span><span class="s3">: </span><span class="s1">StorageOptions </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">mode</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s4">&quot;rb&quot;</span><span class="s3">,</span>
+    <span class="s1">is_dir</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span>
+    <span class="s1">FilePath </span><span class="s3">| </span><span class="s1">ReadBuffer</span><span class="s3">[</span><span class="s1">bytes</span><span class="s3">] | </span><span class="s1">WriteBuffer</span><span class="s3">[</span><span class="s1">bytes</span><span class="s3">], </span><span class="s1">IOHandles</span><span class="s3">[</span><span class="s1">bytes</span><span class="s3">] | </span><span class="s2">None</span><span class="s3">, </span><span class="s1">Any</span>
+<span class="s3">]:</span>
+    <span class="s0">&quot;&quot;&quot;File handling for PyArrow.&quot;&quot;&quot;</span>
+    <span class="s1">path_or_handle </span><span class="s3">= </span><span class="s1">stringify_path</span><span class="s3">(</span><span class="s1">path</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">fs </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s1">pa_fs </span><span class="s3">= </span><span class="s1">import_optional_dependency</span><span class="s3">(</span><span class="s4">&quot;pyarrow.fs&quot;</span><span class="s3">, </span><span class="s1">errors</span><span class="s3">=</span><span class="s4">&quot;ignore&quot;</span><span class="s3">)</span>
+        <span class="s1">fsspec </span><span class="s3">= </span><span class="s1">import_optional_dependency</span><span class="s3">(</span><span class="s4">&quot;fsspec&quot;</span><span class="s3">, </span><span class="s1">errors</span><span class="s3">=</span><span class="s4">&quot;ignore&quot;</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">pa_fs </span><span class="s2">is not None and </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">fs</span><span class="s3">, </span><span class="s1">pa_fs</span><span class="s3">.</span><span class="s1">FileSystem</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">storage_options</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">NotImplementedError</span><span class="s3">(</span>
+                    <span class="s4">&quot;storage_options not supported with a pyarrow FileSystem.&quot;</span>
+                <span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">fsspec </span><span class="s2">is not None and </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">fs</span><span class="s3">, </span><span class="s1">fsspec</span><span class="s3">.</span><span class="s1">spec</span><span class="s3">.</span><span class="s1">AbstractFileSystem</span><span class="s3">):</span>
+            <span class="s2">pass</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                <span class="s4">f&quot;filesystem must be a pyarrow or fsspec FileSystem, &quot;</span>
+                <span class="s4">f&quot;not a </span><span class="s2">{</span><span class="s1">type</span><span class="s3">(</span><span class="s1">fs</span><span class="s3">).</span><span class="s1">__name__</span><span class="s2">}</span><span class="s4">&quot;</span>
+            <span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">is_fsspec_url</span><span class="s3">(</span><span class="s1">path_or_handle</span><span class="s3">) </span><span class="s2">and </span><span class="s1">fs </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">storage_options </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">pa </span><span class="s3">= </span><span class="s1">import_optional_dependency</span><span class="s3">(</span><span class="s4">&quot;pyarrow&quot;</span><span class="s3">)</span>
+            <span class="s1">pa_fs </span><span class="s3">= </span><span class="s1">import_optional_dependency</span><span class="s3">(</span><span class="s4">&quot;pyarrow.fs&quot;</span><span class="s3">)</span>
+
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">fs</span><span class="s3">, </span><span class="s1">path_or_handle </span><span class="s3">= </span><span class="s1">pa_fs</span><span class="s3">.</span><span class="s1">FileSystem</span><span class="s3">.</span><span class="s1">from_uri</span><span class="s3">(</span><span class="s1">path</span><span class="s3">)</span>
+            <span class="s2">except </span><span class="s3">(</span><span class="s1">TypeError</span><span class="s3">, </span><span class="s1">pa</span><span class="s3">.</span><span class="s1">ArrowInvalid</span><span class="s3">):</span>
+                <span class="s2">pass</span>
+        <span class="s2">if </span><span class="s1">fs </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">fsspec </span><span class="s3">= </span><span class="s1">import_optional_dependency</span><span class="s3">(</span><span class="s4">&quot;fsspec&quot;</span><span class="s3">)</span>
+            <span class="s1">fs</span><span class="s3">, </span><span class="s1">path_or_handle </span><span class="s3">= </span><span class="s1">fsspec</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">url_to_fs</span><span class="s3">(</span>
+                <span class="s1">path_or_handle</span><span class="s3">, **(</span><span class="s1">storage_options </span><span class="s2">or </span><span class="s3">{})</span>
+            <span class="s3">)</span>
+    <span class="s2">elif </span><span class="s1">storage_options </span><span class="s2">and </span><span class="s3">(</span><span class="s2">not </span><span class="s1">is_url</span><span class="s3">(</span><span class="s1">path_or_handle</span><span class="s3">) </span><span class="s2">or </span><span class="s1">mode </span><span class="s3">!= </span><span class="s4">&quot;rb&quot;</span><span class="s3">):</span>
+        <span class="s5"># can't write to a remote url</span>
+        <span class="s5"># without making use of fsspec at the moment</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;storage_options passed with buffer, or non-supported URL&quot;</span><span class="s3">)</span>
+
+    <span class="s1">handles </span><span class="s3">= </span><span class="s2">None</span>
+    <span class="s2">if </span><span class="s3">(</span>
+        <span class="s2">not </span><span class="s1">fs</span>
+        <span class="s2">and not </span><span class="s1">is_dir</span>
+        <span class="s2">and </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">path_or_handle</span><span class="s3">, </span><span class="s1">str</span><span class="s3">)</span>
+        <span class="s2">and not </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">isdir</span><span class="s3">(</span><span class="s1">path_or_handle</span><span class="s3">)</span>
+    <span class="s3">):</span>
+        <span class="s5"># use get_handle only when we are very certain that it is not a directory</span>
+        <span class="s5"># fsspec resources can also point to directories</span>
+        <span class="s5"># this branch is used for example when reading from non-fsspec URLs</span>
+        <span class="s1">handles </span><span class="s3">= </span><span class="s1">get_handle</span><span class="s3">(</span>
+            <span class="s1">path_or_handle</span><span class="s3">, </span><span class="s1">mode</span><span class="s3">, </span><span class="s1">is_text</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, </span><span class="s1">storage_options</span><span class="s3">=</span><span class="s1">storage_options</span>
+        <span class="s3">)</span>
+        <span class="s1">fs </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s1">path_or_handle </span><span class="s3">= </span><span class="s1">handles</span><span class="s3">.</span><span class="s1">handle</span>
+    <span class="s2">return </span><span class="s1">path_or_handle</span><span class="s3">, </span><span class="s1">handles</span><span class="s3">, </span><span class="s1">fs</span>
+
+
+<span class="s2">class </span><span class="s1">BaseImpl</span><span class="s3">:</span>
+    <span class="s3">@</span><span class="s1">staticmethod</span>
+    <span class="s2">def </span><span class="s1">validate_dataframe</span><span class="s3">(</span><span class="s1">df</span><span class="s3">: </span><span class="s1">DataFrame</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">df</span><span class="s3">, </span><span class="s1">DataFrame</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;to_parquet only supports IO with DataFrames&quot;</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">write</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">df</span><span class="s3">: </span><span class="s1">DataFrame</span><span class="s3">, </span><span class="s1">path</span><span class="s3">, </span><span class="s1">compression</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">AbstractMethodError</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">read</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">path</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">) </span><span class="s1">-&gt; DataFrame</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">AbstractMethodError</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">PyArrowImpl</span><span class="s3">(</span><span class="s1">BaseImpl</span><span class="s3">):</span>
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">import_optional_dependency</span><span class="s3">(</span>
+            <span class="s4">&quot;pyarrow&quot;</span><span class="s3">, </span><span class="s1">extra</span><span class="s3">=</span><span class="s4">&quot;pyarrow is required for parquet support.&quot;</span>
+        <span class="s3">)</span>
+        <span class="s2">import </span><span class="s1">pyarrow</span><span class="s3">.</span><span class="s1">parquet</span>
+
+        <span class="s5"># import utils to register the pyarrow extension types</span>
+        <span class="s2">import </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">arrays</span><span class="s3">.</span><span class="s1">arrow</span><span class="s3">.</span><span class="s1">extension_types  </span><span class="s5"># pyright: ignore[reportUnusedImport] # noqa: F401</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">api </span><span class="s3">= </span><span class="s1">pyarrow</span>
+
+    <span class="s2">def </span><span class="s1">write</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">df</span><span class="s3">: </span><span class="s1">DataFrame</span><span class="s3">,</span>
+        <span class="s1">path</span><span class="s3">: </span><span class="s1">FilePath </span><span class="s3">| </span><span class="s1">WriteBuffer</span><span class="s3">[</span><span class="s1">bytes</span><span class="s3">],</span>
+        <span class="s1">compression</span><span class="s3">: </span><span class="s1">ParquetCompressionOptions </span><span class="s3">= </span><span class="s4">&quot;snappy&quot;</span><span class="s3">,</span>
+        <span class="s1">index</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">storage_options</span><span class="s3">: </span><span class="s1">StorageOptions </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">partition_cols</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">filesystem</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s3">**</span><span class="s1">kwargs</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">validate_dataframe</span><span class="s3">(</span><span class="s1">df</span><span class="s3">)</span>
+
+        <span class="s1">from_pandas_kwargs</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">] = {</span><span class="s4">&quot;schema&quot;</span><span class="s3">: </span><span class="s1">kwargs</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">(</span><span class="s4">&quot;schema&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)}</span>
+        <span class="s2">if </span><span class="s1">index </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">from_pandas_kwargs</span><span class="s3">[</span><span class="s4">&quot;preserve_index&quot;</span><span class="s3">] = </span><span class="s1">index</span>
+
+        <span class="s1">table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">api</span><span class="s3">.</span><span class="s1">Table</span><span class="s3">.</span><span class="s1">from_pandas</span><span class="s3">(</span><span class="s1">df</span><span class="s3">, **</span><span class="s1">from_pandas_kwargs</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">df</span><span class="s3">.</span><span class="s1">attrs</span><span class="s3">:</span>
+            <span class="s1">df_metadata </span><span class="s3">= {</span><span class="s4">&quot;PANDAS_ATTRS&quot;</span><span class="s3">: </span><span class="s1">json</span><span class="s3">.</span><span class="s1">dumps</span><span class="s3">(</span><span class="s1">df</span><span class="s3">.</span><span class="s1">attrs</span><span class="s3">)}</span>
+            <span class="s1">existing_metadata </span><span class="s3">= </span><span class="s1">table</span><span class="s3">.</span><span class="s1">schema</span><span class="s3">.</span><span class="s1">metadata</span>
+            <span class="s1">merged_metadata </span><span class="s3">= {**</span><span class="s1">existing_metadata</span><span class="s3">, **</span><span class="s1">df_metadata</span><span class="s3">}</span>
+            <span class="s1">table </span><span class="s3">= </span><span class="s1">table</span><span class="s3">.</span><span class="s1">replace_schema_metadata</span><span class="s3">(</span><span class="s1">merged_metadata</span><span class="s3">)</span>
+
+        <span class="s1">path_or_handle</span><span class="s3">, </span><span class="s1">handles</span><span class="s3">, </span><span class="s1">filesystem </span><span class="s3">= </span><span class="s1">_get_path_or_handle</span><span class="s3">(</span>
+            <span class="s1">path</span><span class="s3">,</span>
+            <span class="s1">filesystem</span><span class="s3">,</span>
+            <span class="s1">storage_options</span><span class="s3">=</span><span class="s1">storage_options</span><span class="s3">,</span>
+            <span class="s1">mode</span><span class="s3">=</span><span class="s4">&quot;wb&quot;</span><span class="s3">,</span>
+            <span class="s1">is_dir</span><span class="s3">=</span><span class="s1">partition_cols </span><span class="s2">is not None</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s2">if </span><span class="s3">(</span>
+            <span class="s1">isinstance</span><span class="s3">(</span><span class="s1">path_or_handle</span><span class="s3">, </span><span class="s1">io</span><span class="s3">.</span><span class="s1">BufferedWriter</span><span class="s3">)</span>
+            <span class="s2">and </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">path_or_handle</span><span class="s3">, </span><span class="s4">&quot;name&quot;</span><span class="s3">)</span>
+            <span class="s2">and </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">path_or_handle</span><span class="s3">.</span><span class="s1">name</span><span class="s3">, (</span><span class="s1">str</span><span class="s3">, </span><span class="s1">bytes</span><span class="s3">))</span>
+        <span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">path_or_handle</span><span class="s3">.</span><span class="s1">name</span><span class="s3">, </span><span class="s1">bytes</span><span class="s3">):</span>
+                <span class="s1">path_or_handle </span><span class="s3">= </span><span class="s1">path_or_handle</span><span class="s3">.</span><span class="s1">name</span><span class="s3">.</span><span class="s1">decode</span><span class="s3">()</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">path_or_handle </span><span class="s3">= </span><span class="s1">path_or_handle</span><span class="s3">.</span><span class="s1">name</span>
+
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">partition_cols </span><span class="s2">is not None</span><span class="s3">:</span>
+                <span class="s5"># writes to multiple files under the given path</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">api</span><span class="s3">.</span><span class="s1">parquet</span><span class="s3">.</span><span class="s1">write_to_dataset</span><span class="s3">(</span>
+                    <span class="s1">table</span><span class="s3">,</span>
+                    <span class="s1">path_or_handle</span><span class="s3">,</span>
+                    <span class="s1">compression</span><span class="s3">=</span><span class="s1">compression</span><span class="s3">,</span>
+                    <span class="s1">partition_cols</span><span class="s3">=</span><span class="s1">partition_cols</span><span class="s3">,</span>
+                    <span class="s1">filesystem</span><span class="s3">=</span><span class="s1">filesystem</span><span class="s3">,</span>
+                    <span class="s3">**</span><span class="s1">kwargs</span><span class="s3">,</span>
+                <span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s5"># write to single output file</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">api</span><span class="s3">.</span><span class="s1">parquet</span><span class="s3">.</span><span class="s1">write_table</span><span class="s3">(</span>
+                    <span class="s1">table</span><span class="s3">,</span>
+                    <span class="s1">path_or_handle</span><span class="s3">,</span>
+                    <span class="s1">compression</span><span class="s3">=</span><span class="s1">compression</span><span class="s3">,</span>
+                    <span class="s1">filesystem</span><span class="s3">=</span><span class="s1">filesystem</span><span class="s3">,</span>
+                    <span class="s3">**</span><span class="s1">kwargs</span><span class="s3">,</span>
+                <span class="s3">)</span>
+        <span class="s2">finally</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">handles </span><span class="s2">is not None</span><span class="s3">:</span>
+                <span class="s1">handles</span><span class="s3">.</span><span class="s1">close</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">read</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">path</span><span class="s3">,</span>
+        <span class="s1">columns</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">filters</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">dtype_backend</span><span class="s3">: </span><span class="s1">DtypeBackend </span><span class="s3">| </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">NoDefault </span><span class="s3">= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">no_default</span><span class="s3">,</span>
+        <span class="s1">storage_options</span><span class="s3">: </span><span class="s1">StorageOptions </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">filesystem</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">to_pandas_kwargs</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s3">**</span><span class="s1">kwargs</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; DataFrame</span><span class="s3">:</span>
+        <span class="s1">kwargs</span><span class="s3">[</span><span class="s4">&quot;use_pandas_metadata&quot;</span><span class="s3">] = </span><span class="s2">True</span>
+
+        <span class="s1">path_or_handle</span><span class="s3">, </span><span class="s1">handles</span><span class="s3">, </span><span class="s1">filesystem </span><span class="s3">= </span><span class="s1">_get_path_or_handle</span><span class="s3">(</span>
+            <span class="s1">path</span><span class="s3">,</span>
+            <span class="s1">filesystem</span><span class="s3">,</span>
+            <span class="s1">storage_options</span><span class="s3">=</span><span class="s1">storage_options</span><span class="s3">,</span>
+            <span class="s1">mode</span><span class="s3">=</span><span class="s4">&quot;rb&quot;</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">pa_table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">api</span><span class="s3">.</span><span class="s1">parquet</span><span class="s3">.</span><span class="s1">read_table</span><span class="s3">(</span>
+                <span class="s1">path_or_handle</span><span class="s3">,</span>
+                <span class="s1">columns</span><span class="s3">=</span><span class="s1">columns</span><span class="s3">,</span>
+                <span class="s1">filesystem</span><span class="s3">=</span><span class="s1">filesystem</span><span class="s3">,</span>
+                <span class="s1">filters</span><span class="s3">=</span><span class="s1">filters</span><span class="s3">,</span>
+                <span class="s3">**</span><span class="s1">kwargs</span><span class="s3">,</span>
+            <span class="s3">)</span>
+            <span class="s2">with </span><span class="s1">catch_warnings</span><span class="s3">():</span>
+                <span class="s1">filterwarnings</span><span class="s3">(</span>
+                    <span class="s4">&quot;ignore&quot;</span><span class="s3">,</span>
+                    <span class="s4">&quot;make_block is deprecated&quot;</span><span class="s3">,</span>
+                    <span class="s1">Pandas4Warning</span><span class="s3">,</span>
+                <span class="s3">)</span>
+                <span class="s1">result </span><span class="s3">= </span><span class="s1">arrow_table_to_pandas</span><span class="s3">(</span>
+                    <span class="s1">pa_table</span><span class="s3">,</span>
+                    <span class="s1">dtype_backend</span><span class="s3">=</span><span class="s1">dtype_backend</span><span class="s3">,</span>
+                    <span class="s1">to_pandas_kwargs</span><span class="s3">=</span><span class="s1">to_pandas_kwargs</span><span class="s3">,</span>
+                <span class="s3">)</span>
+
+            <span class="s2">if </span><span class="s1">pa_table</span><span class="s3">.</span><span class="s1">schema</span><span class="s3">.</span><span class="s1">metadata</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s6">b&quot;PANDAS_ATTRS&quot; </span><span class="s2">in </span><span class="s1">pa_table</span><span class="s3">.</span><span class="s1">schema</span><span class="s3">.</span><span class="s1">metadata</span><span class="s3">:</span>
+                    <span class="s1">df_metadata </span><span class="s3">= </span><span class="s1">pa_table</span><span class="s3">.</span><span class="s1">schema</span><span class="s3">.</span><span class="s1">metadata</span><span class="s3">[</span><span class="s6">b&quot;PANDAS_ATTRS&quot;</span><span class="s3">]</span>
+                    <span class="s1">result</span><span class="s3">.</span><span class="s1">attrs </span><span class="s3">= </span><span class="s1">json</span><span class="s3">.</span><span class="s1">loads</span><span class="s3">(</span><span class="s1">df_metadata</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">result</span>
+        <span class="s2">finally</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">handles </span><span class="s2">is not None</span><span class="s3">:</span>
+                <span class="s1">handles</span><span class="s3">.</span><span class="s1">close</span><span class="s3">()</span>
+
+
+<span class="s2">class </span><span class="s1">FastParquetImpl</span><span class="s3">(</span><span class="s1">BaseImpl</span><span class="s3">):</span>
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s5"># since pandas is a dependency of fastparquet</span>
+        <span class="s5"># we need to import on first use</span>
+        <span class="s1">fastparquet </span><span class="s3">= </span><span class="s1">import_optional_dependency</span><span class="s3">(</span>
+            <span class="s4">&quot;fastparquet&quot;</span><span class="s3">, </span><span class="s1">extra</span><span class="s3">=</span><span class="s4">&quot;fastparquet is required for parquet support.&quot;</span>
+        <span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">api </span><span class="s3">= </span><span class="s1">fastparquet</span>
+
+    <span class="s2">def </span><span class="s1">write</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">df</span><span class="s3">: </span><span class="s1">DataFrame</span><span class="s3">,</span>
+        <span class="s1">path</span><span class="s3">,</span>
+        <span class="s1">compression</span><span class="s3">: </span><span class="s1">Literal</span><span class="s3">[</span><span class="s4">&quot;snappy&quot;</span><span class="s3">, </span><span class="s4">&quot;gzip&quot;</span><span class="s3">, </span><span class="s4">&quot;brotli&quot;</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s4">&quot;snappy&quot;</span><span class="s3">,</span>
+        <span class="s1">index</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">partition_cols</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">storage_options</span><span class="s3">: </span><span class="s1">StorageOptions </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">filesystem</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s3">**</span><span class="s1">kwargs</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">validate_dataframe</span><span class="s3">(</span><span class="s1">df</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s4">&quot;partition_on&quot; </span><span class="s2">in </span><span class="s1">kwargs </span><span class="s2">and </span><span class="s1">partition_cols </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                <span class="s4">&quot;Cannot use both partition_on and &quot;</span>
+                <span class="s4">&quot;partition_cols. Use partition_cols for partitioning data&quot;</span>
+            <span class="s3">)</span>
+        <span class="s2">if </span><span class="s4">&quot;partition_on&quot; </span><span class="s2">in </span><span class="s1">kwargs</span><span class="s3">:</span>
+            <span class="s1">partition_cols </span><span class="s3">= </span><span class="s1">kwargs</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">(</span><span class="s4">&quot;partition_on&quot;</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">partition_cols </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">kwargs</span><span class="s3">[</span><span class="s4">&quot;file_scheme&quot;</span><span class="s3">] = </span><span class="s4">&quot;hive&quot;</span>
+
+        <span class="s2">if </span><span class="s1">filesystem </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">NotImplementedError</span><span class="s3">(</span>
+                <span class="s4">&quot;filesystem is not implemented for the fastparquet engine.&quot;</span>
+            <span class="s3">)</span>
+
+        <span class="s5"># cannot use get_handle as write() does not accept file buffers</span>
+        <span class="s1">path </span><span class="s3">= </span><span class="s1">stringify_path</span><span class="s3">(</span><span class="s1">path</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">is_fsspec_url</span><span class="s3">(</span><span class="s1">path</span><span class="s3">):</span>
+            <span class="s1">fsspec </span><span class="s3">= </span><span class="s1">import_optional_dependency</span><span class="s3">(</span><span class="s4">&quot;fsspec&quot;</span><span class="s3">)</span>
+
+            <span class="s5"># if filesystem is provided by fsspec, file must be opened in 'wb' mode.</span>
+            <span class="s1">kwargs</span><span class="s3">[</span><span class="s4">&quot;open_with&quot;</span><span class="s3">] = </span><span class="s2">lambda </span><span class="s1">path</span><span class="s3">, </span><span class="s1">_</span><span class="s3">: </span><span class="s1">fsspec</span><span class="s3">.</span><span class="s1">open</span><span class="s3">(</span>
+                <span class="s1">path</span><span class="s3">, </span><span class="s4">&quot;wb&quot;</span><span class="s3">, **(</span><span class="s1">storage_options </span><span class="s2">or </span><span class="s3">{})</span>
+            <span class="s3">).</span><span class="s1">open</span><span class="s3">()</span>
+        <span class="s2">elif </span><span class="s1">storage_options</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                <span class="s4">&quot;storage_options passed with file object or non-fsspec file path&quot;</span>
+            <span class="s3">)</span>
+
+        <span class="s2">with </span><span class="s1">catch_warnings</span><span class="s3">(</span><span class="s1">record</span><span class="s3">=</span><span class="s2">True</span><span class="s3">):</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">api</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span>
+                <span class="s1">path</span><span class="s3">,</span>
+                <span class="s1">df</span><span class="s3">,</span>
+                <span class="s1">compression</span><span class="s3">=</span><span class="s1">compression</span><span class="s3">,</span>
+                <span class="s1">write_index</span><span class="s3">=</span><span class="s1">index</span><span class="s3">,</span>
+                <span class="s1">partition_on</span><span class="s3">=</span><span class="s1">partition_cols</span><span class="s3">,</span>
+                <span class="s3">**</span><span class="s1">kwargs</span><span class="s3">,</span>
+            <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">read</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">path</span><span class="s3">,</span>
+        <span class="s1">columns</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">filters</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">storage_options</span><span class="s3">: </span><span class="s1">StorageOptions </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">filesystem</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">to_pandas_kwargs</span><span class="s3">: </span><span class="s1">dict </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s3">**</span><span class="s1">kwargs</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; DataFrame</span><span class="s3">:</span>
+        <span class="s1">parquet_kwargs</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">] = {}</span>
+        <span class="s1">dtype_backend </span><span class="s3">= </span><span class="s1">kwargs</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">(</span><span class="s4">&quot;dtype_backend&quot;</span><span class="s3">, </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">no_default</span><span class="s3">)</span>
+        <span class="s5"># We are disabling nullable dtypes for fastparquet pending discussion</span>
+        <span class="s1">parquet_kwargs</span><span class="s3">[</span><span class="s4">&quot;pandas_nulls&quot;</span><span class="s3">] = </span><span class="s2">False</span>
+        <span class="s2">if </span><span class="s1">dtype_backend </span><span class="s2">is not </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">no_default</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                <span class="s4">&quot;The 'dtype_backend' argument is not supported for the &quot;</span>
+                <span class="s4">&quot;fastparquet engine&quot;</span>
+            <span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">filesystem </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">NotImplementedError</span><span class="s3">(</span>
+                <span class="s4">&quot;filesystem is not implemented for the fastparquet engine.&quot;</span>
+            <span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">to_pandas_kwargs </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">NotImplementedError</span><span class="s3">(</span>
+                <span class="s4">&quot;to_pandas_kwargs is not implemented for the fastparquet engine.&quot;</span>
+            <span class="s3">)</span>
+        <span class="s1">path </span><span class="s3">= </span><span class="s1">stringify_path</span><span class="s3">(</span><span class="s1">path</span><span class="s3">)</span>
+        <span class="s1">handles </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">if </span><span class="s1">is_fsspec_url</span><span class="s3">(</span><span class="s1">path</span><span class="s3">):</span>
+            <span class="s1">fsspec </span><span class="s3">= </span><span class="s1">import_optional_dependency</span><span class="s3">(</span><span class="s4">&quot;fsspec&quot;</span><span class="s3">)</span>
+
+            <span class="s1">parquet_kwargs</span><span class="s3">[</span><span class="s4">&quot;fs&quot;</span><span class="s3">] = </span><span class="s1">fsspec</span><span class="s3">.</span><span class="s1">open</span><span class="s3">(</span><span class="s1">path</span><span class="s3">, </span><span class="s4">&quot;rb&quot;</span><span class="s3">, **(</span><span class="s1">storage_options </span><span class="s2">or </span><span class="s3">{})).</span><span class="s1">fs</span>
+        <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">path</span><span class="s3">, </span><span class="s1">str</span><span class="s3">) </span><span class="s2">and not </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">isdir</span><span class="s3">(</span><span class="s1">path</span><span class="s3">):</span>
+            <span class="s5"># use get_handle only when we are very certain that it is not a directory</span>
+            <span class="s5"># fsspec resources can also point to directories</span>
+            <span class="s5"># this branch is used for example when reading from non-fsspec URLs</span>
+            <span class="s1">handles </span><span class="s3">= </span><span class="s1">get_handle</span><span class="s3">(</span>
+                <span class="s1">path</span><span class="s3">, </span><span class="s4">&quot;rb&quot;</span><span class="s3">, </span><span class="s1">is_text</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, </span><span class="s1">storage_options</span><span class="s3">=</span><span class="s1">storage_options</span>
+            <span class="s3">)</span>
+            <span class="s1">path </span><span class="s3">= </span><span class="s1">handles</span><span class="s3">.</span><span class="s1">handle</span>
+
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">parquet_file </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">api</span><span class="s3">.</span><span class="s1">ParquetFile</span><span class="s3">(</span><span class="s1">path</span><span class="s3">, **</span><span class="s1">parquet_kwargs</span><span class="s3">)</span>
+            <span class="s2">with </span><span class="s1">catch_warnings</span><span class="s3">():</span>
+                <span class="s1">filterwarnings</span><span class="s3">(</span>
+                    <span class="s4">&quot;ignore&quot;</span><span class="s3">,</span>
+                    <span class="s4">&quot;make_block is deprecated&quot;</span><span class="s3">,</span>
+                    <span class="s1">Pandas4Warning</span><span class="s3">,</span>
+                <span class="s3">)</span>
+                <span class="s2">return </span><span class="s1">parquet_file</span><span class="s3">.</span><span class="s1">to_pandas</span><span class="s3">(</span>
+                    <span class="s1">columns</span><span class="s3">=</span><span class="s1">columns</span><span class="s3">, </span><span class="s1">filters</span><span class="s3">=</span><span class="s1">filters</span><span class="s3">, **</span><span class="s1">kwargs</span>
+                <span class="s3">)</span>
+        <span class="s2">finally</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">handles </span><span class="s2">is not None</span><span class="s3">:</span>
+                <span class="s1">handles</span><span class="s3">.</span><span class="s1">close</span><span class="s3">()</span>
+
+
+<span class="s2">def </span><span class="s1">to_parquet</span><span class="s3">(</span>
+    <span class="s1">df</span><span class="s3">: </span><span class="s1">DataFrame</span><span class="s3">,</span>
+    <span class="s1">path</span><span class="s3">: </span><span class="s1">FilePath </span><span class="s3">| </span><span class="s1">WriteBuffer</span><span class="s3">[</span><span class="s1">bytes</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">engine</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s4">&quot;auto&quot;</span><span class="s3">,</span>
+    <span class="s1">compression</span><span class="s3">: </span><span class="s1">ParquetCompressionOptions </span><span class="s3">= </span><span class="s4">&quot;snappy&quot;</span><span class="s3">,</span>
+    <span class="s1">index</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">storage_options</span><span class="s3">: </span><span class="s1">StorageOptions </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">partition_cols</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">filesystem</span><span class="s3">: </span><span class="s1">Any </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">**</span><span class="s1">kwargs</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; bytes </span><span class="s3">| </span><span class="s2">None</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Write a DataFrame to the parquet format. 
+ 
+    Parameters 
+    ---------- 
+    df : DataFrame 
+    path : str, path object, file-like object, or None, default None 
+        String, path object (implementing ``os.PathLike[str]``), or file-like 
+        object implementing a binary ``write()`` function. If None, the result 
+        is returned as bytes. If a string, it will be used as Root Directory 
+        path when writing a partitioned dataset. The engine fastparquet does 
+        not accept file-like objects. 
+    engine : {'auto', 'pyarrow', 'fastparquet'}, default 'auto' 
+        Parquet library to use. If 'auto', then the option 
+        ``io.parquet.engine`` is used. The default ``io.parquet.engine`` 
+        behavior is to try 'pyarrow', falling back to 'fastparquet' if 
+        'pyarrow' is unavailable. 
+ 
+        When using the ``'pyarrow'`` engine and no storage options are provided 
+        and a filesystem is implemented by both ``pyarrow.fs`` and ``fsspec`` 
+        (e.g. &quot;s3://&quot;), then the ``pyarrow.fs`` filesystem is attempted first. 
+        Use the filesystem keyword with an instantiated fsspec filesystem 
+        if you wish to use its implementation. 
+    compression : {'snappy', 'gzip', 'brotli', 'lz4', 'zstd', None}, 
+        default 'snappy'. Name of the compression to use. Use ``None`` 
+        for no compression. 
+    index : bool, default None 
+        If ``True``, include the dataframe's index(es) in the file output. If 
+        ``False``, they will not be written to the file. 
+        If ``None``, similar to ``True`` the dataframe's index(es) 
+        will be saved. However, instead of being saved as values, 
+        the RangeIndex will be stored as a range in the metadata so it 
+        doesn't require much space and is faster. Other indexes will 
+        be included as columns in the file output. 
+    partition_cols : str or list, optional, default None 
+        Column names by which to partition the dataset. 
+        Columns are partitioned in the order they are given. 
+        Must be None if path is not a string. 
+    storage_options : dict, optional 
+        Extra options that make sense for a particular storage connection, e.g. 
+        host, port, username, password, etc. For HTTP(S) URLs the key-value 
+        pairs are forwarded to ``urllib.request.Request`` as header options. 
+        For other URLs (e.g. starting with &quot;s3://&quot;, and &quot;gcs://&quot;) the 
+        key-value pairs are forwarded to ``fsspec.open``. Please see ``fsspec`` 
+        and ``urllib`` for more details, and for more examples on storage 
+        options refer `here &lt;https://pandas.pydata.org/docs/user_guide/io.html? 
+        highlight=storage_options#reading-writing-remote-files&gt;`_. 
+    filesystem : fsspec or pyarrow filesystem, default None 
+        Filesystem object to use when reading the parquet file. Only implemented 
+        for ``engine=&quot;pyarrow&quot;``. 
+ 
+        .. versionadded:: 2.1.0 
+ 
+    **kwargs 
+        Additional keyword arguments passed to the engine: 
+ 
+        * For ``engine=&quot;pyarrow&quot;``: passed to :func:`pyarrow.parquet.write_table` 
+          or :func:`pyarrow.parquet.write_to_dataset` (when using partition_cols) 
+        * For ``engine=&quot;fastparquet&quot;``: passed to :func:`fastparquet.write` 
+ 
+    Returns 
+    ------- 
+    bytes if no path argument is provided else None 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">partition_cols</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+        <span class="s1">partition_cols </span><span class="s3">= [</span><span class="s1">partition_cols</span><span class="s3">]</span>
+    <span class="s1">impl </span><span class="s3">= </span><span class="s1">get_engine</span><span class="s3">(</span><span class="s1">engine</span><span class="s3">)</span>
+
+    <span class="s1">path_or_buf</span><span class="s3">: </span><span class="s1">FilePath </span><span class="s3">| </span><span class="s1">WriteBuffer</span><span class="s3">[</span><span class="s1">bytes</span><span class="s3">] = </span><span class="s1">io</span><span class="s3">.</span><span class="s1">BytesIO</span><span class="s3">() </span><span class="s2">if </span><span class="s1">path </span><span class="s2">is None else </span><span class="s1">path</span>
+
+    <span class="s1">impl</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span>
+        <span class="s1">df</span><span class="s3">,</span>
+        <span class="s1">path_or_buf</span><span class="s3">,</span>
+        <span class="s1">compression</span><span class="s3">=</span><span class="s1">compression</span><span class="s3">,</span>
+        <span class="s1">index</span><span class="s3">=</span><span class="s1">index</span><span class="s3">,</span>
+        <span class="s1">partition_cols</span><span class="s3">=</span><span class="s1">partition_cols</span><span class="s3">,</span>
+        <span class="s1">storage_options</span><span class="s3">=</span><span class="s1">storage_options</span><span class="s3">,</span>
+        <span class="s1">filesystem</span><span class="s3">=</span><span class="s1">filesystem</span><span class="s3">,</span>
+        <span class="s3">**</span><span class="s1">kwargs</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">path </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s2">assert </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">path_or_buf</span><span class="s3">, </span><span class="s1">io</span><span class="s3">.</span><span class="s1">BytesIO</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">path_or_buf</span><span class="s3">.</span><span class="s1">getvalue</span><span class="s3">()</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">return None</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;pandas&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">read_parquet</span><span class="s3">(</span>
+    <span class="s1">path</span><span class="s3">: </span><span class="s1">FilePath </span><span class="s3">| </span><span class="s1">ReadBuffer</span><span class="s3">[</span><span class="s1">bytes</span><span class="s3">],</span>
+    <span class="s1">engine</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s4">&quot;auto&quot;</span><span class="s3">,</span>
+    <span class="s1">columns</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">storage_options</span><span class="s3">: </span><span class="s1">StorageOptions </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">dtype_backend</span><span class="s3">: </span><span class="s1">DtypeBackend </span><span class="s3">| </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">NoDefault </span><span class="s3">= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">no_default</span><span class="s3">,</span>
+    <span class="s1">filesystem</span><span class="s3">: </span><span class="s1">Any </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">filters</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">tuple</span><span class="s3">] | </span><span class="s1">list</span><span class="s3">[</span><span class="s1">list</span><span class="s3">[</span><span class="s1">tuple</span><span class="s3">]] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">to_pandas_kwargs</span><span class="s3">: </span><span class="s1">dict </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">**</span><span class="s1">kwargs</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; DataFrame</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Load a parquet object from the file path, returning a DataFrame. 
+ 
+    The function automatically handles reading the data from a parquet file 
+    and creates a DataFrame with the appropriate structure. 
+ 
+    Parameters 
+    ---------- 
+    path : str, path object or file-like object 
+        String, path object (implementing ``os.PathLike[str]``), or file-like 
+        object implementing a binary ``read()`` function. 
+        The string could be a URL. Valid URL schemes include http, ftp, s3, 
+        gs, and file. For file URLs, a host is expected. A local file could be: 
+        ``file://localhost/path/to/table.parquet``. 
+        A file URL can also be a path to a directory that contains multiple 
+        partitioned parquet files. Both pyarrow and fastparquet support 
+        paths to directories as well as file URLs. A directory path could be: 
+        ``file://localhost/path/to/tables`` or ``s3://bucket/partition_dir``. 
+    engine : {'auto', 'pyarrow', 'fastparquet'}, default 'auto' 
+        Parquet library to use. If 'auto', then the option 
+        ``io.parquet.engine`` is used. The default ``io.parquet.engine`` 
+        behavior is to try 'pyarrow', falling back to 'fastparquet' if 
+        'pyarrow' is unavailable. 
+ 
+        When using the ``'pyarrow'`` engine and no storage options are provided 
+        and a filesystem is implemented by both ``pyarrow.fs`` and ``fsspec`` 
+        (e.g. &quot;s3://&quot;), then the ``pyarrow.fs`` filesystem is attempted first. 
+        Use the filesystem keyword with an instantiated fsspec filesystem 
+        if you wish to use its implementation. 
+    columns : list, default=None 
+        If not None, only these columns will be read from the file. 
+    storage_options : dict, optional 
+        Extra options that make sense for a particular storage connection, e.g. 
+        host, port, username, password, etc. For HTTP(S) URLs the key-value 
+        pairs are forwarded to ``urllib.request.Request`` as header options. 
+        For other URLs (e.g. starting with &quot;s3://&quot;, and &quot;gcs://&quot;) the 
+        key-value pairs are forwarded to ``fsspec.open``. Please see ``fsspec`` 
+        and ``urllib`` for more details, and for more examples on storage 
+        options refer `here &lt;https://pandas.pydata.org/docs/user_guide/io.html? 
+        highlight=storage_options#reading-writing-remote-files&gt;`_. 
+    dtype_backend : {'numpy_nullable', 'pyarrow'} 
+        Back-end data type applied to the resultant :class:`DataFrame` 
+        (still experimental). If not specified, the default behavior 
+        is to not use nullable data types. If specified, the behavior 
+        is as follows: 
+ 
+        * ``&quot;numpy_nullable&quot;``: returns nullable-dtype-backed :class:`DataFrame` 
+        * ``&quot;pyarrow&quot;``: returns pyarrow-backed nullable 
+          :class:`ArrowDtype` :class:`DataFrame` 
+ 
+        .. versionadded:: 2.0 
+ 
+    filesystem : fsspec or pyarrow filesystem, default None 
+        Filesystem object to use when reading the parquet file. Only implemented 
+        for ``engine=&quot;pyarrow&quot;``. 
+ 
+        .. versionadded:: 2.1.0 
+ 
+    filters : List[Tuple] or List[List[Tuple]], default None 
+        To filter out data. 
+        Filter syntax: [[(column, op, val), ...],...] 
+        where op is [==, =, &gt;, &gt;=, &lt;, &lt;=, !=, in, not in] 
+        The innermost tuples are transposed into a set of filters applied 
+        through an `AND` operation. 
+        The outer list combines these sets of filters through an `OR` 
+        operation. 
+        A single list of tuples can also be used, meaning that no `OR` 
+        operation between set of filters is to be conducted. 
+ 
+        Using this argument will NOT result in row-wise filtering of the final 
+        partitions unless ``engine=&quot;pyarrow&quot;`` is also specified.  For 
+        other engines, filtering is only performed at the partition level, that is, 
+        to prevent the loading of some row-groups and/or files. 
+ 
+        .. versionadded:: 2.1.0 
+ 
+    to_pandas_kwargs : dict | None, default None 
+        Keyword arguments to pass through to :func:`pyarrow.Table.to_pandas` 
+        when ``engine=&quot;pyarrow&quot;``. 
+ 
+        .. versionadded:: 3.0.0 
+ 
+    **kwargs 
+        Additional keyword arguments passed to the engine: 
+ 
+        * For ``engine=&quot;pyarrow&quot;``: passed to :func:`pyarrow.parquet.read_table` 
+        * For ``engine=&quot;fastparquet&quot;``: passed to 
+          :meth:`fastparquet.ParquetFile.to_pandas` 
+ 
+    Returns 
+    ------- 
+    DataFrame 
+        DataFrame based on parquet file. 
+ 
+    See Also 
+    -------- 
+    DataFrame.to_parquet : Create a parquet object that serializes a DataFrame. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; original_df = pd.DataFrame({&quot;foo&quot;: range(5), &quot;bar&quot;: range(5, 10)}) 
+    &gt;&gt;&gt; original_df 
+       foo  bar 
+    0    0    5 
+    1    1    6 
+    2    2    7 
+    3    3    8 
+    4    4    9 
+    &gt;&gt;&gt; df_parquet_bytes = original_df.to_parquet() 
+    &gt;&gt;&gt; from io import BytesIO 
+    &gt;&gt;&gt; restored_df = pd.read_parquet(BytesIO(df_parquet_bytes)) 
+    &gt;&gt;&gt; restored_df 
+       foo  bar 
+    0    0    5 
+    1    1    6 
+    2    2    7 
+    3    3    8 
+    4    4    9 
+    &gt;&gt;&gt; restored_df.equals(original_df) 
+    True 
+    &gt;&gt;&gt; restored_bar = pd.read_parquet(BytesIO(df_parquet_bytes), columns=[&quot;bar&quot;]) 
+    &gt;&gt;&gt; restored_bar 
+        bar 
+    0    5 
+    1    6 
+    2    7 
+    3    8 
+    4    9 
+    &gt;&gt;&gt; restored_bar.equals(original_df[[&quot;bar&quot;]]) 
+    True 
+ 
+    The function uses `kwargs` that are passed directly to the engine. 
+    In the following example, we use the `filters` argument of the pyarrow 
+    engine to filter the rows of the DataFrame. 
+ 
+    Since `pyarrow` is the default engine, we can omit the `engine` argument. 
+    Note that the `filters` argument is implemented by the `pyarrow` engine, 
+    which can benefit from multithreading and also potentially be more 
+    economical in terms of memory. 
+ 
+    &gt;&gt;&gt; sel = [(&quot;foo&quot;, &quot;&gt;&quot;, 2)] 
+    &gt;&gt;&gt; restored_part = pd.read_parquet(BytesIO(df_parquet_bytes), filters=sel) 
+    &gt;&gt;&gt; restored_part 
+        foo  bar 
+    0    3    8 
+    1    4    9 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">impl </span><span class="s3">= </span><span class="s1">get_engine</span><span class="s3">(</span><span class="s1">engine</span><span class="s3">)</span>
+    <span class="s1">check_dtype_backend</span><span class="s3">(</span><span class="s1">dtype_backend</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">impl</span><span class="s3">.</span><span class="s1">read</span><span class="s3">(</span>
+        <span class="s1">path</span><span class="s3">,</span>
+        <span class="s1">columns</span><span class="s3">=</span><span class="s1">columns</span><span class="s3">,</span>
+        <span class="s1">filters</span><span class="s3">=</span><span class="s1">filters</span><span class="s3">,</span>
+        <span class="s1">storage_options</span><span class="s3">=</span><span class="s1">storage_options</span><span class="s3">,</span>
+        <span class="s1">dtype_backend</span><span class="s3">=</span><span class="s1">dtype_backend</span><span class="s3">,</span>
+        <span class="s1">filesystem</span><span class="s3">=</span><span class="s1">filesystem</span><span class="s3">,</span>
+        <span class="s1">to_pandas_kwargs</span><span class="s3">=</span><span class="s1">to_pandas_kwargs</span><span class="s3">,</span>
+        <span class="s3">**</span><span class="s1">kwargs</span><span class="s3">,</span>
+    <span class="s3">)</span>
+</pre>
+</body>
+</html>

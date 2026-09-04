@@ -1,0 +1,119 @@
+<html>
+<head>
+<title>utils.h</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #7a7e85;}
+.s3 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+utils.h</font>
+</center></td></tr></table>
+<pre><span class="s0">#ifndef </span><span class="s1">NUMPY_CORE_INCLUDE_NUMPY_UTILS_H_</span>
+<span class="s0">#define </span><span class="s1">NUMPY_CORE_INCLUDE_NUMPY_UTILS_H_</span>
+
+<span class="s0">#ifndef </span><span class="s1">__COMP_NPY_UNUSED</span>
+    <span class="s0">#if </span><span class="s1">defined(__GNUC__)</span>
+        <span class="s0">#define </span><span class="s1">__COMP_NPY_UNUSED __attribute__ ((__unused__))</span>
+    <span class="s1">#elif defined(__ICC)</span>
+        <span class="s0">#define </span><span class="s1">__COMP_NPY_UNUSED __attribute__ ((__unused__))</span>
+    <span class="s1">#elif defined(__clang__)</span>
+        <span class="s0">#define </span><span class="s1">__COMP_NPY_UNUSED __attribute__ ((unused))</span>
+    <span class="s0">#else</span>
+        <span class="s0">#define </span><span class="s1">__COMP_NPY_UNUSED</span>
+    <span class="s0">#endif</span>
+<span class="s0">#endif</span>
+
+<span class="s2">// Older compilers may name `_Alignas` differently; to allow compilation on such</span>
+<span class="s2">// unsupported platforms, we don't redefine NPY_DECL_ALIGNED if it's already</span>
+<span class="s2">// defined similar to CPython's _Py_ALIGNED_DEF.</span>
+<span class="s0">#ifndef </span><span class="s1">NPY_DECL_ALIGNED</span>
+<span class="s0">#if </span><span class="s1">defined(__GNUC__) || defined(__ICC) || defined(__clang__)</span>
+    <span class="s0">#define </span><span class="s1">NPY_DECL_ALIGNED(x) __attribute__ ((aligned (x)))</span>
+<span class="s1">#elif defined(_MSC_VER)</span>
+    <span class="s0">#define </span><span class="s1">NPY_DECL_ALIGNED(x) __declspec(align(x))</span>
+<span class="s1">#elif defined(__cplusplus)</span>
+    <span class="s0">#define </span><span class="s1">NPY_DECL_ALIGNED(x) alignas(x)</span>
+<span class="s0">#else</span>
+    <span class="s0">#define </span><span class="s1">NPY_DECL_ALIGNED(x) _Alignas(x)</span>
+<span class="s0">#endif</span>
+<span class="s0">#endif</span>
+<span class="s2">/* 
+ * Force the first field of a struct to be 8-byte aligned on Python 3.15+ to achieve 
+ * ABI compatibility of `_fields` structs with and without `PyObject_HEAD`. 
+ * 
+ * When we expose (or may want to) expose an object structs contents to the Python 
+ * stable ABI we define it as: 
+ * 
+ *     struct _PyArray_Descr { 
+ *     #if !defined(Py_TARGET_ABI3T) 
+ *         PyObject_HEAD; 
+ *     #endif 
+ *         _NPY_OPAQUE_FIRST_FIELD T first_field; 
+ *         ... 
+ *     } fields; 
+ * 
+ * Effectively creating two versions, one `fields_obj` and `fields_no_obj` depending 
+ * on the build target. These builds must be ABI compatible and for that: 
+ * 
+ *     offsetof(fields_obj, first_field) % alignof(fields_no_obj) == 0 
+ * 
+ * must hold. If it does not hold, then `fields_obj` (minus the PyObject_HEAD) will 
+ * be padded differently from `fields_no_obj`.  Concretely, this happened for 32bit 
+ * free-threaded builds (PyObject_HEAD having a size of 20 bytes) where the uint64 
+ * flags required padding to achieve 8 byte alignment, but with the `PyObject_HEAD`. 
+ * 
+ * The only way to ensure the above holds always is to pad the first field so that 
+ * it's offset is a multiple of the alignment. The simplest path (e.g. what PEP 697 
+ * also does) may be to always pad to `alignof(max_align_t)`. 
+ * We do _not_ do this, because we have to remain ABI compatible to abi3 builds and 
+ * Python GIL enabled builds have a PyObject_HEAD size that is a multiple of 
+ * 8/16 (32bit/64bit systems) alignment. 
+ * So, instead we use 8 bytes. We could choose 16 for 64bit systems but it currently 
+ * makes no difference (there is a static_assert to notify us if it might matter). 
+ * 
+ * Because the ABI3T target was added in Python 3.15 we _can_ freely add padding for 
+ * Python 3.15+ builds for them. And this is where it matters, because 32bit 
+ * free-threaded builds have a `sizeof(PyObject) == 20` which gives 4 byte max 
+ * alignment which breaks the requirement above. 
+ * 
+ * As an actual implementation we add the padding by explicitly aligning the first 
+ * field to 8 bytes. 
+ * In theory this might guarantee an alignment larger than `alignof(max_align_t)`, 
+ * we assume that we would notice this first and in practice malloc alignment is &gt;=8. 
+ * 
+ * One may be able to expose &gt;8 byte aligned fields, but this requires thoughts on 
+ * how it affects abi3, abi3t builds and compatibility with older Python/NumPy builds. 
+ * 
+ * Note that assertions concerning these assumptions are paired with the 
+ * `*_GET_ITEM_DATA` function definitions (in `arrayobject.c`). 
+ */</span>
+<span class="s0">#if </span><span class="s1">PY_VERSION_HEX &gt;= </span><span class="s3">0x030f0000</span>
+    <span class="s0">#define </span><span class="s1">_NPY_OPAQUE_FIRST_FIELD NPY_DECL_ALIGNED(</span><span class="s3">8</span><span class="s1">)</span>
+<span class="s0">#else</span>
+    <span class="s0">#define </span><span class="s1">_NPY_OPAQUE_FIRST_FIELD</span>
+<span class="s0">#endif</span>
+
+<span class="s2">/* Use this to tag a variable as not used. It will remove unused variable 
+ * warning on support platforms (see __COM_NPY_UNUSED) and mangle the variable 
+ * to avoid accidental use */</span>
+<span class="s0">#define </span><span class="s1">NPY_UNUSED(x) __NPY_UNUSED_TAGGED ## x __COMP_NPY_UNUSED</span>
+<span class="s0">#define </span><span class="s1">NPY_EXPAND(x) x</span>
+
+<span class="s0">#define </span><span class="s1">NPY_STRINGIFY(x) #x</span>
+<span class="s0">#define </span><span class="s1">NPY_TOSTRING(x) NPY_STRINGIFY(x)</span>
+
+<span class="s0">#define </span><span class="s1">NPY_CAT__(a, b) a ## b</span>
+<span class="s0">#define </span><span class="s1">NPY_CAT_(a, b) NPY_CAT__(a, b)</span>
+<span class="s0">#define </span><span class="s1">NPY_CAT(a, b) NPY_CAT_(a, b)</span>
+
+<span class="s0">#endif  </span><span class="s2">/* NUMPY_CORE_INCLUDE_NUMPY_UTILS_H_ */</span>
+</pre>
+</body>
+</html>

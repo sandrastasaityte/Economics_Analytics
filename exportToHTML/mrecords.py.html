@@ -1,0 +1,762 @@
+<html>
+<head>
+<title>mrecords.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #7a7e85;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+mrecords.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;:mod:`numpy.ma..mrecords` 
+ 
+Defines the equivalent of :class:`numpy.recarrays` for masked arrays, 
+where fields can be accessed as attributes. 
+Note that :class:`numpy.ma.MaskedArray` already supports structured datatypes 
+and the masking of individual fields. 
+ 
+.. moduleauthor:: Pierre Gerard-Marchant 
+ 
+&quot;&quot;&quot;</span>
+<span class="s2">#  We should make sure that no field is called '_mask','mask','_fieldmask',</span>
+<span class="s2">#  or whatever restricted keywords.  An idea would be to no bother in the</span>
+<span class="s2">#  first place, and then rename the invalid fields with a trailing</span>
+<span class="s2">#  underscore. Maybe we could just overload the parser function ?</span>
+<span class="s3">import </span><span class="s1">builtins</span>
+<span class="s3">import </span><span class="s1">warnings</span>
+
+<span class="s3">import </span><span class="s1">numpy </span><span class="s3">as </span><span class="s1">np</span>
+<span class="s3">import </span><span class="s1">numpy</span><span class="s4">.</span><span class="s1">ma </span><span class="s3">as </span><span class="s1">ma</span>
+
+<span class="s1">_byteorderconv </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">_core</span><span class="s4">.</span><span class="s1">records</span><span class="s4">.</span><span class="s1">_byteorderconv</span>
+
+
+<span class="s1">_check_fill_value </span><span class="s4">= </span><span class="s1">ma</span><span class="s4">.</span><span class="s1">core</span><span class="s4">.</span><span class="s1">_check_fill_value</span>
+
+
+<span class="s1">__all__ </span><span class="s4">= [</span>
+    <span class="s5">'MaskedRecords'</span><span class="s4">, </span><span class="s5">'mrecarray'</span><span class="s4">, </span><span class="s5">'fromarrays'</span><span class="s4">, </span><span class="s5">'fromrecords'</span><span class="s4">,</span>
+    <span class="s5">'fromtextfile'</span><span class="s4">, </span><span class="s5">'addfield'</span><span class="s4">,</span>
+<span class="s4">]</span>
+
+<span class="s1">reserved_fields </span><span class="s4">= [</span><span class="s5">'_data'</span><span class="s4">, </span><span class="s5">'_mask'</span><span class="s4">, </span><span class="s5">'_fieldmask'</span><span class="s4">, </span><span class="s5">'dtype'</span><span class="s4">]</span>
+
+
+<span class="s3">def </span><span class="s1">_checknames</span><span class="s4">(</span><span class="s1">descr</span><span class="s4">, </span><span class="s1">names</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Checks that field names ``descr`` are not reserved keywords. 
+ 
+    If this is the case, a default 'f%i' is substituted.  If the argument 
+    `names` is not None, updates the field names to valid names. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ndescr </span><span class="s4">= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">descr</span><span class="s4">)</span>
+    <span class="s1">default_names </span><span class="s4">= [</span><span class="s5">f'f</span><span class="s3">{</span><span class="s1">i</span><span class="s3">}</span><span class="s5">' </span><span class="s3">for </span><span class="s1">i </span><span class="s3">in </span><span class="s1">range</span><span class="s4">(</span><span class="s1">ndescr</span><span class="s4">)]</span>
+    <span class="s3">if </span><span class="s1">names </span><span class="s3">is None</span><span class="s4">:</span>
+        <span class="s1">new_names </span><span class="s4">= </span><span class="s1">default_names</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">names</span><span class="s4">, (</span><span class="s1">tuple</span><span class="s4">, </span><span class="s1">list</span><span class="s4">)):</span>
+            <span class="s1">new_names </span><span class="s4">= </span><span class="s1">names</span>
+        <span class="s3">elif </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">names</span><span class="s4">, </span><span class="s1">str</span><span class="s4">):</span>
+            <span class="s1">new_names </span><span class="s4">= </span><span class="s1">names</span><span class="s4">.</span><span class="s1">split</span><span class="s4">(</span><span class="s5">','</span><span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">NameError</span><span class="s4">(</span><span class="s5">f'illegal input names </span><span class="s3">{</span><span class="s1">names</span><span class="s3">!r}</span><span class="s5">'</span><span class="s4">)</span>
+        <span class="s1">nnames </span><span class="s4">= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">new_names</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">nnames </span><span class="s4">&lt; </span><span class="s1">ndescr</span><span class="s4">:</span>
+            <span class="s1">new_names </span><span class="s4">+= </span><span class="s1">default_names</span><span class="s4">[</span><span class="s1">nnames</span><span class="s4">:]</span>
+    <span class="s1">ndescr </span><span class="s4">= []</span>
+    <span class="s3">for </span><span class="s4">(</span><span class="s1">n</span><span class="s4">, </span><span class="s1">d</span><span class="s4">, </span><span class="s1">t</span><span class="s4">) </span><span class="s3">in </span><span class="s1">zip</span><span class="s4">(</span><span class="s1">new_names</span><span class="s4">, </span><span class="s1">default_names</span><span class="s4">, </span><span class="s1">descr</span><span class="s4">.</span><span class="s1">descr</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">n </span><span class="s3">in </span><span class="s1">reserved_fields</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">t</span><span class="s4">[</span><span class="s6">0</span><span class="s4">] </span><span class="s3">in </span><span class="s1">reserved_fields</span><span class="s4">:</span>
+                <span class="s1">ndescr</span><span class="s4">.</span><span class="s1">append</span><span class="s4">((</span><span class="s1">d</span><span class="s4">, </span><span class="s1">t</span><span class="s4">[</span><span class="s6">1</span><span class="s4">]))</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">ndescr</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">t</span><span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">ndescr</span><span class="s4">.</span><span class="s1">append</span><span class="s4">((</span><span class="s1">n</span><span class="s4">, </span><span class="s1">t</span><span class="s4">[</span><span class="s6">1</span><span class="s4">]))</span>
+    <span class="s3">return </span><span class="s1">np</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">(</span><span class="s1">ndescr</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_get_fieldmask</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+    <span class="s1">mdescr </span><span class="s4">= [(</span><span class="s1">n</span><span class="s4">, </span><span class="s5">'|b1'</span><span class="s4">) </span><span class="s3">for </span><span class="s1">n </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">.</span><span class="s1">names</span><span class="s4">]</span>
+    <span class="s1">fdmask </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">empty</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">shape</span><span class="s4">, </span><span class="s1">dtype</span><span class="s4">=</span><span class="s1">mdescr</span><span class="s4">)</span>
+    <span class="s1">fdmask</span><span class="s4">.</span><span class="s1">flat </span><span class="s4">= </span><span class="s1">tuple</span><span class="s4">([</span><span class="s3">False</span><span class="s4">] * </span><span class="s1">len</span><span class="s4">(</span><span class="s1">mdescr</span><span class="s4">))</span>
+    <span class="s3">return </span><span class="s1">fdmask</span>
+
+
+<span class="s3">class </span><span class="s1">MaskedRecords</span><span class="s4">(</span><span class="s1">ma</span><span class="s4">.</span><span class="s1">MaskedArray</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+ 
+    Attributes 
+    ---------- 
+    _data : recarray 
+        Underlying data, as a record array. 
+    _mask : boolean array 
+        Mask of the records. A record is masked when all its fields are 
+        masked. 
+    _fieldmask : boolean recarray 
+        Record array of booleans, setting the mask of each individual field 
+        of each record. 
+    _fill_value : record 
+        Filling values for each field. 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s3">def </span><span class="s1">__new__</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">shape</span><span class="s4">, </span><span class="s1">dtype</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">buf</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">offset</span><span class="s4">=</span><span class="s6">0</span><span class="s4">, </span><span class="s1">strides</span><span class="s4">=</span><span class="s3">None</span><span class="s4">,</span>
+                <span class="s1">formats</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">names</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">titles</span><span class="s4">=</span><span class="s3">None</span><span class="s4">,</span>
+                <span class="s1">byteorder</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">aligned</span><span class="s4">=</span><span class="s3">False</span><span class="s4">,</span>
+                <span class="s1">mask</span><span class="s4">=</span><span class="s1">ma</span><span class="s4">.</span><span class="s1">nomask</span><span class="s4">, </span><span class="s1">hard_mask</span><span class="s4">=</span><span class="s3">False</span><span class="s4">, </span><span class="s1">fill_value</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">keep_mask</span><span class="s4">=</span><span class="s3">True</span><span class="s4">,</span>
+                <span class="s1">copy</span><span class="s4">=</span><span class="s3">False</span><span class="s4">,</span>
+                <span class="s4">**</span><span class="s1">options</span><span class="s4">):</span>
+
+        <span class="s1">self </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">recarray</span><span class="s4">.</span><span class="s1">__new__</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">shape</span><span class="s4">, </span><span class="s1">dtype</span><span class="s4">=</span><span class="s1">dtype</span><span class="s4">, </span><span class="s1">buf</span><span class="s4">=</span><span class="s1">buf</span><span class="s4">, </span><span class="s1">offset</span><span class="s4">=</span><span class="s1">offset</span><span class="s4">,</span>
+                                   <span class="s1">strides</span><span class="s4">=</span><span class="s1">strides</span><span class="s4">, </span><span class="s1">formats</span><span class="s4">=</span><span class="s1">formats</span><span class="s4">, </span><span class="s1">names</span><span class="s4">=</span><span class="s1">names</span><span class="s4">,</span>
+                                   <span class="s1">titles</span><span class="s4">=</span><span class="s1">titles</span><span class="s4">, </span><span class="s1">byteorder</span><span class="s4">=</span><span class="s1">byteorder</span><span class="s4">,</span>
+                                   <span class="s1">aligned</span><span class="s4">=</span><span class="s1">aligned</span><span class="s4">,)</span>
+
+        <span class="s1">mdtype </span><span class="s4">= </span><span class="s1">ma</span><span class="s4">.</span><span class="s1">make_mask_descr</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">mask </span><span class="s3">is </span><span class="s1">ma</span><span class="s4">.</span><span class="s1">nomask </span><span class="s3">or not </span><span class="s1">np</span><span class="s4">.</span><span class="s1">size</span><span class="s4">(</span><span class="s1">mask</span><span class="s4">):</span>
+            <span class="s3">if not </span><span class="s1">keep_mask</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_mask </span><span class="s4">= </span><span class="s1">tuple</span><span class="s4">([</span><span class="s3">False</span><span class="s4">] * </span><span class="s1">len</span><span class="s4">(</span><span class="s1">mdtype</span><span class="s4">))</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">mask </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">array</span><span class="s4">(</span><span class="s1">mask</span><span class="s4">, </span><span class="s1">copy</span><span class="s4">=</span><span class="s1">copy</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">mask</span><span class="s4">.</span><span class="s1">shape </span><span class="s4">!= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">shape</span><span class="s4">:</span>
+                <span class="s4">(</span><span class="s1">nd</span><span class="s4">, </span><span class="s1">nm</span><span class="s4">) = (</span><span class="s1">self</span><span class="s4">.</span><span class="s1">size</span><span class="s4">, </span><span class="s1">mask</span><span class="s4">.</span><span class="s1">size</span><span class="s4">)</span>
+                <span class="s3">if </span><span class="s1">nm </span><span class="s4">== </span><span class="s6">1</span><span class="s4">:</span>
+                    <span class="s1">mask </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">resize</span><span class="s4">(</span><span class="s1">mask</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">shape</span><span class="s4">)</span>
+                <span class="s3">elif </span><span class="s1">nm </span><span class="s4">== </span><span class="s1">nd</span><span class="s4">:</span>
+                    <span class="s1">mask </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">reshape</span><span class="s4">(</span><span class="s1">mask</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">shape</span><span class="s4">)</span>
+                <span class="s3">else</span><span class="s4">:</span>
+                    <span class="s1">msg </span><span class="s4">= (</span><span class="s5">f&quot;Mask and data not compatible: data size is </span><span class="s3">{</span><span class="s1">nd</span><span class="s3">}</span><span class="s5">,&quot;</span>
+                           <span class="s5">&quot; mask size is {nm}.&quot;</span><span class="s4">)</span>
+                    <span class="s3">raise </span><span class="s1">ma</span><span class="s4">.</span><span class="s1">MAError</span><span class="s4">(</span><span class="s1">msg</span><span class="s4">)</span>
+            <span class="s3">if not </span><span class="s1">keep_mask</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">__setmask__</span><span class="s4">(</span><span class="s1">mask</span><span class="s4">)</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_sharedmask </span><span class="s4">= </span><span class="s3">True</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s3">if </span><span class="s1">mask</span><span class="s4">.</span><span class="s1">dtype </span><span class="s4">== </span><span class="s1">mdtype</span><span class="s4">:</span>
+                    <span class="s1">_mask </span><span class="s4">= </span><span class="s1">mask</span>
+                <span class="s3">else</span><span class="s4">:</span>
+                    <span class="s1">_mask </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">array</span><span class="s4">([</span><span class="s1">tuple</span><span class="s4">([</span><span class="s1">m</span><span class="s4">] * </span><span class="s1">len</span><span class="s4">(</span><span class="s1">mdtype</span><span class="s4">)) </span><span class="s3">for </span><span class="s1">m </span><span class="s3">in </span><span class="s1">mask</span><span class="s4">],</span>
+                                     <span class="s1">dtype</span><span class="s4">=</span><span class="s1">mdtype</span><span class="s4">)</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_mask </span><span class="s4">= </span><span class="s1">_mask</span>
+        <span class="s3">return </span><span class="s1">self</span>
+
+    <span class="s3">def </span><span class="s1">__array_finalize__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">obj</span><span class="s4">):</span>
+        <span class="s2"># Make sure we have a _fieldmask by default</span>
+        <span class="s1">_mask </span><span class="s4">= </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s5">'_mask'</span><span class="s4">, </span><span class="s3">None</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">_mask </span><span class="s3">is None</span><span class="s4">:</span>
+            <span class="s1">objmask </span><span class="s4">= </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s5">'_mask'</span><span class="s4">, </span><span class="s1">ma</span><span class="s4">.</span><span class="s1">nomask</span><span class="s4">)</span>
+            <span class="s1">_dtype </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span><span class="s4">.</span><span class="s1">__getattribute__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s5">'dtype'</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">objmask </span><span class="s3">is </span><span class="s1">ma</span><span class="s4">.</span><span class="s1">nomask</span><span class="s4">:</span>
+                <span class="s1">_mask </span><span class="s4">= </span><span class="s1">ma</span><span class="s4">.</span><span class="s1">make_mask_none</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">shape</span><span class="s4">, </span><span class="s1">dtype</span><span class="s4">=</span><span class="s1">_dtype</span><span class="s4">)</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">mdescr </span><span class="s4">= </span><span class="s1">ma</span><span class="s4">.</span><span class="s1">make_mask_descr</span><span class="s4">(</span><span class="s1">_dtype</span><span class="s4">)</span>
+                <span class="s1">_mask </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">array</span><span class="s4">([</span><span class="s1">tuple</span><span class="s4">([</span><span class="s1">m</span><span class="s4">] * </span><span class="s1">len</span><span class="s4">(</span><span class="s1">mdescr</span><span class="s4">)) </span><span class="s3">for </span><span class="s1">m </span><span class="s3">in </span><span class="s1">objmask</span><span class="s4">],</span>
+                               <span class="s1">dtype</span><span class="s4">=</span><span class="s1">mdescr</span><span class="s4">).</span><span class="s1">view</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">recarray</span><span class="s4">)</span>
+        <span class="s2"># Update some of the attributes</span>
+        <span class="s1">_dict </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">__dict__</span>
+        <span class="s1">_dict</span><span class="s4">.</span><span class="s1">update</span><span class="s4">(</span><span class="s1">_mask</span><span class="s4">=</span><span class="s1">_mask</span><span class="s4">)</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_update_from</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">_dict</span><span class="s4">[</span><span class="s5">'_baseclass'</span><span class="s4">] == </span><span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span><span class="s4">:</span>
+            <span class="s1">_dict</span><span class="s4">[</span><span class="s5">'_baseclass'</span><span class="s4">] = </span><span class="s1">np</span><span class="s4">.</span><span class="s1">recarray</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">_data</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Returns the data as a recarray. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s3">return </span><span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span><span class="s4">.</span><span class="s1">view</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">np</span><span class="s4">.</span><span class="s1">recarray</span><span class="s4">)</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">_fieldmask</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Alias to mask. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_mask</span>
+
+    <span class="s3">def </span><span class="s1">__len__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Returns the length 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s2"># We have more than one record</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">ndim</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">len</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">)</span>
+        <span class="s2"># We have only one record: return the nb of fields</span>
+        <span class="s3">return </span><span class="s1">len</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__getattribute__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">attr</span><span class="s4">):</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">object</span><span class="s4">.</span><span class="s1">__getattribute__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">attr</span><span class="s4">)</span>
+        <span class="s3">except </span><span class="s1">AttributeError</span><span class="s4">:</span>
+            <span class="s2"># attr must be a fieldname</span>
+            <span class="s3">pass</span>
+        <span class="s1">fielddict </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span><span class="s4">.</span><span class="s1">__getattribute__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s5">'dtype'</span><span class="s4">).</span><span class="s1">fields</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">res </span><span class="s4">= </span><span class="s1">fielddict</span><span class="s4">[</span><span class="s1">attr</span><span class="s4">][:</span><span class="s6">2</span><span class="s4">]</span>
+        <span class="s3">except </span><span class="s4">(</span><span class="s1">TypeError</span><span class="s4">, </span><span class="s1">KeyError</span><span class="s4">) </span><span class="s3">as </span><span class="s1">e</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">AttributeError</span><span class="s4">(</span>
+                <span class="s5">f'record array has no attribute </span><span class="s3">{</span><span class="s1">attr</span><span class="s3">}</span><span class="s5">'</span><span class="s4">) </span><span class="s3">from </span><span class="s1">e</span>
+        <span class="s2"># So far, so good</span>
+        <span class="s1">_localdict </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span><span class="s4">.</span><span class="s1">__getattribute__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s5">'__dict__'</span><span class="s4">)</span>
+        <span class="s1">_data </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span><span class="s4">.</span><span class="s1">view</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">_localdict</span><span class="s4">[</span><span class="s5">'_baseclass'</span><span class="s4">])</span>
+        <span class="s1">obj </span><span class="s4">= </span><span class="s1">_data</span><span class="s4">.</span><span class="s1">getfield</span><span class="s4">(*</span><span class="s1">res</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">obj</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">.</span><span class="s1">names </span><span class="s3">is not None</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">NotImplementedError</span><span class="s4">(</span><span class="s5">&quot;MaskedRecords is currently limited to&quot;</span>
+                                      <span class="s5">&quot;simple records.&quot;</span><span class="s4">)</span>
+        <span class="s2"># Get some special attributes</span>
+        <span class="s2"># Reset the object's mask</span>
+        <span class="s1">hasmasked </span><span class="s4">= </span><span class="s3">False</span>
+        <span class="s1">_mask </span><span class="s4">= </span><span class="s1">_localdict</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s5">'_mask'</span><span class="s4">, </span><span class="s3">None</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">_mask </span><span class="s3">is not None</span><span class="s4">:</span>
+            <span class="s3">try</span><span class="s4">:</span>
+                <span class="s1">_mask </span><span class="s4">= </span><span class="s1">_mask</span><span class="s4">[</span><span class="s1">attr</span><span class="s4">]</span>
+            <span class="s3">except </span><span class="s1">IndexError</span><span class="s4">:</span>
+                <span class="s2"># Couldn't find a mask: use the default (nomask)</span>
+                <span class="s3">pass</span>
+            <span class="s1">tp_len </span><span class="s4">= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">_mask</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">)</span>
+            <span class="s1">hasmasked </span><span class="s4">= </span><span class="s1">_mask</span><span class="s4">.</span><span class="s1">view</span><span class="s4">((</span><span class="s1">bool</span><span class="s4">, ((</span><span class="s1">tp_len</span><span class="s4">,) </span><span class="s3">if </span><span class="s1">tp_len </span><span class="s3">else </span><span class="s4">()))).</span><span class="s1">any</span><span class="s4">()</span>
+        <span class="s3">if </span><span class="s4">(</span><span class="s1">obj</span><span class="s4">.</span><span class="s1">shape </span><span class="s3">or </span><span class="s1">hasmasked</span><span class="s4">):</span>
+            <span class="s1">obj </span><span class="s4">= </span><span class="s1">obj</span><span class="s4">.</span><span class="s1">view</span><span class="s4">(</span><span class="s1">ma</span><span class="s4">.</span><span class="s1">MaskedArray</span><span class="s4">)</span>
+            <span class="s1">obj</span><span class="s4">.</span><span class="s1">_baseclass </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span>
+            <span class="s1">obj</span><span class="s4">.</span><span class="s1">_isfield </span><span class="s4">= </span><span class="s3">True</span>
+            <span class="s1">obj</span><span class="s4">.</span><span class="s1">_mask </span><span class="s4">= </span><span class="s1">_mask</span>
+            <span class="s2"># Reset the field values</span>
+            <span class="s1">_fill_value </span><span class="s4">= </span><span class="s1">_localdict</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s5">'_fill_value'</span><span class="s4">, </span><span class="s3">None</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">_fill_value </span><span class="s3">is not None</span><span class="s4">:</span>
+                <span class="s3">try</span><span class="s4">:</span>
+                    <span class="s1">obj</span><span class="s4">.</span><span class="s1">_fill_value </span><span class="s4">= </span><span class="s1">_fill_value</span><span class="s4">[</span><span class="s1">attr</span><span class="s4">]</span>
+                <span class="s3">except </span><span class="s1">ValueError</span><span class="s4">:</span>
+                    <span class="s1">obj</span><span class="s4">.</span><span class="s1">_fill_value </span><span class="s4">= </span><span class="s3">None</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">obj </span><span class="s4">= </span><span class="s1">obj</span><span class="s4">.</span><span class="s1">item</span><span class="s4">()</span>
+        <span class="s3">return </span><span class="s1">obj</span>
+
+    <span class="s3">def </span><span class="s1">__setattr__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">attr</span><span class="s4">, </span><span class="s1">val</span><span class="s4">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Sets the attribute attr to the value val. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s2"># Should we call __setmask__ first ?</span>
+        <span class="s3">if </span><span class="s1">attr </span><span class="s3">in </span><span class="s4">[</span><span class="s5">'mask'</span><span class="s4">, </span><span class="s5">'fieldmask'</span><span class="s4">]:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">__setmask__</span><span class="s4">(</span><span class="s1">val</span><span class="s4">)</span>
+            <span class="s3">return</span>
+        <span class="s2"># Create a shortcut (so that we don't have to call getattr all the time)</span>
+        <span class="s1">_localdict </span><span class="s4">= </span><span class="s1">object</span><span class="s4">.</span><span class="s1">__getattribute__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s5">'__dict__'</span><span class="s4">)</span>
+        <span class="s2"># Check whether we're creating a new field</span>
+        <span class="s1">newattr </span><span class="s4">= </span><span class="s1">attr </span><span class="s3">not in </span><span class="s1">_localdict</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s2"># Is attr a generic attribute ?</span>
+            <span class="s1">ret </span><span class="s4">= </span><span class="s1">object</span><span class="s4">.</span><span class="s1">__setattr__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">attr</span><span class="s4">, </span><span class="s1">val</span><span class="s4">)</span>
+        <span class="s3">except </span><span class="s1">Exception</span><span class="s4">:</span>
+            <span class="s2"># Not a generic attribute: exit if it's not a valid field</span>
+            <span class="s1">fielddict </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span><span class="s4">.</span><span class="s1">__getattribute__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s5">'dtype'</span><span class="s4">).</span><span class="s1">fields </span><span class="s3">or </span><span class="s4">{}</span>
+            <span class="s1">optinfo </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span><span class="s4">.</span><span class="s1">__getattribute__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s5">'_optinfo'</span><span class="s4">) </span><span class="s3">or </span><span class="s4">{}</span>
+            <span class="s3">if not </span><span class="s4">(</span><span class="s1">attr </span><span class="s3">in </span><span class="s1">fielddict </span><span class="s3">or </span><span class="s1">attr </span><span class="s3">in </span><span class="s1">optinfo</span><span class="s4">):</span>
+                <span class="s3">raise</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s2"># Get the list of names</span>
+            <span class="s1">fielddict </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span><span class="s4">.</span><span class="s1">__getattribute__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s5">'dtype'</span><span class="s4">).</span><span class="s1">fields </span><span class="s3">or </span><span class="s4">{}</span>
+            <span class="s2"># Check the attribute</span>
+            <span class="s3">if </span><span class="s1">attr </span><span class="s3">not in </span><span class="s1">fielddict</span><span class="s4">:</span>
+                <span class="s3">return </span><span class="s1">ret</span>
+            <span class="s3">if </span><span class="s1">newattr</span><span class="s4">:</span>
+                <span class="s2"># We just added this one or this setattr worked on an</span>
+                <span class="s2"># internal attribute.</span>
+                <span class="s3">try</span><span class="s4">:</span>
+                    <span class="s1">object</span><span class="s4">.</span><span class="s1">__delattr__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">attr</span><span class="s4">)</span>
+                <span class="s3">except </span><span class="s1">Exception</span><span class="s4">:</span>
+                    <span class="s3">return </span><span class="s1">ret</span>
+        <span class="s2"># Let's try to set the field</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">res </span><span class="s4">= </span><span class="s1">fielddict</span><span class="s4">[</span><span class="s1">attr</span><span class="s4">][:</span><span class="s6">2</span><span class="s4">]</span>
+        <span class="s3">except </span><span class="s4">(</span><span class="s1">TypeError</span><span class="s4">, </span><span class="s1">KeyError</span><span class="s4">) </span><span class="s3">as </span><span class="s1">e</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">AttributeError</span><span class="s4">(</span>
+                <span class="s5">f'record array has no attribute </span><span class="s3">{</span><span class="s1">attr</span><span class="s3">}</span><span class="s5">'</span><span class="s4">) </span><span class="s3">from </span><span class="s1">e</span>
+
+        <span class="s3">if </span><span class="s1">val </span><span class="s3">is </span><span class="s1">ma</span><span class="s4">.</span><span class="s1">masked</span><span class="s4">:</span>
+            <span class="s1">_fill_value </span><span class="s4">= </span><span class="s1">_localdict</span><span class="s4">[</span><span class="s5">'_fill_value'</span><span class="s4">]</span>
+            <span class="s3">if </span><span class="s1">_fill_value </span><span class="s3">is not None</span><span class="s4">:</span>
+                <span class="s1">dval </span><span class="s4">= </span><span class="s1">_localdict</span><span class="s4">[</span><span class="s5">'_fill_value'</span><span class="s4">][</span><span class="s1">attr</span><span class="s4">]</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">dval </span><span class="s4">= </span><span class="s1">val</span>
+            <span class="s1">mval </span><span class="s4">= </span><span class="s3">True</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">dval </span><span class="s4">= </span><span class="s1">ma</span><span class="s4">.</span><span class="s1">filled</span><span class="s4">(</span><span class="s1">val</span><span class="s4">)</span>
+            <span class="s1">mval </span><span class="s4">= </span><span class="s1">ma</span><span class="s4">.</span><span class="s1">getmaskarray</span><span class="s4">(</span><span class="s1">val</span><span class="s4">)</span>
+        <span class="s1">obj </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span><span class="s4">.</span><span class="s1">__getattribute__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s5">'_data'</span><span class="s4">).</span><span class="s1">setfield</span><span class="s4">(</span><span class="s1">dval</span><span class="s4">, *</span><span class="s1">res</span><span class="s4">)</span>
+        <span class="s1">_localdict</span><span class="s4">[</span><span class="s5">'_mask'</span><span class="s4">].</span><span class="s1">__setitem__</span><span class="s4">(</span><span class="s1">attr</span><span class="s4">, </span><span class="s1">mval</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">obj</span>
+
+    <span class="s3">def </span><span class="s1">__getitem__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">indx</span><span class="s4">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Returns all the fields sharing the same fieldname base. 
+ 
+        The fieldname base is either `_data` or `_mask`. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">_localdict </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">__dict__</span>
+        <span class="s1">_mask </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span><span class="s4">.</span><span class="s1">__getattribute__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s5">'_mask'</span><span class="s4">)</span>
+        <span class="s1">_data </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span><span class="s4">.</span><span class="s1">view</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">_localdict</span><span class="s4">[</span><span class="s5">'_baseclass'</span><span class="s4">])</span>
+        <span class="s2"># We want a field</span>
+        <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">indx</span><span class="s4">, </span><span class="s1">str</span><span class="s4">):</span>
+            <span class="s2"># Make sure _sharedmask is True to propagate back to _fieldmask</span>
+            <span class="s2"># Don't use _set_mask, there are some copies being made that</span>
+            <span class="s2"># break propagation Don't force the mask to nomask, that wreaks</span>
+            <span class="s2"># easy masking</span>
+            <span class="s1">obj </span><span class="s4">= </span><span class="s1">_data</span><span class="s4">[</span><span class="s1">indx</span><span class="s4">].</span><span class="s1">view</span><span class="s4">(</span><span class="s1">ma</span><span class="s4">.</span><span class="s1">MaskedArray</span><span class="s4">)</span>
+            <span class="s1">obj</span><span class="s4">.</span><span class="s1">_mask </span><span class="s4">= </span><span class="s1">_mask</span><span class="s4">[</span><span class="s1">indx</span><span class="s4">]</span>
+            <span class="s1">obj</span><span class="s4">.</span><span class="s1">_sharedmask </span><span class="s4">= </span><span class="s3">True</span>
+            <span class="s1">fval </span><span class="s4">= </span><span class="s1">_localdict</span><span class="s4">[</span><span class="s5">'_fill_value'</span><span class="s4">]</span>
+            <span class="s3">if </span><span class="s1">fval </span><span class="s3">is not None</span><span class="s4">:</span>
+                <span class="s1">obj</span><span class="s4">.</span><span class="s1">_fill_value </span><span class="s4">= </span><span class="s1">fval</span><span class="s4">[</span><span class="s1">indx</span><span class="s4">]</span>
+            <span class="s2"># Force to masked if the mask is True</span>
+            <span class="s3">if not </span><span class="s1">obj</span><span class="s4">.</span><span class="s1">ndim </span><span class="s3">and </span><span class="s1">obj</span><span class="s4">.</span><span class="s1">_mask</span><span class="s4">:</span>
+                <span class="s3">return </span><span class="s1">ma</span><span class="s4">.</span><span class="s1">masked</span>
+            <span class="s3">return </span><span class="s1">obj</span>
+        <span class="s2"># We want some elements.</span>
+        <span class="s2"># First, the data.</span>
+        <span class="s1">obj </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">asarray</span><span class="s4">(</span><span class="s1">_data</span><span class="s4">[</span><span class="s1">indx</span><span class="s4">]).</span><span class="s1">view</span><span class="s4">(</span><span class="s1">mrecarray</span><span class="s4">)</span>
+        <span class="s1">obj</span><span class="s4">.</span><span class="s1">_mask </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">asarray</span><span class="s4">(</span><span class="s1">_mask</span><span class="s4">[</span><span class="s1">indx</span><span class="s4">]).</span><span class="s1">view</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">recarray</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">obj</span>
+
+    <span class="s3">def </span><span class="s1">__setitem__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">indx</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Sets the given record to value. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">ma</span><span class="s4">.</span><span class="s1">MaskedArray</span><span class="s4">.</span><span class="s1">__setitem__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">indx</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">indx</span><span class="s4">, </span><span class="s1">str</span><span class="s4">):</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_mask</span><span class="s4">[</span><span class="s1">indx</span><span class="s4">] = </span><span class="s1">ma</span><span class="s4">.</span><span class="s1">getmaskarray</span><span class="s4">(</span><span class="s1">value</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__str__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Calculates the string representation. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">size </span><span class="s4">&gt; </span><span class="s6">1</span><span class="s4">:</span>
+            <span class="s1">mstr </span><span class="s4">= [</span><span class="s5">f&quot;(</span><span class="s3">{</span><span class="s5">','</span><span class="s4">.</span><span class="s1">join</span><span class="s4">([</span><span class="s1">str</span><span class="s4">(</span><span class="s1">i</span><span class="s4">) </span><span class="s3">for </span><span class="s1">i </span><span class="s3">in </span><span class="s1">s</span><span class="s4">])</span><span class="s3">}</span><span class="s5">)&quot;</span>
+                    <span class="s3">for </span><span class="s1">s </span><span class="s3">in </span><span class="s1">zip</span><span class="s4">(*[</span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">f</span><span class="s4">) </span><span class="s3">for </span><span class="s1">f </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">.</span><span class="s1">names</span><span class="s4">])]</span>
+            <span class="s3">return </span><span class="s5">f&quot;[</span><span class="s3">{</span><span class="s5">', '</span><span class="s4">.</span><span class="s1">join</span><span class="s4">(</span><span class="s1">mstr</span><span class="s4">)</span><span class="s3">}</span><span class="s5">]&quot;</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">mstr </span><span class="s4">= [</span><span class="s5">f&quot;</span><span class="s3">{</span><span class="s5">','</span><span class="s4">.</span><span class="s1">join</span><span class="s4">([</span><span class="s1">str</span><span class="s4">(</span><span class="s1">i</span><span class="s4">) </span><span class="s3">for </span><span class="s1">i </span><span class="s3">in </span><span class="s1">s</span><span class="s4">])</span><span class="s3">}</span><span class="s5">&quot;</span>
+                    <span class="s3">for </span><span class="s1">s </span><span class="s3">in </span><span class="s1">zip</span><span class="s4">([</span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">f</span><span class="s4">) </span><span class="s3">for </span><span class="s1">f </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">.</span><span class="s1">names</span><span class="s4">])]</span>
+            <span class="s3">return </span><span class="s5">f&quot;(</span><span class="s3">{</span><span class="s5">', '</span><span class="s4">.</span><span class="s1">join</span><span class="s4">(</span><span class="s1">mstr</span><span class="s4">)</span><span class="s3">}</span><span class="s5">)&quot;</span>
+
+    <span class="s3">def </span><span class="s1">__repr__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Calculates the repr representation. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">_names </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">.</span><span class="s1">names</span>
+        <span class="s1">fmt </span><span class="s4">= </span><span class="s5">f&quot;%</span><span class="s3">{</span><span class="s1">max</span><span class="s4">(</span><span class="s1">len</span><span class="s4">(</span><span class="s1">n</span><span class="s4">) </span><span class="s3">for </span><span class="s1">n </span><span class="s3">in </span><span class="s1">_names</span><span class="s4">) + </span><span class="s6">4</span><span class="s3">}</span><span class="s5">s : %s&quot;</span>
+        <span class="s1">reprstr </span><span class="s4">= [</span><span class="s1">fmt </span><span class="s4">% (</span><span class="s1">f</span><span class="s4">, </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">f</span><span class="s4">)) </span><span class="s3">for </span><span class="s1">f </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">.</span><span class="s1">names</span><span class="s4">]</span>
+        <span class="s1">reprstr</span><span class="s4">.</span><span class="s1">insert</span><span class="s4">(</span><span class="s6">0</span><span class="s4">, </span><span class="s5">'masked_records('</span><span class="s4">)</span>
+        <span class="s1">reprstr</span><span class="s4">.</span><span class="s1">extend</span><span class="s4">([</span><span class="s1">fmt </span><span class="s4">% (</span><span class="s5">'    fill_value'</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">fill_value</span><span class="s4">),</span>
+                        <span class="s5">'              )'</span><span class="s4">])</span>
+        <span class="s3">return </span><span class="s1">str</span><span class="s4">(</span><span class="s5">&quot;</span><span class="s3">\n</span><span class="s5">&quot;</span><span class="s4">.</span><span class="s1">join</span><span class="s4">(</span><span class="s1">reprstr</span><span class="s4">))</span>
+
+    <span class="s3">def </span><span class="s1">view</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">dtype</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">type</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Returns a view of the mrecarray. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s2"># If the new dtype has no fields, we need to revert to MaskedArray,</span>
+        <span class="s2"># but keep the possibility of subclasses (eg, TimeSeriesRecords).</span>
+        <span class="s2"># So we'll force a type set to the first parent.</span>
+        <span class="s3">if </span><span class="s4">(</span><span class="s1">type </span><span class="s3">is None</span>
+                <span class="s3">and </span><span class="s1">dtype </span><span class="s3">is not None</span>
+                <span class="s3">and not </span><span class="s4">(</span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">dtype</span><span class="s4">, </span><span class="s1">builtins</span><span class="s4">.</span><span class="s1">type</span><span class="s4">)</span>
+                         <span class="s3">and </span><span class="s1">issubclass</span><span class="s4">(</span><span class="s1">dtype</span><span class="s4">, </span><span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span><span class="s4">))</span>
+                <span class="s3">and </span><span class="s4">(</span><span class="s1">dtype </span><span class="s4">:= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">(</span><span class="s1">dtype</span><span class="s4">)).</span><span class="s1">fields </span><span class="s3">is None</span><span class="s4">):</span>
+            <span class="s1">type </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">__class__</span><span class="s4">.</span><span class="s1">__bases__</span><span class="s4">[</span><span class="s6">0</span><span class="s4">]</span>
+
+        <span class="s3">return </span><span class="s1">super</span><span class="s4">().</span><span class="s1">view</span><span class="s4">(*[</span><span class="s1">a </span><span class="s3">for </span><span class="s1">a </span><span class="s3">in </span><span class="s4">(</span><span class="s1">dtype</span><span class="s4">, </span><span class="s1">type</span><span class="s4">) </span><span class="s3">if </span><span class="s1">a </span><span class="s3">is not None</span><span class="s4">])</span>
+
+    <span class="s3">def </span><span class="s1">harden_mask</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Forces the mask to hard. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_hardmask </span><span class="s4">= </span><span class="s3">True</span>
+
+    <span class="s3">def </span><span class="s1">soften_mask</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Forces the mask to soft 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_hardmask </span><span class="s4">= </span><span class="s3">False</span>
+
+    <span class="s3">def </span><span class="s1">copy</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Returns a copy of the masked record. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">copied </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">.</span><span class="s1">copy</span><span class="s4">().</span><span class="s1">view</span><span class="s4">(</span><span class="s1">type</span><span class="s4">(</span><span class="s1">self</span><span class="s4">))</span>
+        <span class="s1">copied</span><span class="s4">.</span><span class="s1">_mask </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_mask</span><span class="s4">.</span><span class="s1">copy</span><span class="s4">()</span>
+        <span class="s3">return </span><span class="s1">copied</span>
+
+    <span class="s3">def </span><span class="s1">tolist</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">fill_value</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return the data portion of the array as a list. 
+ 
+        Data items are converted to the nearest compatible Python type. 
+        Masked values are converted to fill_value. If fill_value is None, 
+        the corresponding entries in the output list will be ``None``. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s3">if </span><span class="s1">fill_value </span><span class="s3">is not None</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">filled</span><span class="s4">(</span><span class="s1">fill_value</span><span class="s4">).</span><span class="s1">tolist</span><span class="s4">()</span>
+        <span class="s1">result </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">array</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">filled</span><span class="s4">().</span><span class="s1">tolist</span><span class="s4">(), </span><span class="s1">dtype</span><span class="s4">=</span><span class="s1">object</span><span class="s4">)</span>
+        <span class="s1">mask </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">array</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_mask</span><span class="s4">.</span><span class="s1">tolist</span><span class="s4">())</span>
+        <span class="s1">result</span><span class="s4">[</span><span class="s1">mask</span><span class="s4">] = </span><span class="s3">None</span>
+        <span class="s3">return </span><span class="s1">result</span><span class="s4">.</span><span class="s1">tolist</span><span class="s4">()</span>
+
+    <span class="s3">def </span><span class="s1">__getstate__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s0">&quot;&quot;&quot;Return the internal state of the masked array. 
+ 
+        This is for pickling. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">state </span><span class="s4">= (</span><span class="s6">1</span><span class="s4">,</span>
+                 <span class="s1">self</span><span class="s4">.</span><span class="s1">shape</span><span class="s4">,</span>
+                 <span class="s1">self</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">,</span>
+                 <span class="s1">self</span><span class="s4">.</span><span class="s1">flags</span><span class="s4">.</span><span class="s1">fnc</span><span class="s4">,</span>
+                 <span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">.</span><span class="s1">tobytes</span><span class="s4">(),</span>
+                 <span class="s1">self</span><span class="s4">.</span><span class="s1">_mask</span><span class="s4">.</span><span class="s1">tobytes</span><span class="s4">(),</span>
+                 <span class="s1">self</span><span class="s4">.</span><span class="s1">_fill_value</span><span class="s4">,</span>
+                 <span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">state</span>
+
+    <span class="s3">def </span><span class="s1">__setstate__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">state</span><span class="s4">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Restore the internal state of the masked array. 
+ 
+        This is for pickling.  ``state`` is typically the output of the 
+        ``__getstate__`` output, and is a 5-tuple: 
+ 
+        - class name 
+        - a tuple giving the shape of the data 
+        - a typecode for the data 
+        - a binary string for the data 
+        - a binary string for the mask. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s4">(</span><span class="s1">ver</span><span class="s4">, </span><span class="s1">shp</span><span class="s4">, </span><span class="s1">typ</span><span class="s4">, </span><span class="s1">isf</span><span class="s4">, </span><span class="s1">raw</span><span class="s4">, </span><span class="s1">msk</span><span class="s4">, </span><span class="s1">flv</span><span class="s4">) = </span><span class="s1">state</span>
+        <span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span><span class="s4">.</span><span class="s1">__setstate__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, (</span><span class="s1">shp</span><span class="s4">, </span><span class="s1">typ</span><span class="s4">, </span><span class="s1">isf</span><span class="s4">, </span><span class="s1">raw</span><span class="s4">))</span>
+        <span class="s1">mdtype </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">([(</span><span class="s1">k</span><span class="s4">, </span><span class="s1">np</span><span class="s4">.</span><span class="s1">bool</span><span class="s4">) </span><span class="s3">for </span><span class="s4">(</span><span class="s1">k</span><span class="s4">, </span><span class="s1">_</span><span class="s4">) </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">.</span><span class="s1">descr</span><span class="s4">])</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">__dict__</span><span class="s4">[</span><span class="s5">'_mask'</span><span class="s4">].</span><span class="s1">__setstate__</span><span class="s4">((</span><span class="s1">shp</span><span class="s4">, </span><span class="s1">mdtype</span><span class="s4">, </span><span class="s1">isf</span><span class="s4">, </span><span class="s1">msk</span><span class="s4">))</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">fill_value </span><span class="s4">= </span><span class="s1">flv</span>
+
+    <span class="s3">def </span><span class="s1">__reduce__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Return a 3-tuple for pickling a MaskedArray. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s3">return </span><span class="s4">(</span><span class="s1">_mrreconstruct</span><span class="s4">,</span>
+                <span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">__class__</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_baseclass</span><span class="s4">, (</span><span class="s6">0</span><span class="s4">,), </span><span class="s5">'b'</span><span class="s4">,),</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">__getstate__</span><span class="s4">())</span>
+
+
+<span class="s3">def </span><span class="s1">_mrreconstruct</span><span class="s4">(</span><span class="s1">subtype</span><span class="s4">, </span><span class="s1">baseclass</span><span class="s4">, </span><span class="s1">baseshape</span><span class="s4">, </span><span class="s1">basetype</span><span class="s4">,):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Build a new MaskedArray from the information stored in a pickle. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">_data </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span><span class="s4">.</span><span class="s1">__new__</span><span class="s4">(</span><span class="s1">baseclass</span><span class="s4">, </span><span class="s1">baseshape</span><span class="s4">, </span><span class="s1">basetype</span><span class="s4">).</span><span class="s1">view</span><span class="s4">(</span><span class="s1">subtype</span><span class="s4">)</span>
+    <span class="s1">_mask </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span><span class="s4">.</span><span class="s1">__new__</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span><span class="s4">, </span><span class="s1">baseshape</span><span class="s4">, </span><span class="s5">'b1'</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">subtype</span><span class="s4">.</span><span class="s1">__new__</span><span class="s4">(</span><span class="s1">subtype</span><span class="s4">, </span><span class="s1">_data</span><span class="s4">, </span><span class="s1">mask</span><span class="s4">=</span><span class="s1">_mask</span><span class="s4">, </span><span class="s1">dtype</span><span class="s4">=</span><span class="s1">basetype</span><span class="s4">,)</span>
+
+
+<span class="s1">mrecarray </span><span class="s4">= </span><span class="s1">MaskedRecords</span>
+
+
+<span class="s2">###############################################################################</span>
+<span class="s2">#                             Constructors                                    #</span>
+<span class="s2">###############################################################################</span>
+
+
+<span class="s3">def </span><span class="s1">fromarrays</span><span class="s4">(</span><span class="s1">arraylist</span><span class="s4">, </span><span class="s1">dtype</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">shape</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">formats</span><span class="s4">=</span><span class="s3">None</span><span class="s4">,</span>
+               <span class="s1">names</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">titles</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">aligned</span><span class="s4">=</span><span class="s3">False</span><span class="s4">, </span><span class="s1">byteorder</span><span class="s4">=</span><span class="s3">None</span><span class="s4">,</span>
+               <span class="s1">fill_value</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Creates a mrecarray from a (flat) list of masked arrays. 
+ 
+    Parameters 
+    ---------- 
+    arraylist : sequence 
+        A list of (masked) arrays. Each element of the sequence is first converted 
+        to a masked array if needed. If a 2D array is passed as argument, it is 
+        processed line by line 
+    dtype : {None, dtype}, optional 
+        Data type descriptor. 
+    shape : {None, integer}, optional 
+        Number of records. If None, shape is defined from the shape of the 
+        first array in the list. 
+    formats : {None, sequence}, optional 
+        Sequence of formats for each individual field. If None, the formats will 
+        be autodetected by inspecting the fields and selecting the highest dtype 
+        possible. 
+    names : {None, sequence}, optional 
+        Sequence of the names of each field. 
+    fill_value : {None, sequence}, optional 
+        Sequence of data to be used as filling values. 
+ 
+    Notes 
+    ----- 
+    Lists of tuples should be preferred over lists of lists for faster processing. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">datalist </span><span class="s4">= [</span><span class="s1">ma</span><span class="s4">.</span><span class="s1">getdata</span><span class="s4">(</span><span class="s1">x</span><span class="s4">) </span><span class="s3">for </span><span class="s1">x </span><span class="s3">in </span><span class="s1">arraylist</span><span class="s4">]</span>
+    <span class="s1">masklist </span><span class="s4">= [</span><span class="s1">np</span><span class="s4">.</span><span class="s1">atleast_1d</span><span class="s4">(</span><span class="s1">ma</span><span class="s4">.</span><span class="s1">getmaskarray</span><span class="s4">(</span><span class="s1">x</span><span class="s4">)) </span><span class="s3">for </span><span class="s1">x </span><span class="s3">in </span><span class="s1">arraylist</span><span class="s4">]</span>
+    <span class="s1">_array </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">rec</span><span class="s4">.</span><span class="s1">fromarrays</span><span class="s4">(</span><span class="s1">datalist</span><span class="s4">,</span>
+                               <span class="s1">dtype</span><span class="s4">=</span><span class="s1">dtype</span><span class="s4">, </span><span class="s1">shape</span><span class="s4">=</span><span class="s1">shape</span><span class="s4">, </span><span class="s1">formats</span><span class="s4">=</span><span class="s1">formats</span><span class="s4">,</span>
+                               <span class="s1">names</span><span class="s4">=</span><span class="s1">names</span><span class="s4">, </span><span class="s1">titles</span><span class="s4">=</span><span class="s1">titles</span><span class="s4">, </span><span class="s1">aligned</span><span class="s4">=</span><span class="s1">aligned</span><span class="s4">,</span>
+                               <span class="s1">byteorder</span><span class="s4">=</span><span class="s1">byteorder</span><span class="s4">).</span><span class="s1">view</span><span class="s4">(</span><span class="s1">mrecarray</span><span class="s4">)</span>
+    <span class="s1">_array</span><span class="s4">.</span><span class="s1">_mask</span><span class="s4">.</span><span class="s1">flat </span><span class="s4">= </span><span class="s1">list</span><span class="s4">(</span><span class="s1">zip</span><span class="s4">(*</span><span class="s1">masklist</span><span class="s4">))</span>
+    <span class="s3">if </span><span class="s1">fill_value </span><span class="s3">is not None</span><span class="s4">:</span>
+        <span class="s1">_array</span><span class="s4">.</span><span class="s1">fill_value </span><span class="s4">= </span><span class="s1">fill_value</span>
+    <span class="s3">return </span><span class="s1">_array</span>
+
+
+<span class="s3">def </span><span class="s1">fromrecords</span><span class="s4">(</span><span class="s1">reclist</span><span class="s4">, </span><span class="s1">dtype</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">shape</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">formats</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">names</span><span class="s4">=</span><span class="s3">None</span><span class="s4">,</span>
+                <span class="s1">titles</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">aligned</span><span class="s4">=</span><span class="s3">False</span><span class="s4">, </span><span class="s1">byteorder</span><span class="s4">=</span><span class="s3">None</span><span class="s4">,</span>
+                <span class="s1">fill_value</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">mask</span><span class="s4">=</span><span class="s1">ma</span><span class="s4">.</span><span class="s1">nomask</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Creates a MaskedRecords from a list of records. 
+ 
+    Parameters 
+    ---------- 
+    reclist : sequence 
+        A list of records. Each element of the sequence is first converted 
+        to a masked array if needed. If a 2D array is passed as argument, it is 
+        processed line by line 
+    dtype : {None, dtype}, optional 
+        Data type descriptor. 
+    shape : {None,int}, optional 
+        Number of records. If None, ``shape`` is defined from the shape of the 
+        first array in the list. 
+    formats : {None, sequence}, optional 
+        Sequence of formats for each individual field. If None, the formats will 
+        be autodetected by inspecting the fields and selecting the highest dtype 
+        possible. 
+    names : {None, sequence}, optional 
+        Sequence of the names of each field. 
+    fill_value : {None, sequence}, optional 
+        Sequence of data to be used as filling values. 
+    mask : {nomask, sequence}, optional. 
+        External mask to apply on the data. 
+ 
+    Notes 
+    ----- 
+    Lists of tuples should be preferred over lists of lists for faster processing. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s2"># Grab the initial _fieldmask, if needed:</span>
+    <span class="s1">_mask </span><span class="s4">= </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">reclist</span><span class="s4">, </span><span class="s5">'_mask'</span><span class="s4">, </span><span class="s3">None</span><span class="s4">)</span>
+    <span class="s2"># Get the list of records.</span>
+    <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">reclist</span><span class="s4">, </span><span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span><span class="s4">):</span>
+        <span class="s2"># Make sure we don't have some hidden mask</span>
+        <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">reclist</span><span class="s4">, </span><span class="s1">ma</span><span class="s4">.</span><span class="s1">MaskedArray</span><span class="s4">):</span>
+            <span class="s1">reclist </span><span class="s4">= </span><span class="s1">reclist</span><span class="s4">.</span><span class="s1">filled</span><span class="s4">().</span><span class="s1">view</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">ndarray</span><span class="s4">)</span>
+        <span class="s2"># Grab the initial dtype, just in case</span>
+        <span class="s3">if </span><span class="s1">dtype </span><span class="s3">is None</span><span class="s4">:</span>
+            <span class="s1">dtype </span><span class="s4">= </span><span class="s1">reclist</span><span class="s4">.</span><span class="s1">dtype</span>
+        <span class="s1">reclist </span><span class="s4">= </span><span class="s1">reclist</span><span class="s4">.</span><span class="s1">tolist</span><span class="s4">()</span>
+    <span class="s1">mrec </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">rec</span><span class="s4">.</span><span class="s1">fromrecords</span><span class="s4">(</span><span class="s1">reclist</span><span class="s4">, </span><span class="s1">dtype</span><span class="s4">=</span><span class="s1">dtype</span><span class="s4">, </span><span class="s1">shape</span><span class="s4">=</span><span class="s1">shape</span><span class="s4">, </span><span class="s1">formats</span><span class="s4">=</span><span class="s1">formats</span><span class="s4">,</span>
+                          <span class="s1">names</span><span class="s4">=</span><span class="s1">names</span><span class="s4">, </span><span class="s1">titles</span><span class="s4">=</span><span class="s1">titles</span><span class="s4">,</span>
+                          <span class="s1">aligned</span><span class="s4">=</span><span class="s1">aligned</span><span class="s4">, </span><span class="s1">byteorder</span><span class="s4">=</span><span class="s1">byteorder</span><span class="s4">).</span><span class="s1">view</span><span class="s4">(</span><span class="s1">mrecarray</span><span class="s4">)</span>
+    <span class="s2"># Set the fill_value if needed</span>
+    <span class="s3">if </span><span class="s1">fill_value </span><span class="s3">is not None</span><span class="s4">:</span>
+        <span class="s1">mrec</span><span class="s4">.</span><span class="s1">fill_value </span><span class="s4">= </span><span class="s1">fill_value</span>
+    <span class="s2"># Now, let's deal w/ the mask</span>
+    <span class="s3">if </span><span class="s1">mask </span><span class="s3">is not </span><span class="s1">ma</span><span class="s4">.</span><span class="s1">nomask</span><span class="s4">:</span>
+        <span class="s1">mask </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">asarray</span><span class="s4">(</span><span class="s1">mask</span><span class="s4">)</span>
+        <span class="s1">maskrecordlength </span><span class="s4">= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">mask</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">maskrecordlength</span><span class="s4">:</span>
+            <span class="s1">mrec</span><span class="s4">.</span><span class="s1">_mask</span><span class="s4">.</span><span class="s1">flat </span><span class="s4">= </span><span class="s1">mask</span>
+        <span class="s3">elif </span><span class="s1">mask</span><span class="s4">.</span><span class="s1">ndim </span><span class="s4">== </span><span class="s6">2</span><span class="s4">:</span>
+            <span class="s1">mrec</span><span class="s4">.</span><span class="s1">_mask</span><span class="s4">.</span><span class="s1">flat </span><span class="s4">= [</span><span class="s1">tuple</span><span class="s4">(</span><span class="s1">m</span><span class="s4">) </span><span class="s3">for </span><span class="s1">m </span><span class="s3">in </span><span class="s1">mask</span><span class="s4">]</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">mrec</span><span class="s4">.</span><span class="s1">__setmask__</span><span class="s4">(</span><span class="s1">mask</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">_mask </span><span class="s3">is not None</span><span class="s4">:</span>
+        <span class="s1">mrec</span><span class="s4">.</span><span class="s1">_mask</span><span class="s4">[:] = </span><span class="s1">_mask</span>
+    <span class="s3">return </span><span class="s1">mrec</span>
+
+
+<span class="s3">def </span><span class="s1">_guessvartypes</span><span class="s4">(</span><span class="s1">arr</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Tries to guess the dtypes of the str_ ndarray `arr`. 
+ 
+    Guesses by testing element-wise conversion. Returns a list of dtypes. 
+    The array is first converted to ndarray. If the array is 2D, the test 
+    is performed on the first line. An exception is raised if the file is 
+    3D or more. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">vartypes </span><span class="s4">= []</span>
+    <span class="s1">arr </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">asarray</span><span class="s4">(</span><span class="s1">arr</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">arr</span><span class="s4">.</span><span class="s1">ndim </span><span class="s4">== </span><span class="s6">2</span><span class="s4">:</span>
+        <span class="s1">arr </span><span class="s4">= </span><span class="s1">arr</span><span class="s4">[</span><span class="s6">0</span><span class="s4">]</span>
+    <span class="s3">elif </span><span class="s1">arr</span><span class="s4">.</span><span class="s1">ndim </span><span class="s4">&gt; </span><span class="s6">2</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s5">&quot;The array should be 2D at most!&quot;</span><span class="s4">)</span>
+    <span class="s2"># Start the conversion loop.</span>
+    <span class="s3">for </span><span class="s1">f </span><span class="s3">in </span><span class="s1">arr</span><span class="s4">:</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">int</span><span class="s4">(</span><span class="s1">f</span><span class="s4">)</span>
+        <span class="s3">except </span><span class="s4">(</span><span class="s1">ValueError</span><span class="s4">, </span><span class="s1">TypeError</span><span class="s4">):</span>
+            <span class="s3">try</span><span class="s4">:</span>
+                <span class="s1">float</span><span class="s4">(</span><span class="s1">f</span><span class="s4">)</span>
+            <span class="s3">except </span><span class="s4">(</span><span class="s1">ValueError</span><span class="s4">, </span><span class="s1">TypeError</span><span class="s4">):</span>
+                <span class="s3">try</span><span class="s4">:</span>
+                    <span class="s1">complex</span><span class="s4">(</span><span class="s1">f</span><span class="s4">)</span>
+                <span class="s3">except </span><span class="s4">(</span><span class="s1">ValueError</span><span class="s4">, </span><span class="s1">TypeError</span><span class="s4">):</span>
+                    <span class="s1">vartypes</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">arr</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">)</span>
+                <span class="s3">else</span><span class="s4">:</span>
+                    <span class="s1">vartypes</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">(</span><span class="s1">complex</span><span class="s4">))</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">vartypes</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">(</span><span class="s1">float</span><span class="s4">))</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">vartypes</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">np</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">(</span><span class="s1">int</span><span class="s4">))</span>
+    <span class="s3">return </span><span class="s1">vartypes</span>
+
+
+<span class="s3">def </span><span class="s1">openfile</span><span class="s4">(</span><span class="s1">fname</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Opens the file handle of file `fname`. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s2"># A file handle</span>
+    <span class="s3">if </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">fname</span><span class="s4">, </span><span class="s5">'readline'</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">fname</span>
+    <span class="s2"># Try to open the file and guess its type</span>
+    <span class="s3">try</span><span class="s4">:</span>
+        <span class="s1">f </span><span class="s4">= </span><span class="s1">open</span><span class="s4">(</span><span class="s1">fname</span><span class="s4">)</span>
+    <span class="s3">except </span><span class="s1">FileNotFoundError </span><span class="s3">as </span><span class="s1">e</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">FileNotFoundError</span><span class="s4">(</span><span class="s5">f&quot;No such file: '</span><span class="s3">{</span><span class="s1">fname</span><span class="s3">}</span><span class="s5">'&quot;</span><span class="s4">) </span><span class="s3">from </span><span class="s1">e</span>
+    <span class="s3">if </span><span class="s1">f</span><span class="s4">.</span><span class="s1">readline</span><span class="s4">()[:</span><span class="s6">2</span><span class="s4">] != </span><span class="s5">&quot;</span><span class="s3">\\</span><span class="s5">x&quot;</span><span class="s4">:</span>
+        <span class="s1">f</span><span class="s4">.</span><span class="s1">seek</span><span class="s4">(</span><span class="s6">0</span><span class="s4">, </span><span class="s6">0</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">f</span>
+    <span class="s1">f</span><span class="s4">.</span><span class="s1">close</span><span class="s4">()</span>
+    <span class="s3">raise </span><span class="s1">NotImplementedError</span><span class="s4">(</span><span class="s5">&quot;Wow, binary file&quot;</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">fromtextfile</span><span class="s4">(</span><span class="s1">fname</span><span class="s4">, </span><span class="s1">delimiter</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">commentchar</span><span class="s4">=</span><span class="s5">'#'</span><span class="s4">, </span><span class="s1">missingchar</span><span class="s4">=</span><span class="s5">''</span><span class="s4">,</span>
+                 <span class="s1">varnames</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">vartypes</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Creates a mrecarray from data stored in the file `filename`. 
+ 
+    Parameters 
+    ---------- 
+    fname : {file name/handle} 
+        Handle of an opened file. 
+    delimiter : {None, string}, optional 
+        Alphanumeric character used to separate columns in the file. 
+        If None, any (group of) white spacestring(s) will be used. 
+    commentchar : {'#', string}, optional 
+        Alphanumeric character used to mark the start of a comment. 
+    missingchar : {'', string}, optional 
+        String indicating missing data, and used to create the masks. 
+    varnames : {None, sequence}, optional 
+        Sequence of the variable names. If None, a list will be created from 
+        the first non empty line of the file. 
+    vartypes : {None, sequence}, optional 
+        Sequence of the variables dtypes. If None, it will be estimated from 
+        the first non-commented line. 
+ 
+ 
+    Ultra simple: the varnames are in the header, one line&quot;&quot;&quot;</span>
+
+    <span class="s2"># Try to open the file.</span>
+    <span class="s1">ftext </span><span class="s4">= </span><span class="s1">openfile</span><span class="s4">(</span><span class="s1">fname</span><span class="s4">)</span>
+
+    <span class="s2"># Get the first non-empty line as the varnames</span>
+    <span class="s3">while True</span><span class="s4">:</span>
+        <span class="s1">line </span><span class="s4">= </span><span class="s1">ftext</span><span class="s4">.</span><span class="s1">readline</span><span class="s4">()</span>
+        <span class="s1">firstline </span><span class="s4">= </span><span class="s1">line</span><span class="s4">[:</span><span class="s1">line</span><span class="s4">.</span><span class="s1">find</span><span class="s4">(</span><span class="s1">commentchar</span><span class="s4">)].</span><span class="s1">strip</span><span class="s4">()</span>
+        <span class="s1">_varnames </span><span class="s4">= </span><span class="s1">firstline</span><span class="s4">.</span><span class="s1">split</span><span class="s4">(</span><span class="s1">delimiter</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">_varnames</span><span class="s4">) &gt; </span><span class="s6">1</span><span class="s4">:</span>
+            <span class="s3">break</span>
+    <span class="s3">if </span><span class="s1">varnames </span><span class="s3">is None</span><span class="s4">:</span>
+        <span class="s1">varnames </span><span class="s4">= </span><span class="s1">_varnames</span>
+
+    <span class="s2"># Get the data.</span>
+    <span class="s1">_variables </span><span class="s4">= </span><span class="s1">ma</span><span class="s4">.</span><span class="s1">masked_array</span><span class="s4">([</span><span class="s1">line</span><span class="s4">.</span><span class="s1">strip</span><span class="s4">().</span><span class="s1">split</span><span class="s4">(</span><span class="s1">delimiter</span><span class="s4">) </span><span class="s3">for </span><span class="s1">line </span><span class="s3">in </span><span class="s1">ftext</span>
+                                 <span class="s3">if </span><span class="s1">line</span><span class="s4">[</span><span class="s6">0</span><span class="s4">] != </span><span class="s1">commentchar </span><span class="s3">and </span><span class="s1">len</span><span class="s4">(</span><span class="s1">line</span><span class="s4">) &gt; </span><span class="s6">1</span><span class="s4">])</span>
+    <span class="s4">(</span><span class="s1">_</span><span class="s4">, </span><span class="s1">nfields</span><span class="s4">) = </span><span class="s1">_variables</span><span class="s4">.</span><span class="s1">shape</span>
+    <span class="s1">ftext</span><span class="s4">.</span><span class="s1">close</span><span class="s4">()</span>
+
+    <span class="s2"># Try to guess the dtype.</span>
+    <span class="s3">if </span><span class="s1">vartypes </span><span class="s3">is None</span><span class="s4">:</span>
+        <span class="s1">vartypes </span><span class="s4">= </span><span class="s1">_guessvartypes</span><span class="s4">(</span><span class="s1">_variables</span><span class="s4">[</span><span class="s6">0</span><span class="s4">])</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s1">vartypes </span><span class="s4">= [</span><span class="s1">np</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">(</span><span class="s1">v</span><span class="s4">) </span><span class="s3">for </span><span class="s1">v </span><span class="s3">in </span><span class="s1">vartypes</span><span class="s4">]</span>
+        <span class="s3">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">vartypes</span><span class="s4">) != </span><span class="s1">nfields</span><span class="s4">:</span>
+            <span class="s1">msg </span><span class="s4">= </span><span class="s5">f&quot;Attempting to </span><span class="s3">{</span><span class="s1">len</span><span class="s4">(</span><span class="s1">vartypes</span><span class="s4">)</span><span class="s3">} </span><span class="s5">dtypes for </span><span class="s3">{</span><span class="s1">nfields</span><span class="s3">} </span><span class="s5">fields!&quot;</span>
+            <span class="s1">msg </span><span class="s4">+= </span><span class="s5">&quot; Reverting to default.&quot;</span>
+            <span class="s1">warnings</span><span class="s4">.</span><span class="s1">warn</span><span class="s4">(</span><span class="s1">msg</span><span class="s4">, </span><span class="s1">stacklevel</span><span class="s4">=</span><span class="s6">2</span><span class="s4">)</span>
+            <span class="s1">vartypes </span><span class="s4">= </span><span class="s1">_guessvartypes</span><span class="s4">(</span><span class="s1">_variables</span><span class="s4">[</span><span class="s6">0</span><span class="s4">])</span>
+
+    <span class="s2"># Construct the descriptor.</span>
+    <span class="s1">mdescr </span><span class="s4">= </span><span class="s1">list</span><span class="s4">(</span><span class="s1">zip</span><span class="s4">(</span><span class="s1">varnames</span><span class="s4">, </span><span class="s1">vartypes</span><span class="s4">))</span>
+    <span class="s1">mfillv </span><span class="s4">= [</span><span class="s1">ma</span><span class="s4">.</span><span class="s1">default_fill_value</span><span class="s4">(</span><span class="s1">f</span><span class="s4">) </span><span class="s3">for </span><span class="s1">f </span><span class="s3">in </span><span class="s1">vartypes</span><span class="s4">]</span>
+
+    <span class="s2"># Get the data and the mask.</span>
+    <span class="s2"># We just need a list of masked_arrays. It's easier to create it like that:</span>
+    <span class="s1">_mask </span><span class="s4">= (</span><span class="s1">_variables</span><span class="s4">.</span><span class="s1">T </span><span class="s4">== </span><span class="s1">missingchar</span><span class="s4">)</span>
+    <span class="s1">_datalist </span><span class="s4">= [</span><span class="s1">ma</span><span class="s4">.</span><span class="s1">masked_array</span><span class="s4">(</span><span class="s1">a</span><span class="s4">, </span><span class="s1">mask</span><span class="s4">=</span><span class="s1">m</span><span class="s4">, </span><span class="s1">dtype</span><span class="s4">=</span><span class="s1">t</span><span class="s4">, </span><span class="s1">fill_value</span><span class="s4">=</span><span class="s1">f</span><span class="s4">)</span>
+                 <span class="s3">for </span><span class="s4">(</span><span class="s1">a</span><span class="s4">, </span><span class="s1">m</span><span class="s4">, </span><span class="s1">t</span><span class="s4">, </span><span class="s1">f</span><span class="s4">) </span><span class="s3">in </span><span class="s1">zip</span><span class="s4">(</span><span class="s1">_variables</span><span class="s4">.</span><span class="s1">T</span><span class="s4">, </span><span class="s1">_mask</span><span class="s4">, </span><span class="s1">vartypes</span><span class="s4">, </span><span class="s1">mfillv</span><span class="s4">)]</span>
+
+    <span class="s3">return </span><span class="s1">fromarrays</span><span class="s4">(</span><span class="s1">_datalist</span><span class="s4">, </span><span class="s1">dtype</span><span class="s4">=</span><span class="s1">mdescr</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">addfield</span><span class="s4">(</span><span class="s1">mrecord</span><span class="s4">, </span><span class="s1">newfield</span><span class="s4">, </span><span class="s1">newfieldname</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Adds a new field to the masked record array 
+ 
+    Uses `newfield` as data and `newfieldname` as name. If `newfieldname` 
+    is None, the new field name is set to 'fi', where `i` is the number of 
+    existing fields. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">_data </span><span class="s4">= </span><span class="s1">mrecord</span><span class="s4">.</span><span class="s1">_data</span>
+    <span class="s1">_mask </span><span class="s4">= </span><span class="s1">mrecord</span><span class="s4">.</span><span class="s1">_mask</span>
+    <span class="s3">if </span><span class="s1">newfieldname </span><span class="s3">is None or </span><span class="s1">newfieldname </span><span class="s3">in </span><span class="s1">reserved_fields</span><span class="s4">:</span>
+        <span class="s1">newfieldname </span><span class="s4">= </span><span class="s5">f'f</span><span class="s3">{</span><span class="s1">len</span><span class="s4">(</span><span class="s1">_data</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">)</span><span class="s3">}</span><span class="s5">'</span>
+    <span class="s1">newfield </span><span class="s4">= </span><span class="s1">ma</span><span class="s4">.</span><span class="s1">array</span><span class="s4">(</span><span class="s1">newfield</span><span class="s4">)</span>
+    <span class="s2"># Get the new data.</span>
+    <span class="s2"># Create a new empty recarray</span>
+    <span class="s1">newdtype </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">(</span><span class="s1">_data</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">.</span><span class="s1">descr </span><span class="s4">+ [(</span><span class="s1">newfieldname</span><span class="s4">, </span><span class="s1">newfield</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">)])</span>
+    <span class="s1">newdata </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">recarray</span><span class="s4">(</span><span class="s1">_data</span><span class="s4">.</span><span class="s1">shape</span><span class="s4">, </span><span class="s1">newdtype</span><span class="s4">)</span>
+    <span class="s2"># Add the existing field</span>
+    <span class="s4">[</span><span class="s1">newdata</span><span class="s4">.</span><span class="s1">setfield</span><span class="s4">(</span><span class="s1">_data</span><span class="s4">.</span><span class="s1">getfield</span><span class="s4">(*</span><span class="s1">f</span><span class="s4">), *</span><span class="s1">f</span><span class="s4">)</span>
+     <span class="s3">for </span><span class="s1">f </span><span class="s3">in </span><span class="s1">_data</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">.</span><span class="s1">fields</span><span class="s4">.</span><span class="s1">values</span><span class="s4">()]</span>
+    <span class="s2"># Add the new field</span>
+    <span class="s1">newdata</span><span class="s4">.</span><span class="s1">setfield</span><span class="s4">(</span><span class="s1">newfield</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">, *</span><span class="s1">newdata</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">.</span><span class="s1">fields</span><span class="s4">[</span><span class="s1">newfieldname</span><span class="s4">])</span>
+    <span class="s1">newdata </span><span class="s4">= </span><span class="s1">newdata</span><span class="s4">.</span><span class="s1">view</span><span class="s4">(</span><span class="s1">MaskedRecords</span><span class="s4">)</span>
+    <span class="s2"># Get the new mask</span>
+    <span class="s2"># Create a new empty recarray</span>
+    <span class="s1">newmdtype </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">([(</span><span class="s1">n</span><span class="s4">, </span><span class="s1">np</span><span class="s4">.</span><span class="s1">bool</span><span class="s4">) </span><span class="s3">for </span><span class="s1">n </span><span class="s3">in </span><span class="s1">newdtype</span><span class="s4">.</span><span class="s1">names</span><span class="s4">])</span>
+    <span class="s1">newmask </span><span class="s4">= </span><span class="s1">np</span><span class="s4">.</span><span class="s1">recarray</span><span class="s4">(</span><span class="s1">_data</span><span class="s4">.</span><span class="s1">shape</span><span class="s4">, </span><span class="s1">newmdtype</span><span class="s4">)</span>
+    <span class="s2"># Add the old masks</span>
+    <span class="s4">[</span><span class="s1">newmask</span><span class="s4">.</span><span class="s1">setfield</span><span class="s4">(</span><span class="s1">_mask</span><span class="s4">.</span><span class="s1">getfield</span><span class="s4">(*</span><span class="s1">f</span><span class="s4">), *</span><span class="s1">f</span><span class="s4">)</span>
+     <span class="s3">for </span><span class="s1">f </span><span class="s3">in </span><span class="s1">_mask</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">.</span><span class="s1">fields</span><span class="s4">.</span><span class="s1">values</span><span class="s4">()]</span>
+    <span class="s2"># Add the mask of the new field</span>
+    <span class="s1">newmask</span><span class="s4">.</span><span class="s1">setfield</span><span class="s4">(</span><span class="s1">ma</span><span class="s4">.</span><span class="s1">getmaskarray</span><span class="s4">(</span><span class="s1">newfield</span><span class="s4">),</span>
+                     <span class="s4">*</span><span class="s1">newmask</span><span class="s4">.</span><span class="s1">dtype</span><span class="s4">.</span><span class="s1">fields</span><span class="s4">[</span><span class="s1">newfieldname</span><span class="s4">])</span>
+    <span class="s1">newdata</span><span class="s4">.</span><span class="s1">_mask </span><span class="s4">= </span><span class="s1">newmask</span>
+    <span class="s3">return </span><span class="s1">newdata</span>
+</pre>
+</body>
+</html>

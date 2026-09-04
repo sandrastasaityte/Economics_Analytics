@@ -1,0 +1,524 @@
+<html>
+<head>
+<title>sas_xport.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+sas_xport.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Read a SAS XPort format file into a Pandas DataFrame. 
+ 
+Based on code from Jack Cushman (github.com/jcushman/xport). 
+ 
+The file format is defined here: 
+ 
+https://support.sas.com/content/dam/SAS/support/en/technical-papers/record-layout-of-a-sas-version-5-or-6-data-set-in-sas-transport-xport-format.pdf 
+&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">from </span><span class="s1">datetime </span><span class="s2">import </span><span class="s1">datetime</span>
+<span class="s2">import </span><span class="s1">struct</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">TYPE_CHECKING</span>
+<span class="s2">import </span><span class="s1">warnings</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">_exceptions </span><span class="s2">import </span><span class="s1">find_stack_level</span>
+
+<span class="s2">import </span><span class="s1">pandas </span><span class="s2">as </span><span class="s1">pd</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">common </span><span class="s2">import </span><span class="s1">get_handle</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">sas</span><span class="s3">.</span><span class="s1">sasreader </span><span class="s2">import </span><span class="s1">SASReader</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_typing </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">CompressionOptions</span><span class="s3">,</span>
+        <span class="s1">DatetimeNaTType</span><span class="s3">,</span>
+        <span class="s1">FilePath</span><span class="s3">,</span>
+        <span class="s1">ReadBuffer</span><span class="s3">,</span>
+    <span class="s3">)</span>
+<span class="s1">_correct_line1 </span><span class="s3">= (</span>
+    <span class="s4">&quot;HEADER RECORD*******LIBRARY HEADER RECORD!!!!!!!000000000000000000000000000000  &quot;</span>
+<span class="s3">)</span>
+<span class="s1">_correct_header1 </span><span class="s3">= (</span>
+    <span class="s4">&quot;HEADER RECORD*******MEMBER  HEADER RECORD!!!!!!!000000000000000001600000000&quot;</span>
+<span class="s3">)</span>
+<span class="s1">_correct_header2 </span><span class="s3">= (</span>
+    <span class="s4">&quot;HEADER RECORD*******DSCRPTR HEADER RECORD!!!!!!!000000000000000000000000000000  &quot;</span>
+<span class="s3">)</span>
+<span class="s1">_correct_obs_header </span><span class="s3">= (</span>
+    <span class="s4">&quot;HEADER RECORD*******OBS     HEADER RECORD!!!!!!!000000000000000000000000000000  &quot;</span>
+<span class="s3">)</span>
+<span class="s1">_fieldkeys </span><span class="s3">= [</span>
+    <span class="s4">&quot;ntype&quot;</span><span class="s3">,</span>
+    <span class="s4">&quot;nhfun&quot;</span><span class="s3">,</span>
+    <span class="s4">&quot;field_length&quot;</span><span class="s3">,</span>
+    <span class="s4">&quot;nvar0&quot;</span><span class="s3">,</span>
+    <span class="s4">&quot;name&quot;</span><span class="s3">,</span>
+    <span class="s4">&quot;label&quot;</span><span class="s3">,</span>
+    <span class="s4">&quot;nform&quot;</span><span class="s3">,</span>
+    <span class="s4">&quot;nfl&quot;</span><span class="s3">,</span>
+    <span class="s4">&quot;num_decimals&quot;</span><span class="s3">,</span>
+    <span class="s4">&quot;nfj&quot;</span><span class="s3">,</span>
+    <span class="s4">&quot;nfill&quot;</span><span class="s3">,</span>
+    <span class="s4">&quot;niform&quot;</span><span class="s3">,</span>
+    <span class="s4">&quot;nifl&quot;</span><span class="s3">,</span>
+    <span class="s4">&quot;nifd&quot;</span><span class="s3">,</span>
+    <span class="s4">&quot;npos&quot;</span><span class="s3">,</span>
+    <span class="s4">&quot;_&quot;</span><span class="s3">,</span>
+<span class="s3">]</span>
+
+
+<span class="s1">_base_params_doc </span><span class="s3">= </span><span class="s4">&quot;&quot;&quot;</span><span class="s2">\ 
+</span><span class="s4">Parameters 
+---------- 
+filepath_or_buffer : str or file-like object 
+    Path to SAS file or object implementing binary read method.&quot;&quot;&quot;</span>
+
+<span class="s1">_params2_doc </span><span class="s3">= </span><span class="s4">&quot;&quot;&quot;</span><span class="s2">\ 
+</span><span class="s4">index : identifier of index column 
+    Identifier of column that should be used as index of the DataFrame. 
+encoding : str 
+    Encoding for text data. 
+chunksize : int 
+    Read file `chunksize` lines at a time, returns iterator.&quot;&quot;&quot;</span>
+
+<span class="s1">_format_params_doc </span><span class="s3">= </span><span class="s4">&quot;&quot;&quot;</span><span class="s2">\ 
+</span><span class="s4">format : str 
+    File format, only `xport` is currently supported.&quot;&quot;&quot;</span>
+
+<span class="s1">_iterator_doc </span><span class="s3">= </span><span class="s4">&quot;&quot;&quot;</span><span class="s2">\ 
+</span><span class="s4">iterator : bool, default False 
+    Return XportReader object for reading file incrementally.&quot;&quot;&quot;</span>
+
+
+<span class="s1">_read_sas_doc </span><span class="s3">= </span><span class="s4">f&quot;&quot;&quot;Read a SAS file into a DataFrame.</span>
+
+<span class="s2">{</span><span class="s1">_base_params_doc</span><span class="s2">}</span>
+<span class="s2">{</span><span class="s1">_format_params_doc</span><span class="s2">}</span>
+<span class="s2">{</span><span class="s1">_params2_doc</span><span class="s2">}</span>
+<span class="s2">{</span><span class="s1">_iterator_doc</span><span class="s2">}</span>
+
+<span class="s4">Returns</span>
+<span class="s4">-------</span>
+<span class="s4">DataFrame or XportReader</span>
+
+<span class="s4">Examples</span>
+<span class="s4">--------</span>
+<span class="s4">Read a SAS Xport file:</span>
+
+<span class="s4">&gt;&gt;&gt; df = pd.read_sas('filename.XPT')</span>
+
+<span class="s4">Read a Xport file in 10,000 line chunks:</span>
+
+<span class="s4">&gt;&gt;&gt; itr = pd.read_sas('filename.XPT', chunksize=10000)</span>
+<span class="s4">&gt;&gt;&gt; for chunk in itr:</span>
+<span class="s4">&gt;&gt;&gt;     do_something(chunk)</span>
+
+<span class="s4">&quot;&quot;&quot;</span>
+
+<span class="s1">_xport_reader_doc </span><span class="s3">= </span><span class="s4">f&quot;&quot;&quot;</span><span class="s2">\ 
+</span><span class="s4">Class for reading SAS Xport files.</span>
+
+<span class="s2">{</span><span class="s1">_base_params_doc</span><span class="s2">}</span>
+<span class="s2">{</span><span class="s1">_params2_doc</span><span class="s2">}</span>
+
+<span class="s4">Attributes</span>
+<span class="s4">----------</span>
+<span class="s4">member_info : list</span>
+    <span class="s4">Contains information about the file</span>
+<span class="s4">fields : list</span>
+    <span class="s4">Contains information about the variables in the file</span>
+<span class="s4">&quot;&quot;&quot;</span>
+
+
+<span class="s2">def </span><span class="s1">_parse_date</span><span class="s3">(</span><span class="s1">datestr</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; DatetimeNaTType</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot;Given a date in xport format, return Python date.&quot;&quot;&quot;</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s5"># e.g. &quot;16FEB11:10:07:55&quot;</span>
+        <span class="s2">return </span><span class="s1">datetime</span><span class="s3">.</span><span class="s1">strptime</span><span class="s3">(</span><span class="s1">datestr</span><span class="s3">, </span><span class="s4">&quot;%d%b%y:%H:%M:%S&quot;</span><span class="s3">)</span>
+    <span class="s2">except </span><span class="s1">ValueError</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">NaT</span>
+
+
+<span class="s2">def </span><span class="s1">_split_line</span><span class="s3">(</span><span class="s1">s</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">parts</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Parameters 
+    ---------- 
+    s: str 
+        Fixed-length string to split 
+    parts: list of (name, length) pairs 
+        Used to break up string, name '_' will be filtered from output. 
+ 
+    Returns 
+    ------- 
+    Dict of name:contents of string at given location. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">out </span><span class="s3">= {}</span>
+    <span class="s1">start </span><span class="s3">= </span><span class="s6">0</span>
+    <span class="s2">for </span><span class="s1">name</span><span class="s3">, </span><span class="s1">length </span><span class="s2">in </span><span class="s1">parts</span><span class="s3">:</span>
+        <span class="s1">out</span><span class="s3">[</span><span class="s1">name</span><span class="s3">] = </span><span class="s1">s</span><span class="s3">[</span><span class="s1">start </span><span class="s3">: </span><span class="s1">start </span><span class="s3">+ </span><span class="s1">length</span><span class="s3">].</span><span class="s1">strip</span><span class="s3">()</span>
+        <span class="s1">start </span><span class="s3">+= </span><span class="s1">length</span>
+    <span class="s2">del </span><span class="s1">out</span><span class="s3">[</span><span class="s4">&quot;_&quot;</span><span class="s3">]</span>
+    <span class="s2">return </span><span class="s1">out</span>
+
+
+<span class="s2">def </span><span class="s1">_handle_truncated_float_vec</span><span class="s3">(</span><span class="s1">vec</span><span class="s3">, </span><span class="s1">nbytes</span><span class="s3">):</span>
+    <span class="s5"># This feature is not well documented, but some SAS XPORT files</span>
+    <span class="s5"># have 2-7 byte &quot;truncated&quot; floats.  To read these truncated</span>
+    <span class="s5"># floats, pad them with zeros on the right to make 8 byte floats.</span>
+    <span class="s5">#</span>
+    <span class="s5"># References:</span>
+    <span class="s5"># https://github.com/jcushman/xport/pull/3</span>
+    <span class="s5"># The R &quot;foreign&quot; library</span>
+
+    <span class="s2">if </span><span class="s1">nbytes </span><span class="s3">!= </span><span class="s6">8</span><span class="s3">:</span>
+        <span class="s1">vec1 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">zeros</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">vec</span><span class="s3">), </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s4">&quot;S8&quot;</span><span class="s3">))</span>
+        <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s4">f&quot;S</span><span class="s2">{</span><span class="s1">nbytes</span><span class="s2">}</span><span class="s4">,S</span><span class="s2">{</span><span class="s6">8 </span><span class="s3">- </span><span class="s1">nbytes</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">)</span>
+        <span class="s1">vec2 </span><span class="s3">= </span><span class="s1">vec1</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s1">vec2</span><span class="s3">[</span><span class="s4">&quot;f0&quot;</span><span class="s3">] = </span><span class="s1">vec</span>
+        <span class="s2">return </span><span class="s1">vec2</span>
+
+    <span class="s2">return </span><span class="s1">vec</span>
+
+
+<span class="s2">def </span><span class="s1">_parse_float_vec</span><span class="s3">(</span><span class="s1">vec</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Parse a vector of float values representing IBM 8 byte floats into 
+    native 8 byte floats. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s4">&quot;&gt;u4,&gt;u4&quot;</span><span class="s3">)</span>
+    <span class="s1">vec1 </span><span class="s3">= </span><span class="s1">vec</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+    <span class="s1">xport1 </span><span class="s3">= </span><span class="s1">vec1</span><span class="s3">[</span><span class="s4">&quot;f0&quot;</span><span class="s3">]</span>
+    <span class="s1">xport2 </span><span class="s3">= </span><span class="s1">vec1</span><span class="s3">[</span><span class="s4">&quot;f1&quot;</span><span class="s3">]</span>
+
+    <span class="s5"># Start by setting first half of ieee number to first half of IBM</span>
+    <span class="s5"># number sans exponent</span>
+    <span class="s1">ieee1 </span><span class="s3">= </span><span class="s1">xport1 </span><span class="s3">&amp; </span><span class="s6">0x00FFFFFF</span>
+
+    <span class="s5"># The fraction bit to the left of the binary point in the ieee</span>
+    <span class="s5"># format was set and the number was shifted 0, 1, 2, or 3</span>
+    <span class="s5"># places. This will tell us how to adjust the ibm exponent to be a</span>
+    <span class="s5"># power of 2 ieee exponent and how to shift the fraction bits to</span>
+    <span class="s5"># restore the correct magnitude.</span>
+    <span class="s1">shift </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">zeros</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">vec</span><span class="s3">), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint8</span><span class="s3">)</span>
+    <span class="s1">shift</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">xport1 </span><span class="s3">&amp; </span><span class="s6">0x00200000</span><span class="s3">)] = </span><span class="s6">1</span>
+    <span class="s1">shift</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">xport1 </span><span class="s3">&amp; </span><span class="s6">0x00400000</span><span class="s3">)] = </span><span class="s6">2</span>
+    <span class="s1">shift</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">xport1 </span><span class="s3">&amp; </span><span class="s6">0x00800000</span><span class="s3">)] = </span><span class="s6">3</span>
+
+    <span class="s5"># shift the ieee number down the correct number of places then</span>
+    <span class="s5"># set the second half of the ieee number to be the second half</span>
+    <span class="s5"># of the ibm number shifted appropriately, ored with the bits</span>
+    <span class="s5"># from the first half that would have been shifted in if we</span>
+    <span class="s5"># could shift a double. All we are worried about are the low</span>
+    <span class="s5"># order 3 bits of the first half since we're only shifting by</span>
+    <span class="s5"># 1, 2, or 3.</span>
+    <span class="s1">ieee1 </span><span class="s3">&gt;&gt;= </span><span class="s1">shift</span>
+    <span class="s1">ieee2 </span><span class="s3">= (</span><span class="s1">xport2 </span><span class="s3">&gt;&gt; </span><span class="s1">shift</span><span class="s3">) | ((</span><span class="s1">xport1 </span><span class="s3">&amp; </span><span class="s6">0x00000007</span><span class="s3">) &lt;&lt; (</span><span class="s6">29 </span><span class="s3">+ (</span><span class="s6">3 </span><span class="s3">- </span><span class="s1">shift</span><span class="s3">)))</span>
+
+    <span class="s5"># clear the 1 bit to the left of the binary point</span>
+    <span class="s1">ieee1 </span><span class="s3">&amp;= </span><span class="s6">0xFFEFFFFF</span>
+
+    <span class="s5"># set the exponent of the ieee number to be the actual exponent</span>
+    <span class="s5"># plus the shift count + 1023. Or this into the first half of the</span>
+    <span class="s5"># ieee number. The ibm exponent is excess 64 but is adjusted by 65</span>
+    <span class="s5"># since during conversion to ibm format the exponent is</span>
+    <span class="s5"># incremented by 1 and the fraction bits left 4 positions to the</span>
+    <span class="s5"># right of the radix point.  (had to add &gt;&gt; 24 because C treats &amp;</span>
+    <span class="s5"># 0x7f as 0x7f000000 and Python doesn't)</span>
+    <span class="s1">ieee1 </span><span class="s3">|= ((((((</span><span class="s1">xport1 </span><span class="s3">&gt;&gt; </span><span class="s6">24</span><span class="s3">) &amp; </span><span class="s6">0x7F</span><span class="s3">) - </span><span class="s6">65</span><span class="s3">) &lt;&lt; </span><span class="s6">2</span><span class="s3">) + </span><span class="s1">shift </span><span class="s3">+ </span><span class="s6">1023</span><span class="s3">) &lt;&lt; </span><span class="s6">20</span><span class="s3">) | (</span>
+        <span class="s1">xport1 </span><span class="s3">&amp; </span><span class="s6">0x80000000</span>
+    <span class="s3">)</span>
+
+    <span class="s1">ieee </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty</span><span class="s3">((</span><span class="s1">len</span><span class="s3">(</span><span class="s1">ieee1</span><span class="s3">),), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s4">&quot;&gt;u4,&gt;u4&quot;</span><span class="s3">)</span>
+    <span class="s1">ieee</span><span class="s3">[</span><span class="s4">&quot;f0&quot;</span><span class="s3">] = </span><span class="s1">ieee1</span>
+    <span class="s1">ieee</span><span class="s3">[</span><span class="s4">&quot;f1&quot;</span><span class="s3">] = </span><span class="s1">ieee2</span>
+    <span class="s1">ieee </span><span class="s3">= </span><span class="s1">ieee</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">=</span><span class="s4">&quot;&gt;f8&quot;</span><span class="s3">)</span>
+    <span class="s1">ieee </span><span class="s3">= </span><span class="s1">ieee</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s4">&quot;f8&quot;</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">ieee</span>
+
+
+<span class="s2">class </span><span class="s1">XportReader</span><span class="s3">(</span><span class="s1">SASReader</span><span class="s3">):</span>
+    <span class="s1">__doc__ </span><span class="s3">= </span><span class="s1">_xport_reader_doc</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">filepath_or_buffer</span><span class="s3">: </span><span class="s1">FilePath </span><span class="s3">| </span><span class="s1">ReadBuffer</span><span class="s3">[</span><span class="s1">bytes</span><span class="s3">],</span>
+        <span class="s1">index</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">encoding</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s4">&quot;ISO-8859-1&quot;</span><span class="s3">,</span>
+        <span class="s1">chunksize</span><span class="s3">: </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">compression</span><span class="s3">: </span><span class="s1">CompressionOptions </span><span class="s3">= </span><span class="s4">&quot;infer&quot;</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_encoding </span><span class="s3">= </span><span class="s1">encoding</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_lines_read </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_index </span><span class="s3">= </span><span class="s1">index</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_chunksize </span><span class="s3">= </span><span class="s1">chunksize</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">handles </span><span class="s3">= </span><span class="s1">get_handle</span><span class="s3">(</span>
+            <span class="s1">filepath_or_buffer</span><span class="s3">,</span>
+            <span class="s4">&quot;rb&quot;</span><span class="s3">,</span>
+            <span class="s1">encoding</span><span class="s3">=</span><span class="s1">encoding</span><span class="s3">,</span>
+            <span class="s1">is_text</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+            <span class="s1">compression</span><span class="s3">=</span><span class="s1">compression</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">filepath_or_buffer </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">handles</span><span class="s3">.</span><span class="s1">handle</span>
+
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_read_header</span><span class="s3">()</span>
+        <span class="s2">except </span><span class="s1">Exception</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">close</span><span class="s3">()</span>
+            <span class="s2">raise</span>
+
+    <span class="s2">def </span><span class="s1">close</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">handles</span><span class="s3">.</span><span class="s1">close</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">_get_row</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">filepath_or_buffer</span><span class="s3">.</span><span class="s1">read</span><span class="s3">(</span><span class="s6">80</span><span class="s3">).</span><span class="s1">decode</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">_read_header</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">filepath_or_buffer</span><span class="s3">.</span><span class="s1">seek</span><span class="s3">(</span><span class="s6">0</span><span class="s3">)</span>
+
+        <span class="s5"># read file header</span>
+        <span class="s1">line1 </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_row</span><span class="s3">()</span>
+        <span class="s2">if </span><span class="s1">line1 </span><span class="s3">!= </span><span class="s1">_correct_line1</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s4">&quot;**COMPRESSED**&quot; </span><span class="s2">in </span><span class="s1">line1</span><span class="s3">:</span>
+                <span class="s5"># this was created with the PROC CPORT method and can't be read</span>
+                <span class="s5"># https://documentation.sas.com/doc/en/pgmsascdc/9.4_3.5/movefile/p1bm6aqp3fw4uin1hucwh718f6kp.htm</span>
+                <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                    <span class="s4">&quot;Header record indicates a CPORT file, which is not readable.&quot;</span>
+                <span class="s3">)</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;Header record is not an XPORT file.&quot;</span><span class="s3">)</span>
+
+        <span class="s1">line2 </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_row</span><span class="s3">()</span>
+        <span class="s1">fif </span><span class="s3">= [[</span><span class="s4">&quot;prefix&quot;</span><span class="s3">, </span><span class="s6">24</span><span class="s3">], [</span><span class="s4">&quot;version&quot;</span><span class="s3">, </span><span class="s6">8</span><span class="s3">], [</span><span class="s4">&quot;OS&quot;</span><span class="s3">, </span><span class="s6">8</span><span class="s3">], [</span><span class="s4">&quot;_&quot;</span><span class="s3">, </span><span class="s6">24</span><span class="s3">], [</span><span class="s4">&quot;created&quot;</span><span class="s3">, </span><span class="s6">16</span><span class="s3">]]</span>
+        <span class="s1">file_info </span><span class="s3">= </span><span class="s1">_split_line</span><span class="s3">(</span><span class="s1">line2</span><span class="s3">, </span><span class="s1">fif</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">file_info</span><span class="s3">[</span><span class="s4">&quot;prefix&quot;</span><span class="s3">] != </span><span class="s4">&quot;SAS     SAS     SASLIB&quot;</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;Header record has invalid prefix.&quot;</span><span class="s3">)</span>
+        <span class="s1">file_info</span><span class="s3">[</span><span class="s4">&quot;created&quot;</span><span class="s3">] = </span><span class="s1">_parse_date</span><span class="s3">(</span><span class="s1">file_info</span><span class="s3">[</span><span class="s4">&quot;created&quot;</span><span class="s3">])</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">file_info </span><span class="s3">= </span><span class="s1">file_info</span>
+
+        <span class="s1">line3 </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_row</span><span class="s3">()</span>
+        <span class="s1">file_info</span><span class="s3">[</span><span class="s4">&quot;modified&quot;</span><span class="s3">] = </span><span class="s1">_parse_date</span><span class="s3">(</span><span class="s1">line3</span><span class="s3">[:</span><span class="s6">16</span><span class="s3">])</span>
+
+        <span class="s5"># read member header</span>
+        <span class="s1">header1 </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_row</span><span class="s3">()</span>
+        <span class="s1">header2 </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_row</span><span class="s3">()</span>
+        <span class="s1">headflag1 </span><span class="s3">= </span><span class="s1">header1</span><span class="s3">.</span><span class="s1">startswith</span><span class="s3">(</span><span class="s1">_correct_header1</span><span class="s3">)</span>
+        <span class="s1">headflag2 </span><span class="s3">= </span><span class="s1">header2 </span><span class="s3">== </span><span class="s1">_correct_header2</span>
+        <span class="s2">if not </span><span class="s3">(</span><span class="s1">headflag1 </span><span class="s2">and </span><span class="s1">headflag2</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;Member header not found&quot;</span><span class="s3">)</span>
+        <span class="s5"># usually 140, could be 135</span>
+        <span class="s1">fieldnamelength </span><span class="s3">= </span><span class="s1">int</span><span class="s3">(</span><span class="s1">header1</span><span class="s3">[-</span><span class="s6">5</span><span class="s3">:-</span><span class="s6">2</span><span class="s3">])</span>
+
+        <span class="s5"># member info</span>
+        <span class="s1">mem </span><span class="s3">= [</span>
+            <span class="s3">[</span><span class="s4">&quot;prefix&quot;</span><span class="s3">, </span><span class="s6">8</span><span class="s3">],</span>
+            <span class="s3">[</span><span class="s4">&quot;set_name&quot;</span><span class="s3">, </span><span class="s6">8</span><span class="s3">],</span>
+            <span class="s3">[</span><span class="s4">&quot;sasdata&quot;</span><span class="s3">, </span><span class="s6">8</span><span class="s3">],</span>
+            <span class="s3">[</span><span class="s4">&quot;version&quot;</span><span class="s3">, </span><span class="s6">8</span><span class="s3">],</span>
+            <span class="s3">[</span><span class="s4">&quot;OS&quot;</span><span class="s3">, </span><span class="s6">8</span><span class="s3">],</span>
+            <span class="s3">[</span><span class="s4">&quot;_&quot;</span><span class="s3">, </span><span class="s6">24</span><span class="s3">],</span>
+            <span class="s3">[</span><span class="s4">&quot;created&quot;</span><span class="s3">, </span><span class="s6">16</span><span class="s3">],</span>
+        <span class="s3">]</span>
+        <span class="s1">member_info </span><span class="s3">= </span><span class="s1">_split_line</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_row</span><span class="s3">(), </span><span class="s1">mem</span><span class="s3">)</span>
+        <span class="s1">mem </span><span class="s3">= [[</span><span class="s4">&quot;modified&quot;</span><span class="s3">, </span><span class="s6">16</span><span class="s3">], [</span><span class="s4">&quot;_&quot;</span><span class="s3">, </span><span class="s6">16</span><span class="s3">], [</span><span class="s4">&quot;label&quot;</span><span class="s3">, </span><span class="s6">40</span><span class="s3">], [</span><span class="s4">&quot;type&quot;</span><span class="s3">, </span><span class="s6">8</span><span class="s3">]]</span>
+        <span class="s1">member_info</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">_split_line</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_row</span><span class="s3">(), </span><span class="s1">mem</span><span class="s3">))</span>
+        <span class="s1">member_info</span><span class="s3">[</span><span class="s4">&quot;modified&quot;</span><span class="s3">] = </span><span class="s1">_parse_date</span><span class="s3">(</span><span class="s1">member_info</span><span class="s3">[</span><span class="s4">&quot;modified&quot;</span><span class="s3">])</span>
+        <span class="s1">member_info</span><span class="s3">[</span><span class="s4">&quot;created&quot;</span><span class="s3">] = </span><span class="s1">_parse_date</span><span class="s3">(</span><span class="s1">member_info</span><span class="s3">[</span><span class="s4">&quot;created&quot;</span><span class="s3">])</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">member_info </span><span class="s3">= </span><span class="s1">member_info</span>
+
+        <span class="s5"># read field names</span>
+        <span class="s1">types </span><span class="s3">= {</span><span class="s6">1</span><span class="s3">: </span><span class="s4">&quot;numeric&quot;</span><span class="s3">, </span><span class="s6">2</span><span class="s3">: </span><span class="s4">&quot;char&quot;</span><span class="s3">}</span>
+        <span class="s1">fieldcount </span><span class="s3">= </span><span class="s1">int</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_row</span><span class="s3">()[</span><span class="s6">54</span><span class="s3">:</span><span class="s6">58</span><span class="s3">])</span>
+        <span class="s1">datalength </span><span class="s3">= </span><span class="s1">fieldnamelength </span><span class="s3">* </span><span class="s1">fieldcount</span>
+        <span class="s5"># round up to nearest 80</span>
+        <span class="s2">if </span><span class="s1">datalength </span><span class="s3">% </span><span class="s6">80</span><span class="s3">:</span>
+            <span class="s1">datalength </span><span class="s3">+= </span><span class="s6">80 </span><span class="s3">- </span><span class="s1">datalength </span><span class="s3">% </span><span class="s6">80</span>
+        <span class="s1">fielddata </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">filepath_or_buffer</span><span class="s3">.</span><span class="s1">read</span><span class="s3">(</span><span class="s1">datalength</span><span class="s3">)</span>
+        <span class="s1">fields </span><span class="s3">= []</span>
+        <span class="s1">obs_length </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s2">while </span><span class="s1">len</span><span class="s3">(</span><span class="s1">fielddata</span><span class="s3">) &gt;= </span><span class="s1">fieldnamelength</span><span class="s3">:</span>
+            <span class="s5"># pull data for one field</span>
+            <span class="s1">fieldbytes</span><span class="s3">, </span><span class="s1">fielddata </span><span class="s3">= (</span>
+                <span class="s1">fielddata</span><span class="s3">[:</span><span class="s1">fieldnamelength</span><span class="s3">],</span>
+                <span class="s1">fielddata</span><span class="s3">[</span><span class="s1">fieldnamelength</span><span class="s3">:],</span>
+            <span class="s3">)</span>
+
+            <span class="s5"># rest at end gets ignored, so if field is short, pad out</span>
+            <span class="s5"># to match struct pattern below</span>
+            <span class="s1">fieldbytes </span><span class="s3">= </span><span class="s1">fieldbytes</span><span class="s3">.</span><span class="s1">ljust</span><span class="s3">(</span><span class="s6">140</span><span class="s3">)</span>
+
+            <span class="s1">fieldstruct </span><span class="s3">= </span><span class="s1">struct</span><span class="s3">.</span><span class="s1">unpack</span><span class="s3">(</span><span class="s4">&quot;&gt;hhhh8s40s8shhh2s8shhl52s&quot;</span><span class="s3">, </span><span class="s1">fieldbytes</span><span class="s3">)</span>
+            <span class="s1">field </span><span class="s3">= </span><span class="s1">dict</span><span class="s3">(</span><span class="s1">zip</span><span class="s3">(</span><span class="s1">_fieldkeys</span><span class="s3">, </span><span class="s1">fieldstruct</span><span class="s3">, </span><span class="s1">strict</span><span class="s3">=</span><span class="s2">True</span><span class="s3">))</span>
+            <span class="s2">del </span><span class="s1">field</span><span class="s3">[</span><span class="s4">&quot;_&quot;</span><span class="s3">]</span>
+            <span class="s1">field</span><span class="s3">[</span><span class="s4">&quot;ntype&quot;</span><span class="s3">] = </span><span class="s1">types</span><span class="s3">[</span><span class="s1">field</span><span class="s3">[</span><span class="s4">&quot;ntype&quot;</span><span class="s3">]]</span>
+            <span class="s1">fl </span><span class="s3">= </span><span class="s1">field</span><span class="s3">[</span><span class="s4">&quot;field_length&quot;</span><span class="s3">]</span>
+            <span class="s2">if </span><span class="s1">field</span><span class="s3">[</span><span class="s4">&quot;ntype&quot;</span><span class="s3">] == </span><span class="s4">&quot;numeric&quot; </span><span class="s2">and </span><span class="s3">((</span><span class="s1">fl </span><span class="s3">&lt; </span><span class="s6">2</span><span class="s3">) </span><span class="s2">or </span><span class="s3">(</span><span class="s1">fl </span><span class="s3">&gt; </span><span class="s6">8</span><span class="s3">)):</span>
+                <span class="s1">msg </span><span class="s3">= </span><span class="s4">f&quot;Floating field width </span><span class="s2">{</span><span class="s1">fl</span><span class="s2">} </span><span class="s4">is not between 2 and 8.&quot;</span>
+                <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span><span class="s1">msg</span><span class="s3">)</span>
+
+            <span class="s2">for </span><span class="s1">k</span><span class="s3">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">field</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+                <span class="s2">try</span><span class="s3">:</span>
+                    <span class="s1">field</span><span class="s3">[</span><span class="s1">k</span><span class="s3">] = </span><span class="s1">v</span><span class="s3">.</span><span class="s1">strip</span><span class="s3">()</span>
+                <span class="s2">except </span><span class="s1">AttributeError</span><span class="s3">:</span>
+                    <span class="s2">pass</span>
+
+            <span class="s1">obs_length </span><span class="s3">+= </span><span class="s1">field</span><span class="s3">[</span><span class="s4">&quot;field_length&quot;</span><span class="s3">]</span>
+            <span class="s1">fields </span><span class="s3">+= [</span><span class="s1">field</span><span class="s3">]</span>
+
+        <span class="s1">header </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_row</span><span class="s3">()</span>
+        <span class="s2">if not </span><span class="s1">header </span><span class="s3">== </span><span class="s1">_correct_obs_header</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;Observation header not found.&quot;</span><span class="s3">)</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">fields </span><span class="s3">= </span><span class="s1">fields</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">record_length </span><span class="s3">= </span><span class="s1">obs_length</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">record_start </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">filepath_or_buffer</span><span class="s3">.</span><span class="s1">tell</span><span class="s3">()</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">nobs </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_record_count</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">columns </span><span class="s3">= [</span><span class="s1">x</span><span class="s3">[</span><span class="s4">&quot;name&quot;</span><span class="s3">].</span><span class="s1">decode</span><span class="s3">() </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fields</span><span class="s3">]</span>
+
+        <span class="s5"># Setup the dtype.</span>
+        <span class="s1">dtypel </span><span class="s3">= [</span>
+            <span class="s3">(</span><span class="s4">&quot;s&quot; </span><span class="s3">+ </span><span class="s1">str</span><span class="s3">(</span><span class="s1">i</span><span class="s3">), </span><span class="s4">&quot;S&quot; </span><span class="s3">+ </span><span class="s1">str</span><span class="s3">(</span><span class="s1">field</span><span class="s3">[</span><span class="s4">&quot;field_length&quot;</span><span class="s3">]))</span>
+            <span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">field </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">fields</span><span class="s3">)</span>
+        <span class="s3">]</span>
+        <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">dtypel</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_dtype </span><span class="s3">= </span><span class="s1">dtype</span>
+
+    <span class="s2">def </span><span class="s1">__next__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; pd</span><span class="s3">.</span><span class="s1">DataFrame</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">read</span><span class="s3">(</span><span class="s1">nrows</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_chunksize </span><span class="s2">or </span><span class="s6">1</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_record_count</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; int</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Get number of records in file. 
+ 
+        This is maybe suboptimal because we have to seek to the end of 
+        the file. 
+ 
+        Side effect: returns file position to record_start. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">filepath_or_buffer</span><span class="s3">.</span><span class="s1">seek</span><span class="s3">(</span><span class="s6">0</span><span class="s3">, </span><span class="s6">2</span><span class="s3">)</span>
+        <span class="s1">total_records_length </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">filepath_or_buffer</span><span class="s3">.</span><span class="s1">tell</span><span class="s3">() - </span><span class="s1">self</span><span class="s3">.</span><span class="s1">record_start</span>
+
+        <span class="s2">if </span><span class="s1">total_records_length </span><span class="s3">% </span><span class="s6">80 </span><span class="s3">!= </span><span class="s6">0</span><span class="s3">:</span>
+            <span class="s1">warnings</span><span class="s3">.</span><span class="s1">warn</span><span class="s3">(</span>
+                <span class="s4">&quot;xport file may be corrupted.&quot;</span><span class="s3">,</span>
+                <span class="s1">stacklevel</span><span class="s3">=</span><span class="s1">find_stack_level</span><span class="s3">(),</span>
+            <span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">record_length </span><span class="s3">&gt; </span><span class="s6">80</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">filepath_or_buffer</span><span class="s3">.</span><span class="s1">seek</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">record_start</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">total_records_length </span><span class="s3">// </span><span class="s1">self</span><span class="s3">.</span><span class="s1">record_length</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">filepath_or_buffer</span><span class="s3">.</span><span class="s1">seek</span><span class="s3">(-</span><span class="s6">80</span><span class="s3">, </span><span class="s6">2</span><span class="s3">)</span>
+        <span class="s1">last_card_bytes </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">filepath_or_buffer</span><span class="s3">.</span><span class="s1">read</span><span class="s3">(</span><span class="s6">80</span><span class="s3">)</span>
+        <span class="s1">last_card </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">frombuffer</span><span class="s3">(</span><span class="s1">last_card_bytes</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint64</span><span class="s3">)</span>
+
+        <span class="s5"># 8 byte blank</span>
+        <span class="s1">ix </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">flatnonzero</span><span class="s3">(</span><span class="s1">last_card </span><span class="s3">== </span><span class="s6">2314885530818453536</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">ix</span><span class="s3">) == </span><span class="s6">0</span><span class="s3">:</span>
+            <span class="s1">tail_pad </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">tail_pad </span><span class="s3">= </span><span class="s6">8 </span><span class="s3">* </span><span class="s1">len</span><span class="s3">(</span><span class="s1">ix</span><span class="s3">)</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">filepath_or_buffer</span><span class="s3">.</span><span class="s1">seek</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">record_start</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s3">(</span><span class="s1">total_records_length </span><span class="s3">- </span><span class="s1">tail_pad</span><span class="s3">) // </span><span class="s1">self</span><span class="s3">.</span><span class="s1">record_length</span>
+
+    <span class="s2">def </span><span class="s1">get_chunk</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">size</span><span class="s3">: </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">) </span><span class="s1">-&gt; pd</span><span class="s3">.</span><span class="s1">DataFrame</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Reads lines from Xport file and returns as dataframe 
+ 
+        Parameters 
+        ---------- 
+        size : int, defaults to None 
+            Number of lines to read.  If None, reads whole file. 
+ 
+        Returns 
+        ------- 
+        DataFrame 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">size </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">size </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_chunksize</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">read</span><span class="s3">(</span><span class="s1">nrows</span><span class="s3">=</span><span class="s1">size</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_missing_double</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">vec</span><span class="s3">):</span>
+        <span class="s1">v </span><span class="s3">= </span><span class="s1">vec</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">=</span><span class="s4">&quot;u1,u1,u2,u4&quot;</span><span class="s3">)</span>
+        <span class="s1">miss </span><span class="s3">= (</span><span class="s1">v</span><span class="s3">[</span><span class="s4">&quot;f1&quot;</span><span class="s3">] == </span><span class="s6">0</span><span class="s3">) &amp; (</span><span class="s1">v</span><span class="s3">[</span><span class="s4">&quot;f2&quot;</span><span class="s3">] == </span><span class="s6">0</span><span class="s3">) &amp; (</span><span class="s1">v</span><span class="s3">[</span><span class="s4">&quot;f3&quot;</span><span class="s3">] == </span><span class="s6">0</span><span class="s3">)</span>
+        <span class="s1">miss1 </span><span class="s3">= (</span>
+            <span class="s3">((</span><span class="s1">v</span><span class="s3">[</span><span class="s4">&quot;f0&quot;</span><span class="s3">] &gt;= </span><span class="s6">0x41</span><span class="s3">) &amp; (</span><span class="s1">v</span><span class="s3">[</span><span class="s4">&quot;f0&quot;</span><span class="s3">] &lt;= </span><span class="s6">0x5A</span><span class="s3">))</span>
+            <span class="s3">| (</span><span class="s1">v</span><span class="s3">[</span><span class="s4">&quot;f0&quot;</span><span class="s3">] == </span><span class="s6">0x5F</span><span class="s3">)</span>
+            <span class="s3">| (</span><span class="s1">v</span><span class="s3">[</span><span class="s4">&quot;f0&quot;</span><span class="s3">] == </span><span class="s6">0x2E</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">miss </span><span class="s3">&amp;= </span><span class="s1">miss1</span>
+        <span class="s2">return </span><span class="s1">miss</span>
+
+    <span class="s2">def </span><span class="s1">read</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">nrows</span><span class="s3">: </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">) </span><span class="s1">-&gt; pd</span><span class="s3">.</span><span class="s1">DataFrame</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot;Read observations from SAS Xport file, returning as data frame. 
+ 
+        Parameters 
+        ---------- 
+        nrows : int 
+            Number of rows to read from data file; if None, read whole 
+            file. 
+ 
+        Returns 
+        ------- 
+        A DataFrame. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">nrows </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">nrows </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">nobs</span>
+
+        <span class="s1">read_lines </span><span class="s3">= </span><span class="s1">min</span><span class="s3">(</span><span class="s1">nrows</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">nobs </span><span class="s3">- </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_lines_read</span><span class="s3">)</span>
+        <span class="s1">read_len </span><span class="s3">= </span><span class="s1">read_lines </span><span class="s3">* </span><span class="s1">self</span><span class="s3">.</span><span class="s1">record_length</span>
+        <span class="s2">if </span><span class="s1">read_len </span><span class="s3">&lt;= </span><span class="s6">0</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">close</span><span class="s3">()</span>
+            <span class="s2">raise </span><span class="s1">StopIteration</span>
+        <span class="s1">raw </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">filepath_or_buffer</span><span class="s3">.</span><span class="s1">read</span><span class="s3">(</span><span class="s1">read_len</span><span class="s3">)</span>
+        <span class="s1">data </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">frombuffer</span><span class="s3">(</span><span class="s1">raw</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_dtype</span><span class="s3">, </span><span class="s1">count</span><span class="s3">=</span><span class="s1">read_lines</span><span class="s3">)</span>
+
+        <span class="s1">df_data </span><span class="s3">= {}</span>
+        <span class="s2">for </span><span class="s1">j</span><span class="s3">, </span><span class="s1">x </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">columns</span><span class="s3">):</span>
+            <span class="s1">vec </span><span class="s3">= </span><span class="s1">data</span><span class="s3">[</span><span class="s4">&quot;s&quot; </span><span class="s3">+ </span><span class="s1">str</span><span class="s3">(</span><span class="s1">j</span><span class="s3">)]</span>
+            <span class="s1">ntype </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fields</span><span class="s3">[</span><span class="s1">j</span><span class="s3">][</span><span class="s4">&quot;ntype&quot;</span><span class="s3">]</span>
+            <span class="s2">if </span><span class="s1">ntype </span><span class="s3">== </span><span class="s4">&quot;numeric&quot;</span><span class="s3">:</span>
+                <span class="s1">vec </span><span class="s3">= </span><span class="s1">_handle_truncated_float_vec</span><span class="s3">(</span><span class="s1">vec</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fields</span><span class="s3">[</span><span class="s1">j</span><span class="s3">][</span><span class="s4">&quot;field_length&quot;</span><span class="s3">])</span>
+                <span class="s1">miss </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_missing_double</span><span class="s3">(</span><span class="s1">vec</span><span class="s3">)</span>
+                <span class="s1">v </span><span class="s3">= </span><span class="s1">_parse_float_vec</span><span class="s3">(</span><span class="s1">vec</span><span class="s3">)</span>
+                <span class="s1">v</span><span class="s3">[</span><span class="s1">miss</span><span class="s3">] = </span><span class="s1">np</span><span class="s3">.</span><span class="s1">nan</span>
+            <span class="s2">elif </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fields</span><span class="s3">[</span><span class="s1">j</span><span class="s3">][</span><span class="s4">&quot;ntype&quot;</span><span class="s3">] == </span><span class="s4">&quot;char&quot;</span><span class="s3">:</span>
+                <span class="s1">v </span><span class="s3">= [</span><span class="s1">y</span><span class="s3">.</span><span class="s1">rstrip</span><span class="s3">() </span><span class="s2">for </span><span class="s1">y </span><span class="s2">in </span><span class="s1">vec</span><span class="s3">]</span>
+
+                <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_encoding </span><span class="s2">is not None</span><span class="s3">:</span>
+                    <span class="s1">v </span><span class="s3">= [</span><span class="s1">y</span><span class="s3">.</span><span class="s1">decode</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_encoding</span><span class="s3">) </span><span class="s2">for </span><span class="s1">y </span><span class="s2">in </span><span class="s1">v</span><span class="s3">]</span>
+
+            <span class="s1">df_data</span><span class="s3">.</span><span class="s1">update</span><span class="s3">({</span><span class="s1">x</span><span class="s3">: </span><span class="s1">v</span><span class="s3">})</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">DataFrame</span><span class="s3">(</span><span class="s1">df_data</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_index </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">df</span><span class="s3">.</span><span class="s1">index </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Index</span><span class="s3">(</span><span class="s1">range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_lines_read</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_lines_read </span><span class="s3">+ </span><span class="s1">read_lines</span><span class="s3">))</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">df </span><span class="s3">= </span><span class="s1">df</span><span class="s3">.</span><span class="s1">set_index</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_index</span><span class="s3">)</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_lines_read </span><span class="s3">+= </span><span class="s1">read_lines</span>
+
+        <span class="s2">return </span><span class="s1">df</span>
+</pre>
+</body>
+</html>

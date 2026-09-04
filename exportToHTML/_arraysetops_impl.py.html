@@ -1,0 +1,1181 @@
+<html>
+<head>
+<title>_arraysetops_impl.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_arraysetops_impl.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Set operations for arrays based on sorting. 
+ 
+Notes 
+----- 
+ 
+For floating point arrays, inaccurate results may appear due to usual round-off 
+and floating point comparison issues. 
+ 
+Speed could be gained in some operations by an implementation of 
+`numpy.sort`, that can provide directly the permutation vectors, thus avoiding 
+calls to `numpy.argsort`. 
+ 
+Original author: Robert Cimrman 
+ 
+&quot;&quot;&quot;</span>
+<span class="s2">import </span><span class="s1">functools</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">NamedTuple</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+<span class="s2">from </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">_core </span><span class="s2">import </span><span class="s1">overrides</span>
+<span class="s2">from </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">_core</span><span class="s3">.</span><span class="s1">_multiarray_umath </span><span class="s2">import </span><span class="s1">_array_converter</span><span class="s3">, </span><span class="s1">_unique_hash</span>
+<span class="s2">from </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">lib</span><span class="s3">.</span><span class="s1">array_utils </span><span class="s2">import </span><span class="s1">normalize_axis_index</span>
+
+<span class="s1">array_function_dispatch </span><span class="s3">= </span><span class="s1">functools</span><span class="s3">.</span><span class="s1">partial</span><span class="s3">(</span>
+    <span class="s1">overrides</span><span class="s3">.</span><span class="s1">array_function_dispatch</span><span class="s3">, </span><span class="s1">module</span><span class="s3">=</span><span class="s4">'numpy'</span><span class="s3">)</span>
+
+
+<span class="s1">__all__ </span><span class="s3">= [</span>
+    <span class="s4">&quot;ediff1d&quot;</span><span class="s3">, </span><span class="s4">&quot;intersect1d&quot;</span><span class="s3">, </span><span class="s4">&quot;isin&quot;</span><span class="s3">, </span><span class="s4">&quot;setdiff1d&quot;</span><span class="s3">, </span><span class="s4">&quot;setxor1d&quot;</span><span class="s3">,</span>
+    <span class="s4">&quot;union1d&quot;</span><span class="s3">, </span><span class="s4">&quot;unique&quot;</span><span class="s3">, </span><span class="s4">&quot;unique_all&quot;</span><span class="s3">, </span><span class="s4">&quot;unique_counts&quot;</span><span class="s3">, </span><span class="s4">&quot;unique_inverse&quot;</span><span class="s3">,</span>
+    <span class="s4">&quot;unique_values&quot;</span>
+<span class="s3">]</span>
+
+
+<span class="s2">def </span><span class="s1">_ediff1d_dispatcher</span><span class="s3">(</span><span class="s1">ary</span><span class="s3">, </span><span class="s1">to_end</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">to_begin</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s2">return </span><span class="s3">(</span><span class="s1">ary</span><span class="s3">, </span><span class="s1">to_end</span><span class="s3">, </span><span class="s1">to_begin</span><span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">array_function_dispatch</span><span class="s3">(</span><span class="s1">_ediff1d_dispatcher</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">ediff1d</span><span class="s3">(</span><span class="s1">ary</span><span class="s3">, </span><span class="s1">to_end</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">to_begin</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    The differences between consecutive elements of an array. 
+ 
+    Parameters 
+    ---------- 
+    ary : array_like 
+        If necessary, will be flattened before the differences are taken. 
+    to_end : array_like, optional 
+        Number(s) to append at the end of the returned differences. 
+    to_begin : array_like, optional 
+        Number(s) to prepend at the beginning of the returned differences. 
+ 
+    Returns 
+    ------- 
+    ediff1d : ndarray 
+        The differences. Loosely, this is ``ary.flat[1:] - ary.flat[:-1]``. 
+ 
+    See Also 
+    -------- 
+    diff, gradient 
+ 
+    Notes 
+    ----- 
+    When applied to masked arrays, this function drops the mask information 
+    if the `to_begin` and/or `to_end` parameters are used. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+    &gt;&gt;&gt; x = np.array([1, 2, 4, 7, 0]) 
+    &gt;&gt;&gt; np.ediff1d(x) 
+    array([ 1,  2,  3, -7]) 
+ 
+    &gt;&gt;&gt; np.ediff1d(x, to_begin=-99, to_end=np.array([88, 99])) 
+    array([-99,   1,   2, ...,  -7,  88,  99]) 
+ 
+    The returned array is always 1D. 
+ 
+    &gt;&gt;&gt; y = [[1, 2, 4], [1, 6, 24]] 
+    &gt;&gt;&gt; np.ediff1d(y) 
+    array([ 1,  2, -3,  5, 18]) 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">conv </span><span class="s3">= </span><span class="s1">_array_converter</span><span class="s3">(</span><span class="s1">ary</span><span class="s3">)</span>
+    <span class="s5"># Convert to (any) array and ravel:</span>
+    <span class="s1">ary </span><span class="s3">= </span><span class="s1">conv</span><span class="s3">[</span><span class="s6">0</span><span class="s3">].</span><span class="s1">ravel</span><span class="s3">()</span>
+
+    <span class="s5"># enforce that the dtype of `ary` is used for the output</span>
+    <span class="s1">dtype_req </span><span class="s3">= </span><span class="s1">ary</span><span class="s3">.</span><span class="s1">dtype</span>
+
+    <span class="s5"># fast track default case</span>
+    <span class="s2">if </span><span class="s1">to_begin </span><span class="s2">is None and </span><span class="s1">to_end </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">ary</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:] - </span><span class="s1">ary</span><span class="s3">[:-</span><span class="s6">1</span><span class="s3">]</span>
+
+    <span class="s2">if </span><span class="s1">to_begin </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">l_begin </span><span class="s3">= </span><span class="s6">0</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">to_begin </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asanyarray</span><span class="s3">(</span><span class="s1">to_begin</span><span class="s3">)</span>
+        <span class="s2">if not </span><span class="s1">np</span><span class="s3">.</span><span class="s1">can_cast</span><span class="s3">(</span><span class="s1">to_begin</span><span class="s3">, </span><span class="s1">dtype_req</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s4">&quot;same_kind&quot;</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span><span class="s4">&quot;dtype of `to_begin` must be compatible &quot;</span>
+                            <span class="s4">&quot;with input `ary` under the `same_kind` rule.&quot;</span><span class="s3">)</span>
+
+        <span class="s1">to_begin </span><span class="s3">= </span><span class="s1">to_begin</span><span class="s3">.</span><span class="s1">ravel</span><span class="s3">()</span>
+        <span class="s1">l_begin </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">to_begin</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">to_end </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">l_end </span><span class="s3">= </span><span class="s6">0</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">to_end </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asanyarray</span><span class="s3">(</span><span class="s1">to_end</span><span class="s3">)</span>
+        <span class="s2">if not </span><span class="s1">np</span><span class="s3">.</span><span class="s1">can_cast</span><span class="s3">(</span><span class="s1">to_end</span><span class="s3">, </span><span class="s1">dtype_req</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s4">&quot;same_kind&quot;</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span><span class="s4">&quot;dtype of `to_end` must be compatible &quot;</span>
+                            <span class="s4">&quot;with input `ary` under the `same_kind` rule.&quot;</span><span class="s3">)</span>
+
+        <span class="s1">to_end </span><span class="s3">= </span><span class="s1">to_end</span><span class="s3">.</span><span class="s1">ravel</span><span class="s3">()</span>
+        <span class="s1">l_end </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">to_end</span><span class="s3">)</span>
+
+    <span class="s5"># do the calculation in place and copy to_begin and to_end</span>
+    <span class="s1">l_diff </span><span class="s3">= </span><span class="s1">max</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">ary</span><span class="s3">) - </span><span class="s6">1</span><span class="s3">, </span><span class="s6">0</span><span class="s3">)</span>
+    <span class="s1">result </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty_like</span><span class="s3">(</span><span class="s1">ary</span><span class="s3">, </span><span class="s1">shape</span><span class="s3">=</span><span class="s1">l_diff </span><span class="s3">+ </span><span class="s1">l_begin </span><span class="s3">+ </span><span class="s1">l_end</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">l_begin </span><span class="s3">&gt; </span><span class="s6">0</span><span class="s3">:</span>
+        <span class="s1">result</span><span class="s3">[:</span><span class="s1">l_begin</span><span class="s3">] = </span><span class="s1">to_begin</span>
+    <span class="s2">if </span><span class="s1">l_end </span><span class="s3">&gt; </span><span class="s6">0</span><span class="s3">:</span>
+        <span class="s1">result</span><span class="s3">[</span><span class="s1">l_begin </span><span class="s3">+ </span><span class="s1">l_diff</span><span class="s3">:] = </span><span class="s1">to_end</span>
+    <span class="s1">np</span><span class="s3">.</span><span class="s1">subtract</span><span class="s3">(</span><span class="s1">ary</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:], </span><span class="s1">ary</span><span class="s3">[:-</span><span class="s6">1</span><span class="s3">], </span><span class="s1">result</span><span class="s3">[</span><span class="s1">l_begin</span><span class="s3">:</span><span class="s1">l_begin </span><span class="s3">+ </span><span class="s1">l_diff</span><span class="s3">])</span>
+
+    <span class="s2">return </span><span class="s1">conv</span><span class="s3">.</span><span class="s1">wrap</span><span class="s3">(</span><span class="s1">result</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_unpack_tuple</span><span class="s3">(</span><span class="s1">x</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; Unpacks one-element tuples for use as return values &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">x</span><span class="s3">) == </span><span class="s6">1</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">x</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">x</span>
+
+
+<span class="s2">def </span><span class="s1">_unique_dispatcher</span><span class="s3">(</span><span class="s1">ar</span><span class="s3">, </span><span class="s1">return_index</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">return_inverse</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                       <span class="s1">return_counts</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, *, </span><span class="s1">equal_nan</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                       <span class="s1">sorted</span><span class="s3">=</span><span class="s2">True</span><span class="s3">):</span>
+    <span class="s2">return </span><span class="s3">(</span><span class="s1">ar</span><span class="s3">,)</span>
+
+
+<span class="s3">@</span><span class="s1">array_function_dispatch</span><span class="s3">(</span><span class="s1">_unique_dispatcher</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">unique</span><span class="s3">(</span><span class="s1">ar</span><span class="s3">, </span><span class="s1">return_index</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, </span><span class="s1">return_inverse</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+           <span class="s1">return_counts</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, *, </span><span class="s1">equal_nan</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+           <span class="s1">sorted</span><span class="s3">=</span><span class="s2">True</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Find the unique elements of an array. 
+ 
+    Returns the sorted unique elements of an array. There are three optional 
+    outputs in addition to the unique elements: 
+ 
+    * the indices of the input array that give the unique values 
+    * the indices of the unique array that reconstruct the input array 
+    * the number of times each unique value comes up in the input array 
+ 
+    Parameters 
+    ---------- 
+    ar : array_like 
+        Input array. Unless `axis` is specified, this will be flattened if it 
+        is not already 1-D. 
+    return_index : bool, optional 
+        If True, also return the indices of `ar` (along the specified axis, 
+        if provided, or in the flattened array) that result in the unique array. 
+    return_inverse : bool, optional 
+        If True, also return the indices of the unique array (for the specified 
+        axis, if provided) that can be used to reconstruct `ar`. 
+    return_counts : bool, optional 
+        If True, also return the number of times each unique item appears 
+        in `ar`. 
+    axis : int or None, optional 
+        The axis to operate on. If None, `ar` will be flattened. If an integer, 
+        the subarrays indexed by the given axis will be flattened and treated 
+        as the elements of a 1-D array with the dimension of the given axis, 
+        see the notes for more details.  Object arrays or structured arrays 
+        that contain objects are not supported if the `axis` kwarg is used. The 
+        default is None. 
+ 
+    equal_nan : bool, optional 
+        If True, collapses multiple NaN values in the return array into one. 
+ 
+        .. versionadded:: 1.24 
+ 
+    sorted : bool, optional 
+        If True, the unique elements are sorted. Elements may be sorted in 
+        practice even if ``sorted=False``, but this could change without 
+        notice. 
+ 
+        .. versionadded:: 2.3 
+ 
+    Returns 
+    ------- 
+    unique : ndarray 
+        The sorted unique values. 
+    unique_indices : ndarray, optional 
+        The indices of the first occurrences of the unique values in the 
+        original array. Only provided if `return_index` is True. 
+    unique_inverse : ndarray, optional 
+        The indices to reconstruct the original array from the 
+        unique array. Only provided if `return_inverse` is True. 
+    unique_counts : ndarray, optional 
+        The number of times each of the unique values comes up in the 
+        original array. Only provided if `return_counts` is True. 
+ 
+    See Also 
+    -------- 
+    repeat : Repeat elements of an array. 
+    sort : Return a sorted copy of an array. 
+ 
+    Notes 
+    ----- 
+    When an axis is specified the subarrays indexed by the axis are sorted. 
+    This is done by making the specified axis the first dimension of the array 
+    (move the axis to the first dimension to keep the order of the other axes) 
+    and then flattening the subarrays in C order. The flattened subarrays are 
+    then viewed as a structured type with each element given a label, with the 
+    effect that we end up with a 1-D array of structured types that can be 
+    treated in the same way as any other 1-D array. The result is that the 
+    flattened subarrays are sorted in lexicographic order starting with the 
+    first element. 
+ 
+    .. versionchanged:: 1.21 
+        Like np.sort, NaN will sort to the end of the values. 
+        For complex arrays all NaN values are considered equivalent 
+        (no matter whether the NaN is in the real or imaginary part). 
+        As the representant for the returned array the smallest one in the 
+        lexicographical order is chosen - see np.sort for how the lexicographical 
+        order is defined for complex arrays. 
+ 
+    .. versionchanged:: 2.0 
+        For multi-dimensional inputs, ``unique_inverse`` is reshaped 
+        such that the input can be reconstructed using 
+        ``np.take(unique, unique_inverse, axis=axis)``. The result is 
+        now not 1-dimensional when ``axis=None``. 
+ 
+        Note that in NumPy 2.0.0 a higher dimensional array was returned also 
+        when ``axis`` was not ``None``.  This was reverted, but 
+        ``inverse.reshape(-1)`` can be used to ensure compatibility with both 
+        versions. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+    &gt;&gt;&gt; np.unique([1, 1, 2, 2, 3, 3]) 
+    array([1, 2, 3]) 
+    &gt;&gt;&gt; a = np.array([[1, 1], [2, 3]]) 
+    &gt;&gt;&gt; np.unique(a) 
+    array([1, 2, 3]) 
+ 
+    Return the unique rows of a 2D array 
+ 
+    &gt;&gt;&gt; a = np.array([[1, 0, 0], [1, 0, 0], [2, 3, 4]]) 
+    &gt;&gt;&gt; np.unique(a, axis=0) 
+    array([[1, 0, 0], [2, 3, 4]]) 
+ 
+    Return the indices of the original array that give the unique values: 
+ 
+    &gt;&gt;&gt; a = np.array(['a', 'b', 'b', 'c', 'a']) 
+    &gt;&gt;&gt; u, indices = np.unique(a, return_index=True) 
+    &gt;&gt;&gt; u 
+    array(['a', 'b', 'c'], dtype='&lt;U1') 
+    &gt;&gt;&gt; indices 
+    array([0, 1, 3]) 
+    &gt;&gt;&gt; a[indices] 
+    array(['a', 'b', 'c'], dtype='&lt;U1') 
+ 
+    Reconstruct the input array from the unique values and inverse: 
+ 
+    &gt;&gt;&gt; a = np.array([1, 2, 6, 4, 2, 3, 2]) 
+    &gt;&gt;&gt; u, indices = np.unique(a, return_inverse=True) 
+    &gt;&gt;&gt; u 
+    array([1, 2, 3, 4, 6]) 
+    &gt;&gt;&gt; indices 
+    array([0, 1, 4, 3, 1, 2, 1]) 
+    &gt;&gt;&gt; u[indices] 
+    array([1, 2, 6, 4, 2, 3, 2]) 
+ 
+    Reconstruct the input values from the unique values and counts: 
+ 
+    &gt;&gt;&gt; a = np.array([1, 2, 6, 4, 2, 3, 2]) 
+    &gt;&gt;&gt; values, counts = np.unique(a, return_counts=True) 
+    &gt;&gt;&gt; values 
+    array([1, 2, 3, 4, 6]) 
+    &gt;&gt;&gt; counts 
+    array([1, 3, 1, 1, 1]) 
+    &gt;&gt;&gt; np.repeat(values, counts) 
+    array([1, 2, 2, 2, 3, 4, 6])    # original order not preserved 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asanyarray</span><span class="s3">(</span><span class="s1">ar</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">axis </span><span class="s2">is None or </span><span class="s1">ar</span><span class="s3">.</span><span class="s1">ndim </span><span class="s3">== </span><span class="s6">1</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">axis </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">normalize_axis_index</span><span class="s3">(</span><span class="s1">axis</span><span class="s3">, </span><span class="s1">ar</span><span class="s3">.</span><span class="s1">ndim</span><span class="s3">)</span>
+        <span class="s1">ret </span><span class="s3">= </span><span class="s1">_unique1d</span><span class="s3">(</span><span class="s1">ar</span><span class="s3">, </span><span class="s1">return_index</span><span class="s3">, </span><span class="s1">return_inverse</span><span class="s3">, </span><span class="s1">return_counts</span><span class="s3">,</span>
+                        <span class="s1">equal_nan</span><span class="s3">=</span><span class="s1">equal_nan</span><span class="s3">, </span><span class="s1">inverse_shape</span><span class="s3">=</span><span class="s1">ar</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                        <span class="s1">sorted</span><span class="s3">=</span><span class="s1">sorted</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">_unpack_tuple</span><span class="s3">(</span><span class="s1">ret</span><span class="s3">)</span>
+
+    <span class="s5"># axis was specified and not None</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s1">ar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">moveaxis</span><span class="s3">(</span><span class="s1">ar</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">, </span><span class="s6">0</span><span class="s3">)</span>
+    <span class="s2">except </span><span class="s1">np</span><span class="s3">.</span><span class="s1">exceptions</span><span class="s3">.</span><span class="s1">AxisError</span><span class="s3">:</span>
+        <span class="s5"># this removes the &quot;axis1&quot; or &quot;axis2&quot; prefix from the error message</span>
+        <span class="s2">raise </span><span class="s1">np</span><span class="s3">.</span><span class="s1">exceptions</span><span class="s3">.</span><span class="s1">AxisError</span><span class="s3">(</span><span class="s1">axis</span><span class="s3">, </span><span class="s1">ar</span><span class="s3">.</span><span class="s1">ndim</span><span class="s3">) </span><span class="s2">from None</span>
+    <span class="s1">inverse_shape </span><span class="s3">= [</span><span class="s6">1</span><span class="s3">] * </span><span class="s1">ar</span><span class="s3">.</span><span class="s1">ndim</span>
+    <span class="s1">inverse_shape</span><span class="s3">[</span><span class="s1">axis</span><span class="s3">] = </span><span class="s1">ar</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]</span>
+
+    <span class="s5"># Must reshape to a contiguous 2D array for this to work...</span>
+    <span class="s1">orig_shape</span><span class="s3">, </span><span class="s1">orig_dtype </span><span class="s3">= </span><span class="s1">ar</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">, </span><span class="s1">ar</span><span class="s3">.</span><span class="s1">dtype</span>
+    <span class="s1">ar </span><span class="s3">= </span><span class="s1">ar</span><span class="s3">.</span><span class="s1">reshape</span><span class="s3">(</span><span class="s1">orig_shape</span><span class="s3">[</span><span class="s6">0</span><span class="s3">], </span><span class="s1">np</span><span class="s3">.</span><span class="s1">prod</span><span class="s3">(</span><span class="s1">orig_shape</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">))</span>
+    <span class="s1">ar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ascontiguousarray</span><span class="s3">(</span><span class="s1">ar</span><span class="s3">)</span>
+    <span class="s1">dtype </span><span class="s3">= [(</span><span class="s4">f'f</span><span class="s2">{</span><span class="s1">i</span><span class="s2">}</span><span class="s4">'</span><span class="s3">, </span><span class="s1">ar</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">) </span><span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">ar</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">[</span><span class="s6">1</span><span class="s3">])]</span>
+
+    <span class="s5"># At this point, `ar` has shape `(n, m)`, and `dtype` is a structured</span>
+    <span class="s5"># data type with `m` fields where each field has the data type of `ar`.</span>
+    <span class="s5"># In the following, we create the array `consolidated`, which has</span>
+    <span class="s5"># shape `(n,)` with data type `dtype`.</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">ar</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">[</span><span class="s6">1</span><span class="s3">] &gt; </span><span class="s6">0</span><span class="s3">:</span>
+            <span class="s1">consolidated </span><span class="s3">= </span><span class="s1">ar</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s5"># If ar.shape[1] == 0, then dtype will be `np.dtype([])`, which is</span>
+            <span class="s5"># a data type with itemsize 0, and the call `ar.view(dtype)` will</span>
+            <span class="s5"># fail.  Instead, we'll use `np.empty` to explicitly create the</span>
+            <span class="s5"># array with shape `(len(ar),)`.  Because `dtype` in this case has</span>
+            <span class="s5"># itemsize 0, the total size of the result is still 0 bytes.</span>
+            <span class="s1">consolidated </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">ar</span><span class="s3">), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+    <span class="s2">except </span><span class="s1">TypeError </span><span class="s2">as </span><span class="s1">e</span><span class="s3">:</span>
+        <span class="s5"># There's no good way to do this for object arrays, etc...</span>
+        <span class="s1">msg </span><span class="s3">= </span><span class="s4">'The axis argument to unique is not supported for dtype {dt}'</span>
+        <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span><span class="s1">msg</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">dt</span><span class="s3">=</span><span class="s1">ar</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">)) </span><span class="s2">from </span><span class="s1">e</span>
+
+    <span class="s2">def </span><span class="s1">reshape_uniq</span><span class="s3">(</span><span class="s1">uniq</span><span class="s3">):</span>
+        <span class="s1">n </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">uniq</span><span class="s3">)</span>
+        <span class="s1">uniq </span><span class="s3">= </span><span class="s1">uniq</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s1">orig_dtype</span><span class="s3">)</span>
+        <span class="s1">uniq </span><span class="s3">= </span><span class="s1">uniq</span><span class="s3">.</span><span class="s1">reshape</span><span class="s3">(</span><span class="s1">n</span><span class="s3">, *</span><span class="s1">orig_shape</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:])</span>
+        <span class="s1">uniq </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">moveaxis</span><span class="s3">(</span><span class="s1">uniq</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">uniq</span>
+
+    <span class="s1">output </span><span class="s3">= </span><span class="s1">_unique1d</span><span class="s3">(</span><span class="s1">consolidated</span><span class="s3">, </span><span class="s1">return_index</span><span class="s3">,</span>
+                       <span class="s1">return_inverse</span><span class="s3">, </span><span class="s1">return_counts</span><span class="s3">,</span>
+                       <span class="s1">equal_nan</span><span class="s3">=</span><span class="s1">equal_nan</span><span class="s3">, </span><span class="s1">inverse_shape</span><span class="s3">=</span><span class="s1">inverse_shape</span><span class="s3">,</span>
+                       <span class="s1">axis</span><span class="s3">=</span><span class="s1">axis</span><span class="s3">, </span><span class="s1">sorted</span><span class="s3">=</span><span class="s1">sorted</span><span class="s3">)</span>
+    <span class="s1">output </span><span class="s3">= (</span><span class="s1">reshape_uniq</span><span class="s3">(</span><span class="s1">output</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]),) + </span><span class="s1">output</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:]</span>
+    <span class="s2">return </span><span class="s1">_unpack_tuple</span><span class="s3">(</span><span class="s1">output</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_unique1d</span><span class="s3">(</span><span class="s1">ar</span><span class="s3">, </span><span class="s1">return_index</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, </span><span class="s1">return_inverse</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+              <span class="s1">return_counts</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, *, </span><span class="s1">equal_nan</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">inverse_shape</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+              <span class="s1">axis</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">sorted</span><span class="s3">=</span><span class="s2">True</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Find the unique elements of an array, ignoring shape. 
+ 
+    Uses a hash table to find the unique elements if possible. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asanyarray</span><span class="s3">(</span><span class="s1">ar</span><span class="s3">).</span><span class="s1">flatten</span><span class="s3">()</span>
+    <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">ar</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">) != </span><span class="s6">1</span><span class="s3">:</span>
+        <span class="s5"># np.matrix, and maybe some other array subclasses, insist on keeping</span>
+        <span class="s5"># two dimensions for all operations. Coerce to an ndarray in such cases.</span>
+        <span class="s1">ar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">ar</span><span class="s3">).</span><span class="s1">flatten</span><span class="s3">()</span>
+
+    <span class="s1">optional_indices </span><span class="s3">= </span><span class="s1">return_index </span><span class="s2">or </span><span class="s1">return_inverse</span>
+
+    <span class="s5"># masked arrays are not supported yet.</span>
+    <span class="s2">if not </span><span class="s1">optional_indices </span><span class="s2">and not </span><span class="s1">return_counts </span><span class="s2">and not </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ma</span><span class="s3">.</span><span class="s1">is_masked</span><span class="s3">(</span><span class="s1">ar</span><span class="s3">):</span>
+        <span class="s5"># First we convert the array to a numpy array, later we wrap it back</span>
+        <span class="s5"># in case it was a subclass of numpy.ndarray.</span>
+        <span class="s1">conv </span><span class="s3">= </span><span class="s1">_array_converter</span><span class="s3">(</span><span class="s1">ar</span><span class="s3">)</span>
+        <span class="s1">ar_</span><span class="s3">, = </span><span class="s1">conv</span>
+
+        <span class="s2">if </span><span class="s3">(</span><span class="s1">hash_unique </span><span class="s3">:= </span><span class="s1">_unique_hash</span><span class="s3">(</span><span class="s1">ar_</span><span class="s3">, </span><span class="s1">equal_nan</span><span class="s3">=</span><span class="s1">equal_nan</span><span class="s3">)) </span><span class="s1">\</span>
+            <span class="s2">is not </span><span class="s1">NotImplemented</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">sorted</span><span class="s3">:</span>
+                <span class="s1">hash_unique</span><span class="s3">.</span><span class="s1">sort</span><span class="s3">()</span>
+            <span class="s5"># We wrap the result back in case it was a subclass of numpy.ndarray.</span>
+            <span class="s2">return </span><span class="s3">(</span><span class="s1">conv</span><span class="s3">.</span><span class="s1">wrap</span><span class="s3">(</span><span class="s1">hash_unique</span><span class="s3">),)</span>
+
+    <span class="s5"># If we don't use the hash map, we use the slower sorting method.</span>
+    <span class="s2">if </span><span class="s1">optional_indices</span><span class="s3">:</span>
+        <span class="s1">perm </span><span class="s3">= </span><span class="s1">ar</span><span class="s3">.</span><span class="s1">argsort</span><span class="s3">(</span><span class="s1">kind</span><span class="s3">=</span><span class="s4">'mergesort' </span><span class="s2">if </span><span class="s1">return_index </span><span class="s2">else </span><span class="s4">'quicksort'</span><span class="s3">)</span>
+        <span class="s1">aux </span><span class="s3">= </span><span class="s1">ar</span><span class="s3">[</span><span class="s1">perm</span><span class="s3">]</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">ar</span><span class="s3">.</span><span class="s1">sort</span><span class="s3">()</span>
+        <span class="s1">aux </span><span class="s3">= </span><span class="s1">ar</span>
+    <span class="s1">mask </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty</span><span class="s3">(</span><span class="s1">aux</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">bool</span><span class="s3">)</span>
+    <span class="s1">mask</span><span class="s3">[:</span><span class="s6">1</span><span class="s3">] = </span><span class="s2">True</span>
+    <span class="s2">if </span><span class="s3">(</span><span class="s1">equal_nan </span><span class="s2">and </span><span class="s1">aux</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">[</span><span class="s6">0</span><span class="s3">] &gt; </span><span class="s6">0 </span><span class="s2">and </span><span class="s1">aux</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s2">in </span><span class="s4">&quot;cfmM&quot; </span><span class="s2">and</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">isnan</span><span class="s3">(</span><span class="s1">aux</span><span class="s3">[-</span><span class="s6">1</span><span class="s3">])):</span>
+        <span class="s2">if </span><span class="s1">aux</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">== </span><span class="s4">&quot;c&quot;</span><span class="s3">:  </span><span class="s5"># for complex all NaNs are considered equivalent</span>
+            <span class="s1">aux_firstnan </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">searchsorted</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">isnan</span><span class="s3">(</span><span class="s1">aux</span><span class="s3">), </span><span class="s2">True</span><span class="s3">, </span><span class="s1">side</span><span class="s3">=</span><span class="s4">'left'</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">aux_firstnan </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">searchsorted</span><span class="s3">(</span><span class="s1">aux</span><span class="s3">, </span><span class="s1">aux</span><span class="s3">[-</span><span class="s6">1</span><span class="s3">], </span><span class="s1">side</span><span class="s3">=</span><span class="s4">'left'</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">aux_firstnan </span><span class="s3">&gt; </span><span class="s6">0</span><span class="s3">:</span>
+            <span class="s1">mask</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:</span><span class="s1">aux_firstnan</span><span class="s3">] = (</span>
+                <span class="s1">aux</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:</span><span class="s1">aux_firstnan</span><span class="s3">] != </span><span class="s1">aux</span><span class="s3">[:</span><span class="s1">aux_firstnan </span><span class="s3">- </span><span class="s6">1</span><span class="s3">])</span>
+        <span class="s1">mask</span><span class="s3">[</span><span class="s1">aux_firstnan</span><span class="s3">] = </span><span class="s2">True</span>
+        <span class="s1">mask</span><span class="s3">[</span><span class="s1">aux_firstnan </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">:] = </span><span class="s2">False</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">mask</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:] = </span><span class="s1">aux</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:] != </span><span class="s1">aux</span><span class="s3">[:-</span><span class="s6">1</span><span class="s3">]</span>
+
+    <span class="s1">ret </span><span class="s3">= (</span><span class="s1">aux</span><span class="s3">[</span><span class="s1">mask</span><span class="s3">],)</span>
+    <span class="s2">if </span><span class="s1">return_index</span><span class="s3">:</span>
+        <span class="s1">ret </span><span class="s3">+= (</span><span class="s1">perm</span><span class="s3">[</span><span class="s1">mask</span><span class="s3">],)</span>
+    <span class="s2">if </span><span class="s1">return_inverse</span><span class="s3">:</span>
+        <span class="s1">imask </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">cumsum</span><span class="s3">(</span><span class="s1">mask</span><span class="s3">) - </span><span class="s6">1</span>
+        <span class="s1">inv_idx </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty</span><span class="s3">(</span><span class="s1">mask</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">)</span>
+        <span class="s1">inv_idx</span><span class="s3">[</span><span class="s1">perm</span><span class="s3">] = </span><span class="s1">imask</span>
+        <span class="s1">ret </span><span class="s3">+= (</span><span class="s1">inv_idx</span><span class="s3">.</span><span class="s1">reshape</span><span class="s3">(</span><span class="s1">inverse_shape</span><span class="s3">) </span><span class="s2">if </span><span class="s1">axis </span><span class="s2">is None else </span><span class="s1">inv_idx</span><span class="s3">,)</span>
+    <span class="s2">if </span><span class="s1">return_counts</span><span class="s3">:</span>
+        <span class="s1">idx </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">concatenate</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">nonzero</span><span class="s3">(</span><span class="s1">mask</span><span class="s3">) + ([</span><span class="s1">mask</span><span class="s3">.</span><span class="s1">size</span><span class="s3">],))</span>
+        <span class="s1">ret </span><span class="s3">+= (</span><span class="s1">np</span><span class="s3">.</span><span class="s1">diff</span><span class="s3">(</span><span class="s1">idx</span><span class="s3">),)</span>
+    <span class="s2">return </span><span class="s1">ret</span>
+
+
+<span class="s5"># Array API set functions</span>
+
+<span class="s2">class </span><span class="s1">UniqueAllResult</span><span class="s3">(</span><span class="s1">NamedTuple</span><span class="s3">):</span>
+    <span class="s1">values</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span>
+    <span class="s1">indices</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span>
+    <span class="s1">inverse_indices</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span>
+    <span class="s1">counts</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span>
+
+
+<span class="s2">class </span><span class="s1">UniqueCountsResult</span><span class="s3">(</span><span class="s1">NamedTuple</span><span class="s3">):</span>
+    <span class="s1">values</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span>
+    <span class="s1">counts</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span>
+
+
+<span class="s2">class </span><span class="s1">UniqueInverseResult</span><span class="s3">(</span><span class="s1">NamedTuple</span><span class="s3">):</span>
+    <span class="s1">values</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span>
+    <span class="s1">inverse_indices</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span>
+
+
+<span class="s2">def </span><span class="s1">_unique_all_dispatcher</span><span class="s3">(</span><span class="s1">x</span><span class="s3">, /):</span>
+    <span class="s2">return </span><span class="s3">(</span><span class="s1">x</span><span class="s3">,)</span>
+
+
+<span class="s3">@</span><span class="s1">array_function_dispatch</span><span class="s3">(</span><span class="s1">_unique_all_dispatcher</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">unique_all</span><span class="s3">(</span><span class="s1">x</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Find the unique elements of an array, and counts, inverse, and indices. 
+ 
+    This function is an Array API compatible alternative to:: 
+ 
+        np.unique(x, return_index=True, return_inverse=True, 
+                  return_counts=True, equal_nan=False, sorted=False) 
+ 
+    but returns a namedtuple for easier access to each output. 
+ 
+    .. note:: 
+        This function currently always returns a sorted result, however, 
+        this could change in any NumPy minor release. 
+ 
+    Parameters 
+    ---------- 
+    x : array_like 
+        Input array. It will be flattened if it is not already 1-D. 
+ 
+    Returns 
+    ------- 
+    out : namedtuple 
+        The result containing: 
+ 
+        * values - The unique elements of an input array. 
+        * indices - The first occurring indices for each unique element. 
+        * inverse_indices - The indices from the set of unique elements 
+          that reconstruct `x`. 
+        * counts - The corresponding counts for each unique element. 
+ 
+    See Also 
+    -------- 
+    unique : Find the unique elements of an array. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+    &gt;&gt;&gt; x = [1, 1, 2] 
+    &gt;&gt;&gt; uniq = np.unique_all(x) 
+    &gt;&gt;&gt; uniq.values 
+    array([1, 2]) 
+    &gt;&gt;&gt; uniq.indices 
+    array([0, 2]) 
+    &gt;&gt;&gt; uniq.inverse_indices 
+    array([0, 0, 1]) 
+    &gt;&gt;&gt; uniq.counts 
+    array([2, 1]) 
+    &quot;&quot;&quot;</span>
+    <span class="s1">result </span><span class="s3">= </span><span class="s1">unique</span><span class="s3">(</span>
+        <span class="s1">x</span><span class="s3">,</span>
+        <span class="s1">return_index</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+        <span class="s1">return_inverse</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+        <span class="s1">return_counts</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+        <span class="s1">equal_nan</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+    <span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">UniqueAllResult</span><span class="s3">(*</span><span class="s1">result</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_unique_counts_dispatcher</span><span class="s3">(</span><span class="s1">x</span><span class="s3">, /):</span>
+    <span class="s2">return </span><span class="s3">(</span><span class="s1">x</span><span class="s3">,)</span>
+
+
+<span class="s3">@</span><span class="s1">array_function_dispatch</span><span class="s3">(</span><span class="s1">_unique_counts_dispatcher</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">unique_counts</span><span class="s3">(</span><span class="s1">x</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Find the unique elements and counts of an input array `x`. 
+ 
+    This function is an Array API compatible alternative to:: 
+ 
+        np.unique(x, return_counts=True, equal_nan=False, sorted=False) 
+ 
+    but returns a namedtuple for easier access to each output. 
+ 
+    .. note:: 
+        This function currently always returns a sorted result, however, 
+        this could change in any NumPy minor release. 
+ 
+    Parameters 
+    ---------- 
+    x : array_like 
+        Input array. It will be flattened if it is not already 1-D. 
+ 
+    Returns 
+    ------- 
+    out : namedtuple 
+        The result containing: 
+ 
+        * values - The unique elements of an input array. 
+        * counts - The corresponding counts for each unique element. 
+ 
+    See Also 
+    -------- 
+    unique : Find the unique elements of an array. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+    &gt;&gt;&gt; x = [1, 1, 2] 
+    &gt;&gt;&gt; uniq = np.unique_counts(x) 
+    &gt;&gt;&gt; uniq.values 
+    array([1, 2]) 
+    &gt;&gt;&gt; uniq.counts 
+    array([2, 1]) 
+    &quot;&quot;&quot;</span>
+    <span class="s1">result </span><span class="s3">= </span><span class="s1">unique</span><span class="s3">(</span>
+        <span class="s1">x</span><span class="s3">,</span>
+        <span class="s1">return_index</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s1">return_inverse</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s1">return_counts</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+        <span class="s1">equal_nan</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+    <span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">UniqueCountsResult</span><span class="s3">(*</span><span class="s1">result</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_unique_inverse_dispatcher</span><span class="s3">(</span><span class="s1">x</span><span class="s3">, /):</span>
+    <span class="s2">return </span><span class="s3">(</span><span class="s1">x</span><span class="s3">,)</span>
+
+
+<span class="s3">@</span><span class="s1">array_function_dispatch</span><span class="s3">(</span><span class="s1">_unique_inverse_dispatcher</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">unique_inverse</span><span class="s3">(</span><span class="s1">x</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Find the unique elements of `x` and indices to reconstruct `x`. 
+ 
+    This function is an Array API compatible alternative to:: 
+ 
+        np.unique(x, return_inverse=True, equal_nan=False, sorted=False) 
+ 
+    but returns a namedtuple for easier access to each output. 
+ 
+    .. note:: 
+        This function currently always returns a sorted result, however, 
+        this could change in any NumPy minor release. 
+ 
+    Parameters 
+    ---------- 
+    x : array_like 
+        Input array. It will be flattened if it is not already 1-D. 
+ 
+    Returns 
+    ------- 
+    out : namedtuple 
+        The result containing: 
+ 
+        * values - The unique elements of an input array. 
+        * inverse_indices - The indices from the set of unique elements 
+          that reconstruct `x`. 
+ 
+    See Also 
+    -------- 
+    unique : Find the unique elements of an array. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+    &gt;&gt;&gt; x = [1, 1, 2] 
+    &gt;&gt;&gt; uniq = np.unique_inverse(x) 
+    &gt;&gt;&gt; uniq.values 
+    array([1, 2]) 
+    &gt;&gt;&gt; uniq.inverse_indices 
+    array([0, 0, 1]) 
+    &quot;&quot;&quot;</span>
+    <span class="s1">result </span><span class="s3">= </span><span class="s1">unique</span><span class="s3">(</span>
+        <span class="s1">x</span><span class="s3">,</span>
+        <span class="s1">return_index</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s1">return_inverse</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+        <span class="s1">return_counts</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s1">equal_nan</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+    <span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">UniqueInverseResult</span><span class="s3">(*</span><span class="s1">result</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_unique_values_dispatcher</span><span class="s3">(</span><span class="s1">x</span><span class="s3">, /):</span>
+    <span class="s2">return </span><span class="s3">(</span><span class="s1">x</span><span class="s3">,)</span>
+
+
+<span class="s3">@</span><span class="s1">array_function_dispatch</span><span class="s3">(</span><span class="s1">_unique_values_dispatcher</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">unique_values</span><span class="s3">(</span><span class="s1">x</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Returns the unique elements of an input array `x`. 
+ 
+    This function is an Array API compatible alternative to:: 
+ 
+        np.unique(x, equal_nan=False, sorted=False) 
+ 
+    .. versionchanged:: 2.3 
+       The algorithm was changed to a faster one that does not rely on 
+       sorting, and hence the results are no longer implicitly sorted. 
+ 
+    Parameters 
+    ---------- 
+    x : array_like 
+        Input array. It will be flattened if it is not already 1-D. 
+ 
+    Returns 
+    ------- 
+    out : ndarray 
+        The unique elements of an input array. 
+ 
+    See Also 
+    -------- 
+    unique : Find the unique elements of an array. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+    &gt;&gt;&gt; np.unique_values([1, 1, 2]) 
+    array([1, 2])  # may vary 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s2">return </span><span class="s1">unique</span><span class="s3">(</span>
+        <span class="s1">x</span><span class="s3">,</span>
+        <span class="s1">return_index</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s1">return_inverse</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s1">return_counts</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s1">equal_nan</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s1">sorted</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_intersect1d_dispatcher</span><span class="s3">(</span>
+        <span class="s1">ar1</span><span class="s3">, </span><span class="s1">ar2</span><span class="s3">, </span><span class="s1">assume_unique</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">return_indices</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s2">return </span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">ar2</span><span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">array_function_dispatch</span><span class="s3">(</span><span class="s1">_intersect1d_dispatcher</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">intersect1d</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">ar2</span><span class="s3">, </span><span class="s1">assume_unique</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, </span><span class="s1">return_indices</span><span class="s3">=</span><span class="s2">False</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Find the intersection of two arrays. 
+ 
+    Return the sorted, unique values that are in both of the input arrays. 
+ 
+    Parameters 
+    ---------- 
+    ar1, ar2 : array_like 
+        Input arrays. Will be flattened if not already 1D. 
+    assume_unique : bool 
+        If True, the input arrays are both assumed to be unique, which 
+        can speed up the calculation.  If True but ``ar1`` or ``ar2`` are not 
+        unique, incorrect results and out-of-bounds indices could result. 
+        Default is False. 
+    return_indices : bool 
+        If True, the indices which correspond to the intersection of the two 
+        arrays are returned. The first instance of a value is used if there are 
+        multiple. Default is False. 
+ 
+    Returns 
+    ------- 
+    intersect1d : ndarray 
+        Sorted 1D array of common and unique elements. 
+    comm1 : ndarray 
+        The indices of the first occurrences of the common values in `ar1`. 
+        Only provided if `return_indices` is True. 
+    comm2 : ndarray 
+        The indices of the first occurrences of the common values in `ar2`. 
+        Only provided if `return_indices` is True. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+    &gt;&gt;&gt; np.intersect1d([1, 3, 4, 3], [3, 1, 2, 1]) 
+    array([1, 3]) 
+ 
+    To intersect more than two arrays, use functools.reduce: 
+ 
+    &gt;&gt;&gt; from functools import reduce 
+    &gt;&gt;&gt; reduce(np.intersect1d, ([1, 3, 4, 3], [3, 1, 2, 1], [6, 3, 4, 2])) 
+    array([3]) 
+ 
+    To return the indices of the values common to the input arrays 
+    along with the intersected values: 
+ 
+    &gt;&gt;&gt; x = np.array([1, 1, 2, 3, 4]) 
+    &gt;&gt;&gt; y = np.array([2, 1, 4, 6]) 
+    &gt;&gt;&gt; xy, x_ind, y_ind = np.intersect1d(x, y, return_indices=True) 
+    &gt;&gt;&gt; x_ind, y_ind 
+    (array([0, 2, 4]), array([1, 0, 2])) 
+    &gt;&gt;&gt; xy, x[x_ind], y[y_ind] 
+    (array([1, 2, 4]), array([1, 2, 4]), array([1, 2, 4])) 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">ar1 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asanyarray</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">)</span>
+    <span class="s1">ar2 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asanyarray</span><span class="s3">(</span><span class="s1">ar2</span><span class="s3">)</span>
+
+    <span class="s2">if not </span><span class="s1">assume_unique</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">return_indices</span><span class="s3">:</span>
+            <span class="s1">ar1</span><span class="s3">, </span><span class="s1">ind1 </span><span class="s3">= </span><span class="s1">unique</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">return_index</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+            <span class="s1">ar2</span><span class="s3">, </span><span class="s1">ind2 </span><span class="s3">= </span><span class="s1">unique</span><span class="s3">(</span><span class="s1">ar2</span><span class="s3">, </span><span class="s1">return_index</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">ar1 </span><span class="s3">= </span><span class="s1">unique</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">)</span>
+            <span class="s1">ar2 </span><span class="s3">= </span><span class="s1">unique</span><span class="s3">(</span><span class="s1">ar2</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">ar1 </span><span class="s3">= </span><span class="s1">ar1</span><span class="s3">.</span><span class="s1">ravel</span><span class="s3">()</span>
+        <span class="s1">ar2 </span><span class="s3">= </span><span class="s1">ar2</span><span class="s3">.</span><span class="s1">ravel</span><span class="s3">()</span>
+
+    <span class="s1">aux </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">concatenate</span><span class="s3">((</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">ar2</span><span class="s3">))</span>
+    <span class="s2">if </span><span class="s1">return_indices</span><span class="s3">:</span>
+        <span class="s1">aux_sort_indices </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">argsort</span><span class="s3">(</span><span class="s1">aux</span><span class="s3">, </span><span class="s1">kind</span><span class="s3">=</span><span class="s4">'mergesort'</span><span class="s3">)</span>
+        <span class="s1">aux </span><span class="s3">= </span><span class="s1">aux</span><span class="s3">[</span><span class="s1">aux_sort_indices</span><span class="s3">]</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">aux</span><span class="s3">.</span><span class="s1">sort</span><span class="s3">()</span>
+
+    <span class="s1">mask </span><span class="s3">= </span><span class="s1">aux</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:] == </span><span class="s1">aux</span><span class="s3">[:-</span><span class="s6">1</span><span class="s3">]</span>
+    <span class="s1">int1d </span><span class="s3">= </span><span class="s1">aux</span><span class="s3">[:-</span><span class="s6">1</span><span class="s3">][</span><span class="s1">mask</span><span class="s3">]</span>
+
+    <span class="s2">if </span><span class="s1">return_indices</span><span class="s3">:</span>
+        <span class="s1">ar1_indices </span><span class="s3">= </span><span class="s1">aux_sort_indices</span><span class="s3">[:-</span><span class="s6">1</span><span class="s3">][</span><span class="s1">mask</span><span class="s3">]</span>
+        <span class="s1">ar2_indices </span><span class="s3">= </span><span class="s1">aux_sort_indices</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:][</span><span class="s1">mask</span><span class="s3">] - </span><span class="s1">ar1</span><span class="s3">.</span><span class="s1">size</span>
+        <span class="s2">if not </span><span class="s1">assume_unique</span><span class="s3">:</span>
+            <span class="s1">ar1_indices </span><span class="s3">= </span><span class="s1">ind1</span><span class="s3">[</span><span class="s1">ar1_indices</span><span class="s3">]</span>
+            <span class="s1">ar2_indices </span><span class="s3">= </span><span class="s1">ind2</span><span class="s3">[</span><span class="s1">ar2_indices</span><span class="s3">]</span>
+
+        <span class="s2">return </span><span class="s1">int1d</span><span class="s3">, </span><span class="s1">ar1_indices</span><span class="s3">, </span><span class="s1">ar2_indices</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">int1d</span>
+
+
+<span class="s2">def </span><span class="s1">_setxor1d_dispatcher</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">ar2</span><span class="s3">, </span><span class="s1">assume_unique</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s2">return </span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">ar2</span><span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">array_function_dispatch</span><span class="s3">(</span><span class="s1">_setxor1d_dispatcher</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">setxor1d</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">ar2</span><span class="s3">, </span><span class="s1">assume_unique</span><span class="s3">=</span><span class="s2">False</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Find the set exclusive-or of two arrays. 
+ 
+    Return the sorted, unique values that are in only one (not both) of the 
+    input arrays. 
+ 
+    Parameters 
+    ---------- 
+    ar1, ar2 : array_like 
+        Input arrays. 
+    assume_unique : bool 
+        If True, the input arrays are both assumed to be unique, which 
+        can speed up the calculation. Default is False. 
+ 
+    Returns 
+    ------- 
+    setxor1d : ndarray 
+        Sorted 1D array of unique values that are in only one of the input 
+        arrays. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+    &gt;&gt;&gt; a = np.array([1, 2, 3, 2, 4]) 
+    &gt;&gt;&gt; b = np.array([2, 3, 5, 7, 5]) 
+    &gt;&gt;&gt; np.setxor1d(a,b) 
+    array([1, 4, 5, 7]) 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if not </span><span class="s1">assume_unique</span><span class="s3">:</span>
+        <span class="s1">ar1 </span><span class="s3">= </span><span class="s1">unique</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">)</span>
+        <span class="s1">ar2 </span><span class="s3">= </span><span class="s1">unique</span><span class="s3">(</span><span class="s1">ar2</span><span class="s3">)</span>
+
+    <span class="s1">aux </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">concatenate</span><span class="s3">((</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">ar2</span><span class="s3">), </span><span class="s1">axis</span><span class="s3">=</span><span class="s2">None</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">aux</span><span class="s3">.</span><span class="s1">size </span><span class="s3">== </span><span class="s6">0</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">aux</span>
+
+    <span class="s1">aux</span><span class="s3">.</span><span class="s1">sort</span><span class="s3">()</span>
+    <span class="s1">flag </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">concatenate</span><span class="s3">(([</span><span class="s2">True</span><span class="s3">], </span><span class="s1">aux</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:] != </span><span class="s1">aux</span><span class="s3">[:-</span><span class="s6">1</span><span class="s3">], [</span><span class="s2">True</span><span class="s3">]))</span>
+    <span class="s2">return </span><span class="s1">aux</span><span class="s3">[</span><span class="s1">flag</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:] &amp; </span><span class="s1">flag</span><span class="s3">[:-</span><span class="s6">1</span><span class="s3">]]</span>
+
+
+<span class="s2">def </span><span class="s1">_isin</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">ar2</span><span class="s3">, </span><span class="s1">assume_unique</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, </span><span class="s1">invert</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, *, </span><span class="s1">kind</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s5"># Ravel both arrays, behavior for the first array could be different</span>
+    <span class="s1">ar1 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">).</span><span class="s1">ravel</span><span class="s3">()</span>
+    <span class="s1">ar2 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">ar2</span><span class="s3">).</span><span class="s1">ravel</span><span class="s3">()</span>
+
+    <span class="s5"># Ensure that iteration through object arrays yields size-1 arrays</span>
+    <span class="s2">if </span><span class="s1">ar2</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">object</span><span class="s3">:</span>
+        <span class="s1">ar2 </span><span class="s3">= </span><span class="s1">ar2</span><span class="s3">.</span><span class="s1">reshape</span><span class="s3">(-</span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">kind </span><span class="s2">not in </span><span class="s3">{</span><span class="s2">None</span><span class="s3">, </span><span class="s4">'sort'</span><span class="s3">, </span><span class="s4">'table'</span><span class="s3">}:</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+            <span class="s4">f&quot;Invalid kind: '</span><span class="s2">{</span><span class="s1">kind</span><span class="s2">}</span><span class="s4">'. Please use None, 'sort' or 'table'.&quot;</span><span class="s3">)</span>
+
+    <span class="s5"># Can use the table method if all arrays are integers or boolean:</span>
+    <span class="s1">is_int_arrays </span><span class="s3">= </span><span class="s1">all</span><span class="s3">(</span><span class="s1">ar</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s2">in </span><span class="s3">(</span><span class="s4">&quot;u&quot;</span><span class="s3">, </span><span class="s4">&quot;i&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">) </span><span class="s2">for </span><span class="s1">ar </span><span class="s2">in </span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">ar2</span><span class="s3">))</span>
+    <span class="s1">use_table_method </span><span class="s3">= </span><span class="s1">is_int_arrays </span><span class="s2">and </span><span class="s1">kind </span><span class="s2">in </span><span class="s3">{</span><span class="s2">None</span><span class="s3">, </span><span class="s4">'table'</span><span class="s3">}</span>
+
+    <span class="s2">if </span><span class="s1">use_table_method</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">ar2</span><span class="s3">.</span><span class="s1">size </span><span class="s3">== </span><span class="s6">0</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">invert</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ones_like</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">bool</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">np</span><span class="s3">.</span><span class="s1">zeros_like</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">bool</span><span class="s3">)</span>
+
+        <span class="s5"># Convert booleans to uint8 so we can use the fast integer algorithm</span>
+        <span class="s2">if </span><span class="s1">ar1</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">bool</span><span class="s3">:</span>
+            <span class="s1">ar1 </span><span class="s3">= </span><span class="s1">ar1</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint8</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">ar2</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">bool</span><span class="s3">:</span>
+            <span class="s1">ar2 </span><span class="s3">= </span><span class="s1">ar2</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint8</span><span class="s3">)</span>
+
+        <span class="s1">ar2_min </span><span class="s3">= </span><span class="s1">int</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">min</span><span class="s3">(</span><span class="s1">ar2</span><span class="s3">))</span>
+        <span class="s1">ar2_max </span><span class="s3">= </span><span class="s1">int</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">max</span><span class="s3">(</span><span class="s1">ar2</span><span class="s3">))</span>
+
+        <span class="s1">ar2_range </span><span class="s3">= </span><span class="s1">ar2_max </span><span class="s3">- </span><span class="s1">ar2_min</span>
+
+        <span class="s5"># Constraints on whether we can actually use the table method:</span>
+        <span class="s5">#  1. Assert memory usage is not too large</span>
+        <span class="s1">below_memory_constraint </span><span class="s3">= </span><span class="s1">ar2_range </span><span class="s3">&lt;= </span><span class="s6">6 </span><span class="s3">* (</span><span class="s1">ar1</span><span class="s3">.</span><span class="s1">size </span><span class="s3">+ </span><span class="s1">ar2</span><span class="s3">.</span><span class="s1">size</span><span class="s3">)</span>
+        <span class="s5">#  2. Check overflows for (ar2 - ar2_min); dtype=ar2.dtype</span>
+        <span class="s1">range_safe_from_overflow </span><span class="s3">= </span><span class="s1">ar2_range </span><span class="s3">&lt;= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s1">ar2</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">).</span><span class="s1">max</span>
+
+        <span class="s5"># Optimal performance is for approximately</span>
+        <span class="s5"># log10(size) &gt; (log10(range) - 2.27) / 0.927.</span>
+        <span class="s5"># However, here we set the requirement that by default</span>
+        <span class="s5"># the intermediate array can only be 6x</span>
+        <span class="s5"># the combined memory allocation of the original</span>
+        <span class="s5"># arrays. See discussion on</span>
+        <span class="s5"># https://github.com/numpy/numpy/pull/12065.</span>
+
+        <span class="s2">if </span><span class="s3">(</span>
+            <span class="s1">range_safe_from_overflow </span><span class="s2">and</span>
+            <span class="s3">(</span><span class="s1">below_memory_constraint </span><span class="s2">or </span><span class="s1">kind </span><span class="s3">== </span><span class="s4">'table'</span><span class="s3">)</span>
+        <span class="s3">):</span>
+
+            <span class="s2">if </span><span class="s1">invert</span><span class="s3">:</span>
+                <span class="s1">outgoing_array </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ones_like</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">bool</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">outgoing_array </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">zeros_like</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">bool</span><span class="s3">)</span>
+
+            <span class="s5"># Make elements 1 where the integer exists in ar2</span>
+            <span class="s2">if </span><span class="s1">invert</span><span class="s3">:</span>
+                <span class="s1">isin_helper_ar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ones</span><span class="s3">(</span><span class="s1">ar2_range </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">bool</span><span class="s3">)</span>
+                <span class="s1">isin_helper_ar</span><span class="s3">[</span><span class="s1">ar2 </span><span class="s3">- </span><span class="s1">ar2_min</span><span class="s3">] = </span><span class="s6">0</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">isin_helper_ar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">zeros</span><span class="s3">(</span><span class="s1">ar2_range </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">bool</span><span class="s3">)</span>
+                <span class="s1">isin_helper_ar</span><span class="s3">[</span><span class="s1">ar2 </span><span class="s3">- </span><span class="s1">ar2_min</span><span class="s3">] = </span><span class="s6">1</span>
+
+            <span class="s5"># Mask out elements we know won't work</span>
+            <span class="s1">basic_mask </span><span class="s3">= (</span><span class="s1">ar1 </span><span class="s3">&lt;= </span><span class="s1">ar2_max</span><span class="s3">) &amp; (</span><span class="s1">ar1 </span><span class="s3">&gt;= </span><span class="s1">ar2_min</span><span class="s3">)</span>
+            <span class="s1">in_range_ar1 </span><span class="s3">= </span><span class="s1">ar1</span><span class="s3">[</span><span class="s1">basic_mask</span><span class="s3">]</span>
+            <span class="s2">if </span><span class="s1">in_range_ar1</span><span class="s3">.</span><span class="s1">size </span><span class="s3">== </span><span class="s6">0</span><span class="s3">:</span>
+                <span class="s5"># Nothing more to do, since all values are out of range.</span>
+                <span class="s2">return </span><span class="s1">outgoing_array</span>
+
+            <span class="s5"># Unfortunately, ar2_min can be out of range for `intp` even</span>
+            <span class="s5"># if the calculation result must fit in range (and be positive).</span>
+            <span class="s5"># In that case, use ar2.dtype which must work for all unmasked</span>
+            <span class="s5"># values.</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">ar2_min </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">ar2_min</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">)</span>
+                <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span>
+            <span class="s2">except </span><span class="s1">OverflowError</span><span class="s3">:</span>
+                <span class="s1">dtype </span><span class="s3">= </span><span class="s1">ar2</span><span class="s3">.</span><span class="s1">dtype</span>
+
+            <span class="s1">out </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty_like</span><span class="s3">(</span><span class="s1">in_range_ar1</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">)</span>
+            <span class="s1">outgoing_array</span><span class="s3">[</span><span class="s1">basic_mask</span><span class="s3">] = </span><span class="s1">isin_helper_ar</span><span class="s3">[</span>
+                    <span class="s1">np</span><span class="s3">.</span><span class="s1">subtract</span><span class="s3">(</span><span class="s1">in_range_ar1</span><span class="s3">, </span><span class="s1">ar2_min</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">,</span>
+                                <span class="s1">out</span><span class="s3">=</span><span class="s1">out</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s4">&quot;unsafe&quot;</span><span class="s3">)]</span>
+
+            <span class="s2">return </span><span class="s1">outgoing_array</span>
+        <span class="s2">elif </span><span class="s1">kind </span><span class="s3">== </span><span class="s4">'table'</span><span class="s3">:  </span><span class="s5"># not range_safe_from_overflow</span>
+            <span class="s2">raise </span><span class="s1">RuntimeError</span><span class="s3">(</span>
+                <span class="s4">&quot;You have specified kind='table', &quot;</span>
+                <span class="s4">&quot;but the range of values in `ar2` or `ar1` exceed the &quot;</span>
+                <span class="s4">&quot;maximum integer of the datatype. &quot;</span>
+                <span class="s4">&quot;Please set `kind` to None or 'sort'.&quot;</span>
+            <span class="s3">)</span>
+    <span class="s2">elif </span><span class="s1">kind </span><span class="s3">== </span><span class="s4">'table'</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+            <span class="s4">&quot;The 'table' method is only &quot;</span>
+            <span class="s4">&quot;supported for boolean or integer arrays. &quot;</span>
+            <span class="s4">&quot;Please select 'sort' or None for kind.&quot;</span>
+        <span class="s3">)</span>
+
+    <span class="s5"># Check if one of the arrays may contain arbitrary objects</span>
+    <span class="s1">contains_object </span><span class="s3">= </span><span class="s1">ar1</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">hasobject </span><span class="s2">or </span><span class="s1">ar2</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">hasobject</span>
+
+    <span class="s5"># This code is run when</span>
+    <span class="s5"># a) the first condition is true, making the code significantly faster</span>
+    <span class="s5"># b) the second condition is true (i.e. `ar1` or `ar2` may contain</span>
+    <span class="s5">#    arbitrary objects), since then sorting is not guaranteed to work</span>
+    <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">ar2</span><span class="s3">) &lt; </span><span class="s6">10 </span><span class="s3">* </span><span class="s1">len</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">) ** </span><span class="s6">0.145 </span><span class="s2">or </span><span class="s1">contains_object</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">invert</span><span class="s3">:</span>
+            <span class="s1">mask </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ones</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">bool</span><span class="s3">)</span>
+            <span class="s2">for </span><span class="s1">a </span><span class="s2">in </span><span class="s1">ar2</span><span class="s3">:</span>
+                <span class="s1">mask </span><span class="s3">&amp;= (</span><span class="s1">ar1 </span><span class="s3">!= </span><span class="s1">a</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">mask </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">zeros</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">bool</span><span class="s3">)</span>
+            <span class="s2">for </span><span class="s1">a </span><span class="s2">in </span><span class="s1">ar2</span><span class="s3">:</span>
+                <span class="s1">mask </span><span class="s3">|= (</span><span class="s1">ar1 </span><span class="s3">== </span><span class="s1">a</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">mask</span>
+
+    <span class="s5"># Otherwise use sorting</span>
+    <span class="s2">if not </span><span class="s1">assume_unique</span><span class="s3">:</span>
+        <span class="s1">ar1</span><span class="s3">, </span><span class="s1">rev_idx </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">unique</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">return_inverse</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+        <span class="s1">ar2 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">unique</span><span class="s3">(</span><span class="s1">ar2</span><span class="s3">)</span>
+
+    <span class="s1">ar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">concatenate</span><span class="s3">((</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">ar2</span><span class="s3">))</span>
+    <span class="s5"># We need this to be a stable sort, so always use 'mergesort'</span>
+    <span class="s5"># here. The values from the first array should always come before</span>
+    <span class="s5"># the values from the second array.</span>
+    <span class="s1">order </span><span class="s3">= </span><span class="s1">ar</span><span class="s3">.</span><span class="s1">argsort</span><span class="s3">(</span><span class="s1">kind</span><span class="s3">=</span><span class="s4">'mergesort'</span><span class="s3">)</span>
+    <span class="s1">sar </span><span class="s3">= </span><span class="s1">ar</span><span class="s3">[</span><span class="s1">order</span><span class="s3">]</span>
+    <span class="s2">if </span><span class="s1">invert</span><span class="s3">:</span>
+        <span class="s1">bool_ar </span><span class="s3">= (</span><span class="s1">sar</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:] != </span><span class="s1">sar</span><span class="s3">[:-</span><span class="s6">1</span><span class="s3">])</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">bool_ar </span><span class="s3">= (</span><span class="s1">sar</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:] == </span><span class="s1">sar</span><span class="s3">[:-</span><span class="s6">1</span><span class="s3">])</span>
+    <span class="s1">flag </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">concatenate</span><span class="s3">((</span><span class="s1">bool_ar</span><span class="s3">, [</span><span class="s1">invert</span><span class="s3">]))</span>
+    <span class="s1">ret </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty</span><span class="s3">(</span><span class="s1">ar</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">bool</span><span class="s3">)</span>
+    <span class="s1">ret</span><span class="s3">[</span><span class="s1">order</span><span class="s3">] = </span><span class="s1">flag</span>
+
+    <span class="s2">if </span><span class="s1">assume_unique</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">ret</span><span class="s3">[:</span><span class="s1">len</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">)]</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">ret</span><span class="s3">[</span><span class="s1">rev_idx</span><span class="s3">]</span>
+
+
+<span class="s2">def </span><span class="s1">_isin_dispatcher</span><span class="s3">(</span><span class="s1">element</span><span class="s3">, </span><span class="s1">test_elements</span><span class="s3">, </span><span class="s1">assume_unique</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">invert</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                     <span class="s3">*, </span><span class="s1">kind</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s2">return </span><span class="s3">(</span><span class="s1">element</span><span class="s3">, </span><span class="s1">test_elements</span><span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">array_function_dispatch</span><span class="s3">(</span><span class="s1">_isin_dispatcher</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">isin</span><span class="s3">(</span><span class="s1">element</span><span class="s3">, </span><span class="s1">test_elements</span><span class="s3">, </span><span class="s1">assume_unique</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, </span><span class="s1">invert</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, *,</span>
+         <span class="s1">kind</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Calculates ``element in test_elements``, broadcasting over `element` only. 
+    Returns a boolean array of the same shape as `element` that is True 
+    where an element of `element` is in `test_elements` and False otherwise. 
+ 
+    Parameters 
+    ---------- 
+    element : array_like 
+        Input array. 
+    test_elements : array_like 
+        The values against which to test each value of `element`. 
+        This argument is flattened if it is an array or array_like. 
+        See notes for behavior with non-array-like parameters. 
+    assume_unique : bool, optional 
+        If True, the input arrays are both assumed to be unique, which 
+        can speed up the calculation.  Default is False. 
+    invert : bool, optional 
+        If True, the values in the returned array are inverted, as if 
+        calculating `element not in test_elements`. Default is False. 
+        ``np.isin(a, b, invert=True)`` is equivalent to (but faster 
+        than) ``np.invert(np.isin(a, b))``. 
+    kind : {None, 'sort', 'table'}, optional 
+        The algorithm to use. This will not affect the final result, 
+        but will affect the speed and memory use. The default, None, 
+        will select automatically based on memory considerations. 
+ 
+        * If 'sort', will use a mergesort-based approach. This will have 
+          a memory usage of roughly 6 times the sum of the sizes of 
+          `element` and `test_elements`, not accounting for size of dtypes. 
+        * If 'table', will use a lookup table approach similar 
+          to a counting sort. This is only available for boolean and 
+          integer arrays. This will have a memory usage of the 
+          size of `element` plus the max-min value of `test_elements`. 
+          `assume_unique` has no effect when the 'table' option is used. 
+        * If None, will automatically choose 'table' if 
+          the required memory allocation is less than or equal to 
+          6 times the sum of the sizes of `element` and `test_elements`, 
+          otherwise will use 'sort'. This is done to not use 
+          a large amount of memory by default, even though 
+          'table' may be faster in most cases. If 'table' is chosen, 
+          `assume_unique` will have no effect. 
+ 
+ 
+    Returns 
+    ------- 
+    isin : ndarray, bool 
+        Has the same shape as `element`. The values `element[isin]` 
+        are in `test_elements`. 
+ 
+    Notes 
+    ----- 
+    `isin` is an element-wise function version of the python keyword `in`. 
+    ``isin(a, b)`` is roughly equivalent to 
+    ``np.array([item in b for item in a])`` if `a` and `b` are 1-D sequences. 
+ 
+    `element` and `test_elements` are converted to arrays if they are not 
+    already. If `test_elements` is a set (or other non-sequence collection) 
+    it will be converted to an object array with one element, rather than an 
+    array of the values contained in `test_elements`. This is a consequence 
+    of the `array` constructor's way of handling non-sequence collections. 
+    Converting the set to a list usually gives the desired behavior. 
+ 
+    Using ``kind='table'`` tends to be faster than `kind='sort'` if the 
+    following relationship is true: 
+    ``log10(len(test_elements)) &gt; 
+    (log10(max(test_elements)-min(test_elements)) - 2.27) / 0.927``, 
+    but may use greater memory. The default value for `kind` will 
+    be automatically selected based only on memory usage, so one may 
+    manually set ``kind='table'`` if memory constraints can be relaxed. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+    &gt;&gt;&gt; element = 2*np.arange(4).reshape((2, 2)) 
+    &gt;&gt;&gt; element 
+    array([[0, 2], 
+           [4, 6]]) 
+    &gt;&gt;&gt; test_elements = [1, 2, 4, 8] 
+    &gt;&gt;&gt; mask = np.isin(element, test_elements) 
+    &gt;&gt;&gt; mask 
+    array([[False,  True], 
+           [ True, False]]) 
+    &gt;&gt;&gt; element[mask] 
+    array([2, 4]) 
+ 
+    The indices of the matched values can be obtained with `nonzero`: 
+ 
+    &gt;&gt;&gt; np.nonzero(mask) 
+    (array([0, 1]), array([1, 0])) 
+ 
+    The test can also be inverted: 
+ 
+    &gt;&gt;&gt; mask = np.isin(element, test_elements, invert=True) 
+    &gt;&gt;&gt; mask 
+    array([[ True, False], 
+           [False,  True]]) 
+    &gt;&gt;&gt; element[mask] 
+    array([0, 6]) 
+ 
+    Because of how `array` handles sets, the following does not 
+    work as expected: 
+ 
+    &gt;&gt;&gt; test_set = {1, 2, 4, 8} 
+    &gt;&gt;&gt; np.isin(element, test_set) 
+    array([[False, False], 
+           [False, False]]) 
+ 
+    Casting the set to a list gives the expected result: 
+ 
+    &gt;&gt;&gt; np.isin(element, list(test_set)) 
+    array([[False,  True], 
+           [ True, False]]) 
+    &quot;&quot;&quot;</span>
+    <span class="s1">element </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">element</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">_isin</span><span class="s3">(</span><span class="s1">element</span><span class="s3">, </span><span class="s1">test_elements</span><span class="s3">, </span><span class="s1">assume_unique</span><span class="s3">=</span><span class="s1">assume_unique</span><span class="s3">,</span>
+                 <span class="s1">invert</span><span class="s3">=</span><span class="s1">invert</span><span class="s3">, </span><span class="s1">kind</span><span class="s3">=</span><span class="s1">kind</span><span class="s3">).</span><span class="s1">reshape</span><span class="s3">(</span><span class="s1">element</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_union1d_dispatcher</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">ar2</span><span class="s3">):</span>
+    <span class="s2">return </span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">ar2</span><span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">array_function_dispatch</span><span class="s3">(</span><span class="s1">_union1d_dispatcher</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">union1d</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">ar2</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Find the union of two arrays. 
+ 
+    Return the unique, sorted array of values that are in either of the two 
+    input arrays. 
+ 
+    Parameters 
+    ---------- 
+    ar1, ar2 : array_like 
+        Input arrays. They are flattened if they are not already 1D. 
+ 
+    Returns 
+    ------- 
+    union1d : ndarray 
+        Unique, sorted union of the input arrays. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+    &gt;&gt;&gt; np.union1d([-1, 0, 1], [-2, 0, 2]) 
+    array([-2, -1,  0,  1,  2]) 
+ 
+    To find the union of more than two arrays, use functools.reduce: 
+ 
+    &gt;&gt;&gt; from functools import reduce 
+    &gt;&gt;&gt; reduce(np.union1d, ([1, 3, 4, 3], [3, 1, 2, 1], [6, 3, 4, 2])) 
+    array([1, 2, 3, 4, 6]) 
+    &quot;&quot;&quot;</span>
+    <span class="s2">return </span><span class="s1">unique</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">concatenate</span><span class="s3">((</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">ar2</span><span class="s3">), </span><span class="s1">axis</span><span class="s3">=</span><span class="s2">None</span><span class="s3">))</span>
+
+
+<span class="s2">def </span><span class="s1">_setdiff1d_dispatcher</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">ar2</span><span class="s3">, </span><span class="s1">assume_unique</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s2">return </span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">ar2</span><span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">array_function_dispatch</span><span class="s3">(</span><span class="s1">_setdiff1d_dispatcher</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">setdiff1d</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">ar2</span><span class="s3">, </span><span class="s1">assume_unique</span><span class="s3">=</span><span class="s2">False</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Find the set difference of two arrays. 
+ 
+    Return the unique values in `ar1` that are not in `ar2`. 
+ 
+    Parameters 
+    ---------- 
+    ar1 : array_like 
+        Input array. 
+    ar2 : array_like 
+        Input comparison array. 
+    assume_unique : bool 
+        If True, the input arrays are both assumed to be unique, which 
+        can speed up the calculation.  Default is False. 
+ 
+    Returns 
+    ------- 
+    setdiff1d : ndarray 
+        1D array of values in `ar1` that are not in `ar2`. The result 
+        is sorted when `assume_unique=False`, but otherwise only sorted 
+        if the input is sorted. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; import numpy as np 
+    &gt;&gt;&gt; a = np.array([1, 2, 3, 2, 4, 1]) 
+    &gt;&gt;&gt; b = np.array([3, 4, 5, 6]) 
+    &gt;&gt;&gt; np.setdiff1d(a, b) 
+    array([1, 2]) 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">assume_unique</span><span class="s3">:</span>
+        <span class="s1">ar1 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">).</span><span class="s1">ravel</span><span class="s3">()</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">ar1 </span><span class="s3">= </span><span class="s1">unique</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">)</span>
+        <span class="s1">ar2 </span><span class="s3">= </span><span class="s1">unique</span><span class="s3">(</span><span class="s1">ar2</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">ar1</span><span class="s3">[</span><span class="s1">_isin</span><span class="s3">(</span><span class="s1">ar1</span><span class="s3">, </span><span class="s1">ar2</span><span class="s3">, </span><span class="s1">assume_unique</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">invert</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)]</span>
+</pre>
+</body>
+</html>

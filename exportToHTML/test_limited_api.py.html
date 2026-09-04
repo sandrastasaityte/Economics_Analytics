@@ -1,0 +1,276 @@
+<html>
+<head>
+<title>test_limited_api.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_limited_api.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">importlib</span>
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">shutil</span>
+<span class="s0">import </span><span class="s1">subprocess</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">import </span><span class="s1">sysconfig</span>
+
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">testing </span><span class="s0">import </span><span class="s1">IS_EDITABLE</span><span class="s2">, </span><span class="s1">IS_WASM</span><span class="s2">, </span><span class="s1">NOGIL_BUILD</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">testing</span><span class="s2">.</span><span class="s1">_private</span><span class="s2">.</span><span class="s1">utils </span><span class="s0">import </span><span class="s1">run_subprocess</span>
+
+<span class="s3"># This import is copied from random.tests.test_extending</span>
+<span class="s0">try</span><span class="s2">:</span>
+    <span class="s0">import </span><span class="s1">cython</span>
+    <span class="s0">from </span><span class="s1">Cython</span><span class="s2">.</span><span class="s1">Compiler</span><span class="s2">.</span><span class="s1">Version </span><span class="s0">import </span><span class="s1">version </span><span class="s0">as </span><span class="s1">cython_version</span>
+<span class="s0">except </span><span class="s1">ImportError</span><span class="s2">:</span>
+    <span class="s1">cython </span><span class="s2">= </span><span class="s0">None</span>
+<span class="s0">else</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">_utils </span><span class="s0">import </span><span class="s1">_pep440</span>
+
+    <span class="s3"># Note: keep in sync with the one in pyproject.toml</span>
+    <span class="s1">required_version </span><span class="s2">= </span><span class="s4">&quot;3.1.0&quot;</span>
+    <span class="s0">if </span><span class="s1">_pep440</span><span class="s2">.</span><span class="s1">parse</span><span class="s2">(</span><span class="s1">cython_version</span><span class="s2">) &lt; </span><span class="s1">_pep440</span><span class="s2">.</span><span class="s1">Version</span><span class="s2">(</span><span class="s1">required_version</span><span class="s2">):</span>
+        <span class="s3"># too old or wrong cython, skip the test</span>
+        <span class="s1">cython </span><span class="s2">= </span><span class="s0">None</span>
+
+<span class="s1">pytestmark </span><span class="s2">= </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span><span class="s1">cython </span><span class="s0">is None</span><span class="s2">, </span><span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;requires cython&quot;</span><span class="s2">)</span>
+
+
+<span class="s0">if </span><span class="s1">IS_EDITABLE</span><span class="s2">:</span>
+    <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span>
+        <span class="s4">&quot;Editable install doesn't support tests with a compile step&quot;</span><span class="s2">,</span>
+        <span class="s1">allow_module_level</span><span class="s2">=</span><span class="s0">True</span>
+    <span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">fixture</span><span class="s2">(</span><span class="s1">scope</span><span class="s2">=</span><span class="s4">'module'</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">install_temp</span><span class="s2">(</span><span class="s1">tmpdir_factory</span><span class="s2">):</span>
+    <span class="s3"># Based in part on test_cython from random.tests.test_extending</span>
+    <span class="s0">if </span><span class="s1">IS_WASM</span><span class="s2">:</span>
+        <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span><span class="s4">&quot;No subprocess&quot;</span><span class="s2">)</span>
+
+    <span class="s3"># Build against a copy of the sources placed next to the build dir:</span>
+    <span class="s3"># meson refers to sources via paths relative to the build dir, and on</span>
+    <span class="s3"># Windows the unnormalized cwd + `..` chain joining the deeply nested</span>
+    <span class="s3"># pytest tmp dir and site-packages can exceed MAX_PATH, failing the</span>
+    <span class="s3"># compile with &quot;Cannot open source file&quot;.</span>
+    <span class="s1">tmp_root </span><span class="s2">= </span><span class="s1">tmpdir_factory</span><span class="s2">.</span><span class="s1">mktemp</span><span class="s2">(</span><span class="s4">&quot;limited_api&quot;</span><span class="s2">)</span>
+    <span class="s1">srcdir </span><span class="s2">= </span><span class="s1">str</span><span class="s2">(</span><span class="s1">tmp_root </span><span class="s2">/ </span><span class="s4">&quot;src&quot;</span><span class="s2">)</span>
+    <span class="s1">shutil</span><span class="s2">.</span><span class="s1">copytree</span><span class="s2">(</span>
+        <span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">dirname</span><span class="s2">(</span><span class="s1">__file__</span><span class="s2">), </span><span class="s4">'examples'</span><span class="s2">, </span><span class="s4">'limited_api'</span><span class="s2">),</span>
+        <span class="s1">srcdir</span><span class="s2">)</span>
+    <span class="s1">build_dir </span><span class="s2">= </span><span class="s1">tmp_root </span><span class="s2">/ </span><span class="s4">&quot;build&quot;</span>
+    <span class="s1">os</span><span class="s2">.</span><span class="s1">makedirs</span><span class="s2">(</span><span class="s1">build_dir</span><span class="s2">, </span><span class="s1">exist_ok</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s3"># Ensure we use the correct Python interpreter even when `meson` is</span>
+    <span class="s3"># installed in a different Python environment (see gh-24956)</span>
+    <span class="s1">native_file </span><span class="s2">= </span><span class="s1">str</span><span class="s2">(</span><span class="s1">build_dir </span><span class="s2">/ </span><span class="s4">'interpreter-native-file.ini'</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">native_file</span><span class="s2">, </span><span class="s4">'w'</span><span class="s2">) </span><span class="s0">as </span><span class="s1">f</span><span class="s2">:</span>
+        <span class="s1">f</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s4">&quot;[binaries]</span><span class="s0">\n</span><span class="s4">&quot;</span><span class="s2">)</span>
+        <span class="s1">f</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s4">f&quot;python = '</span><span class="s0">{</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">executable</span><span class="s0">}</span><span class="s4">'</span><span class="s0">\n</span><span class="s4">&quot;</span><span class="s2">)</span>
+        <span class="s1">f</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s4">f&quot;python3 = '</span><span class="s0">{</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">executable</span><span class="s0">}</span><span class="s4">'&quot;</span><span class="s2">)</span>
+
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s1">subprocess</span><span class="s2">.</span><span class="s1">check_call</span><span class="s2">([</span><span class="s4">&quot;meson&quot;</span><span class="s2">, </span><span class="s4">&quot;--version&quot;</span><span class="s2">])</span>
+    <span class="s0">except </span><span class="s1">FileNotFoundError</span><span class="s2">:</span>
+        <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span><span class="s4">&quot;No usable 'meson' found&quot;</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">sysconfig</span><span class="s2">.</span><span class="s1">get_platform</span><span class="s2">() == </span><span class="s4">&quot;win-arm64&quot;</span><span class="s2">:</span>
+        <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span><span class="s4">&quot;Meson unable to find MSVC linker on win-arm64&quot;</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">platform </span><span class="s2">== </span><span class="s4">&quot;win32&quot;</span><span class="s2">:</span>
+        <span class="s1">run_subprocess</span><span class="s2">([</span><span class="s4">&quot;meson&quot;</span><span class="s2">, </span><span class="s4">&quot;setup&quot;</span><span class="s2">,</span>
+                        <span class="s4">&quot;--werror&quot;</span><span class="s2">,</span>
+                        <span class="s4">&quot;--buildtype=release&quot;</span><span class="s2">,</span>
+                        <span class="s4">&quot;--vsenv&quot;</span><span class="s2">, </span><span class="s4">&quot;--native-file&quot;</span><span class="s2">, </span><span class="s1">native_file</span><span class="s2">,</span>
+                        <span class="s1">str</span><span class="s2">(</span><span class="s1">srcdir</span><span class="s2">)],</span>
+                       <span class="s1">build_dir</span><span class="s2">)</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">run_subprocess</span><span class="s2">([</span><span class="s4">&quot;meson&quot;</span><span class="s2">, </span><span class="s4">&quot;setup&quot;</span><span class="s2">, </span><span class="s4">&quot;--werror&quot;</span><span class="s2">,</span>
+                        <span class="s4">&quot;--native-file&quot;</span><span class="s2">, </span><span class="s1">native_file</span><span class="s2">, </span><span class="s1">str</span><span class="s2">(</span><span class="s1">srcdir</span><span class="s2">)],</span>
+                       <span class="s1">build_dir</span><span class="s2">)</span>
+    <span class="s1">run_subprocess</span><span class="s2">([</span><span class="s4">&quot;meson&quot;</span><span class="s2">, </span><span class="s4">&quot;compile&quot;</span><span class="s2">, </span><span class="s4">&quot;-vv&quot;</span><span class="s2">], </span><span class="s1">build_dir</span><span class="s2">)</span>
+
+    <span class="s1">sys</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">build_dir</span><span class="s2">))</span>
+
+
+<span class="s0">def </span><span class="s1">_check_api_module</span><span class="s2">(</span><span class="s1">mod</span><span class="s2">, </span><span class="s1">cython</span><span class="s2">=</span><span class="s0">False</span><span class="s2">):</span>
+    <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ones</span><span class="s2">((</span><span class="s5">200</span><span class="s2">, </span><span class="s5">200</span><span class="s2">))</span>
+    <span class="s0">assert </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">nonzero</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">) == </span><span class="s5">200 </span><span class="s2">* </span><span class="s5">200</span>
+
+    <span class="s3"># Legacy single-array iterator: PyArray_ITER_NEXT / _DATA / _NOTDONE.</span>
+    <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s5">12.0</span><span class="s2">).</span><span class="s1">reshape</span><span class="s2">(</span><span class="s5">3</span><span class="s2">, </span><span class="s5">4</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">iter_next</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">) == </span><span class="s5">66.0</span>
+    <span class="s0">assert </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">iter_goto1d</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s5">5</span><span class="s2">) == </span><span class="s5">5.0</span>
+    <span class="s0">assert </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">iter_goto1d</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, -</span><span class="s5">1</span><span class="s2">) == </span><span class="s5">11.0</span>
+    <span class="s0">assert </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">iter_reset</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">) == </span><span class="s5">66.0</span>
+    <span class="s0">assert </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">iter_goto</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, (</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">)) == </span><span class="s5">6.0</span>
+    <span class="s0">assert </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">iter_goto</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, (</span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">)) == </span><span class="s5">11.0</span>
+
+    <span class="s3"># Broadcasting multi-iterator.</span>
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s5">3.0</span><span class="s2">).</span><span class="s1">reshape</span><span class="s2">(</span><span class="s5">3</span><span class="s2">, </span><span class="s5">1</span><span class="s2">)</span>
+    <span class="s1">b </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s5">4.0</span><span class="s2">).</span><span class="s1">reshape</span><span class="s2">(</span><span class="s5">1</span><span class="s2">, </span><span class="s5">4</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">multi_iter_next</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">) == </span><span class="s1">float</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">sum</span><span class="s2">(</span><span class="s1">a </span><span class="s2">+ </span><span class="s1">b</span><span class="s2">))</span>
+    <span class="s0">if not </span><span class="s1">cython</span><span class="s2">:</span>
+        <span class="s1">va</span><span class="s2">, </span><span class="s1">vb </span><span class="s2">= </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">multi_iter_goto</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, (</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">))</span>
+        <span class="s0">assert </span><span class="s1">va </span><span class="s2">== </span><span class="s5">1.0 </span><span class="s0">and </span><span class="s1">vb </span><span class="s2">== </span><span class="s5">2.0</span>
+    <span class="s1">va</span><span class="s2">, </span><span class="s1">vb </span><span class="s2">= </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">multi_iter_goto1d</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s5">6</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">va </span><span class="s2">== </span><span class="s5">1.0 </span><span class="s0">and </span><span class="s1">vb </span><span class="s2">== </span><span class="s5">2.0</span>
+
+    <span class="s1">a </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s5">6.0</span><span class="s2">).</span><span class="s1">reshape</span><span class="s2">(</span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">)</span>
+    <span class="s1">b </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">((</span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">))</span>
+    <span class="s0">assert </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">multi_iter_nexti</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s5">3</span><span class="s2">) == </span><span class="s5">3.0</span>
+
+    <span class="s0">if </span><span class="s1">cython</span><span class="s2">:</span>
+        <span class="s3"># Datetime / timedelta scalar accessors (.pxd helpers).</span>
+        <span class="s1">dt </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">datetime64</span><span class="s2">(</span><span class="s4">&quot;2021-01-01&quot;</span><span class="s2">, </span><span class="s4">&quot;D&quot;</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">get_datetime_value</span><span class="s2">(</span><span class="s1">dt</span><span class="s2">) == </span><span class="s1">dt</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s4">&quot;int64&quot;</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">get_datetime_unit</span><span class="s2">(</span><span class="s1">dt</span><span class="s2">) == </span><span class="s5">4</span>
+        <span class="s0">assert </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">is_datetime64</span><span class="s2">(</span><span class="s1">dt</span><span class="s2">)</span>
+        <span class="s0">assert not </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">is_timedelta64</span><span class="s2">(</span><span class="s1">dt</span><span class="s2">)</span>
+
+        <span class="s3"># A plain seconds timedelta: base NPY_FR_s, unit multiplier 1.</span>
+        <span class="s1">td </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">timedelta64</span><span class="s2">(</span><span class="s5">5</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">get_timedelta_value</span><span class="s2">(</span><span class="s1">td</span><span class="s2">) == </span><span class="s5">5</span>
+        <span class="s0">assert </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">is_timedelta64</span><span class="s2">(</span><span class="s1">td</span><span class="s2">)</span>
+        <span class="s0">assert not </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">is_datetime64</span><span class="s2">(</span><span class="s1">td</span><span class="s2">)</span>
+
+        <span class="s3"># A non-unit multiplier exercises the metadata `num` field.</span>
+        <span class="s1">td </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">timedelta64</span><span class="s2">(</span><span class="s5">1000</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span><span class="s4">&quot;timedelta64[10ms]&quot;</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">get_timedelta_value</span><span class="s2">(</span><span class="s1">td</span><span class="s2">) == </span><span class="s1">td</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s4">&quot;int64&quot;</span><span class="s2">)</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s3"># PyDataType_FLAGS / PyDataType_C_METADATA on datetime descriptors.</span>
+        <span class="s1">dt </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">&quot;2021-01-01&quot;</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s4">&quot;datetime64[D]&quot;</span><span class="s2">)</span>
+        <span class="s1">flags</span><span class="s2">, </span><span class="s1">base</span><span class="s2">, </span><span class="s1">num </span><span class="s2">= </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">datetime_metadata</span><span class="s2">(</span><span class="s1">dt</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">flags </span><span class="s2">== </span><span class="s1">dt</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">flags</span>
+        <span class="s0">assert </span><span class="s1">base </span><span class="s2">== </span><span class="s5">4    </span><span class="s3"># NPY_FR_D</span>
+        <span class="s0">assert </span><span class="s1">num </span><span class="s2">== </span><span class="s5">1</span>
+
+        <span class="s3"># A plain seconds timedelta: base NPY_FR_s, unit multiplier 1.</span>
+        <span class="s1">td </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s5">5</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s4">&quot;timedelta64[s]&quot;</span><span class="s2">)</span>
+        <span class="s1">flags</span><span class="s2">, </span><span class="s1">base</span><span class="s2">, </span><span class="s1">num </span><span class="s2">= </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">datetime_metadata</span><span class="s2">(</span><span class="s1">td</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">flags </span><span class="s2">== </span><span class="s1">td</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">flags</span>
+        <span class="s0">assert </span><span class="s1">base </span><span class="s2">== </span><span class="s5">7    </span><span class="s3"># NPY_FR_s</span>
+        <span class="s0">assert </span><span class="s1">num </span><span class="s2">== </span><span class="s5">1</span>
+
+        <span class="s3"># A non-unit multiplier exercises the metadata `num` field.</span>
+        <span class="s1">td </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s5">1000</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s4">&quot;timedelta64[ms]&quot;</span><span class="s2">).</span><span class="s1">astype</span><span class="s2">(</span>
+            <span class="s4">&quot;timedelta64[10ms]&quot;</span><span class="s2">)</span>
+        <span class="s1">flags</span><span class="s2">, </span><span class="s1">base</span><span class="s2">, </span><span class="s1">num </span><span class="s2">= </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">datetime_metadata</span><span class="s2">(</span><span class="s1">td</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">flags </span><span class="s2">== </span><span class="s1">td</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">flags</span>
+        <span class="s0">assert </span><span class="s1">base </span><span class="s2">== </span><span class="s5">8    </span><span class="s3"># NPY_FR_ms</span>
+        <span class="s0">assert </span><span class="s1">num </span><span class="s2">== </span><span class="s5">10</span>
+
+        <span class="s3"># Non-datetime descriptors have no c_metadata and are rejected.</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">RuntimeError</span><span class="s2">):</span>
+            <span class="s1">mod</span><span class="s2">.</span><span class="s1">datetime_metadata</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s5">3</span><span class="s2">))</span>
+
+        <span class="s3"># NpyString allocator API; under abi3t PyArray_StringDTypeObject is</span>
+        <span class="s3"># opaque and only the descriptor object pointer is passed. Absent</span>
+        <span class="s3"># when the module targets NumPy &lt; 2.0 (the &quot;default&quot; target).</span>
+        <span class="s0">if </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">mod</span><span class="s2">, </span><span class="s4">&quot;stringdtype_load&quot;</span><span class="s2">):</span>
+            <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">&quot;hello&quot;</span><span class="s2">, </span><span class="s4">&quot;world&quot;</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtypes</span><span class="s2">.</span><span class="s1">StringDType</span><span class="s2">())</span>
+            <span class="s0">assert </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">stringdtype_load</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">) == </span><span class="s4">&quot;hello&quot;</span>
+            <span class="s3"># A long string is stored on the heap, so loading it</span>
+            <span class="s3"># dereferences the allocator acquired from the descriptor.</span>
+            <span class="s1">text </span><span class="s2">= </span><span class="s4">&quot;numpy&quot; </span><span class="s2">* </span><span class="s5">20</span>
+            <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s1">text</span><span class="s2">, </span><span class="s4">&quot;world&quot;</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtypes</span><span class="s2">.</span><span class="s1">StringDType</span><span class="s2">())</span>
+            <span class="s0">assert </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">stringdtype_load</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">) == </span><span class="s1">text</span>
+            <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s0">None</span><span class="s2">, </span><span class="s4">&quot;world&quot;</span><span class="s2">],</span>
+                           <span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtypes</span><span class="s2">.</span><span class="s1">StringDType</span><span class="s2">(</span><span class="s1">na_object</span><span class="s2">=</span><span class="s0">None</span><span class="s2">))</span>
+            <span class="s0">assert </span><span class="s1">mod</span><span class="s2">.</span><span class="s1">stringdtype_load</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">) </span><span class="s0">is None</span>
+
+
+<span class="s3"># Test limited API extension modules for all supported Python and NumPy versions</span>
+<span class="s3"># The _PY_ABI3_VERSIONS and _NPY_TARGET_VERSIONS lists should be kept in sync</span>
+<span class="s3"># with the lists defined in meson.build, and the test should be updated</span>
+<span class="s3"># if new versions are added here.</span>
+<span class="s3"># The special &quot;default&quot; entry builds without defining NPY_TARGET_VERSION at all,</span>
+<span class="s3"># which exercises the path where numpyconfig.h picks the current API version.</span>
+<span class="s1">_PY_ABI3_VERSIONS </span><span class="s2">= [</span><span class="s4">&quot;3.9&quot;</span><span class="s2">, </span><span class="s4">&quot;3.10&quot;</span><span class="s2">, </span><span class="s4">&quot;3.11&quot;</span><span class="s2">, </span><span class="s4">&quot;3.12&quot;</span><span class="s2">, </span><span class="s4">&quot;3.13&quot;</span><span class="s2">, </span><span class="s4">&quot;3.14&quot;</span><span class="s2">, </span><span class="s4">&quot;3.15&quot;</span><span class="s2">]</span>
+<span class="s1">_NPY_TARGET_VERSIONS </span><span class="s2">= [</span><span class="s4">&quot;2.0&quot;</span><span class="s2">, </span><span class="s4">&quot;2.1&quot;</span><span class="s2">, </span><span class="s4">&quot;2.2&quot;</span><span class="s2">, </span><span class="s4">&quot;2.3&quot;</span><span class="s2">, </span><span class="s4">&quot;2.4&quot;</span><span class="s2">, </span><span class="s4">&quot;2.5&quot;</span><span class="s2">, </span><span class="s4">&quot;default&quot;</span><span class="s2">]</span>
+
+<span class="s0">def </span><span class="s1">_module_names</span><span class="s2">(</span><span class="s1">prefix</span><span class="s2">, </span><span class="s1">abi3_versions</span><span class="s2">):</span>
+    <span class="s1">names </span><span class="s2">= []</span>
+    <span class="s0">for </span><span class="s1">py_ver </span><span class="s0">in </span><span class="s1">abi3_versions</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">version_info </span><span class="s2">&lt; </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">map</span><span class="s2">(</span><span class="s1">int</span><span class="s2">, </span><span class="s1">py_ver</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s4">'.'</span><span class="s2">))):</span>
+            <span class="s0">continue</span>
+        <span class="s1">py </span><span class="s2">= </span><span class="s1">py_ver</span><span class="s2">.</span><span class="s1">replace</span><span class="s2">(</span><span class="s4">'.'</span><span class="s2">, </span><span class="s4">'_'</span><span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">npy_ver </span><span class="s0">in </span><span class="s1">_NPY_TARGET_VERSIONS</span><span class="s2">:</span>
+            <span class="s1">npy </span><span class="s2">= </span><span class="s1">npy_ver</span><span class="s2">.</span><span class="s1">replace</span><span class="s2">(</span><span class="s4">'.'</span><span class="s2">, </span><span class="s4">'_'</span><span class="s2">)</span>
+            <span class="s1">names</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">prefix</span><span class="s0">}</span><span class="s4">_</span><span class="s0">{</span><span class="s1">py</span><span class="s0">}</span><span class="s4">_npy</span><span class="s0">{</span><span class="s1">npy</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">names</span>
+
+
+<span class="s0">def </span><span class="s1">limited_api_module_names</span><span class="s2">():</span>
+    <span class="s0">return </span><span class="s1">_module_names</span><span class="s2">(</span><span class="s4">&quot;limited_api&quot;</span><span class="s2">, </span><span class="s1">_PY_ABI3_VERSIONS</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">limited_api_cython_module_names</span><span class="s2">():</span>
+    <span class="s0">return </span><span class="s1">_module_names</span><span class="s2">(</span><span class="s4">&quot;limited_api_cython&quot;</span><span class="s2">, </span><span class="s1">_PY_ABI3_VERSIONS</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span>
+    <span class="s1">IS_WASM</span><span class="s2">, </span><span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;platform cannot start subprocesses&quot;</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span>
+    <span class="s1">sysconfig</span><span class="s2">.</span><span class="s1">get_config_var</span><span class="s2">(</span><span class="s4">&quot;Py_DEBUG&quot;</span><span class="s2">),</span>
+    <span class="s1">reason</span><span class="s2">=(</span>
+        <span class="s4">&quot;Py_LIMITED_API is incompatible with Py_DEBUG, Py_TRACE_REFS, &quot;</span>
+        <span class="s4">&quot;and Py_REF_DEBUG&quot;</span>
+    <span class="s2">),</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span>
+    <span class="s1">NOGIL_BUILD</span><span class="s2">,</span>
+    <span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;Py_GIL_DISABLED builds do not support abi3&quot;</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;module_name&quot;</span><span class="s2">, </span><span class="s1">limited_api_module_names</span><span class="s2">())</span>
+<span class="s0">def </span><span class="s1">test_limited_api_abi3</span><span class="s2">(</span><span class="s1">install_temp</span><span class="s2">, </span><span class="s1">module_name</span><span class="s2">):</span>
+    <span class="s1">mod </span><span class="s2">= </span><span class="s1">importlib</span><span class="s2">.</span><span class="s1">import_module</span><span class="s2">(</span><span class="s1">module_name</span><span class="s2">)</span>
+    <span class="s1">_check_api_module</span><span class="s2">(</span><span class="s1">mod</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span>
+    <span class="s1">IS_WASM</span><span class="s2">, </span><span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;platform cannot start subprocesses&quot;</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span>
+    <span class="s1">sysconfig</span><span class="s2">.</span><span class="s1">get_config_var</span><span class="s2">(</span><span class="s4">&quot;Py_DEBUG&quot;</span><span class="s2">),</span>
+    <span class="s1">reason</span><span class="s2">=(</span>
+        <span class="s4">&quot;Py_LIMITED_API is incompatible with Py_DEBUG, Py_TRACE_REFS, &quot;</span>
+        <span class="s4">&quot;and Py_REF_DEBUG&quot;</span>
+    <span class="s2">),</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span>
+    <span class="s1">NOGIL_BUILD</span><span class="s2">,</span>
+    <span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;Py_GIL_DISABLED builds do not support abi3&quot;</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;module_name&quot;</span><span class="s2">, </span><span class="s1">limited_api_cython_module_names</span><span class="s2">())</span>
+<span class="s0">def </span><span class="s1">test_limited_api_cython</span><span class="s2">(</span><span class="s1">install_temp</span><span class="s2">, </span><span class="s1">module_name</span><span class="s2">):</span>
+    <span class="s1">mod </span><span class="s2">= </span><span class="s1">importlib</span><span class="s2">.</span><span class="s1">import_module</span><span class="s2">(</span><span class="s1">module_name</span><span class="s2">)</span>
+    <span class="s1">_check_api_module</span><span class="s2">(</span><span class="s1">mod</span><span class="s2">, </span><span class="s1">cython</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span>
+    <span class="s1">sys</span><span class="s2">.</span><span class="s1">version_info </span><span class="s2">&lt; (</span><span class="s5">3</span><span class="s2">, </span><span class="s5">15</span><span class="s2">), </span><span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;opaque PyObject requires Python 3.15+&quot;</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span>
+    <span class="s1">sys</span><span class="s2">.</span><span class="s1">platform </span><span class="s2">== </span><span class="s4">&quot;win32&quot; </span><span class="s0">and not </span><span class="s1">sysconfig</span><span class="s2">.</span><span class="s1">get_config_var</span><span class="s2">(</span><span class="s4">'Py_GIL_DISABLED'</span><span class="s2">),</span>
+    <span class="s1">reason</span><span class="s2">=(</span><span class="s4">&quot;Meson does not yet support building abi3t extensions on the &quot;</span>
+            <span class="s4">&quot;GIL-enabled build&quot;</span><span class="s2">)</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_limited_opaque</span><span class="s2">(</span><span class="s1">install_temp</span><span class="s2">):</span>
+    <span class="s0">import </span><span class="s1">limited_api_opaque</span>
+
+    <span class="s1">_check_api_module</span><span class="s2">(</span><span class="s1">limited_api_opaque</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

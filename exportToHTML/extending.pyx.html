@@ -1,0 +1,94 @@
+<html>
+<head>
+<title>extending.pyx</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #bcbec4;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+extending.pyx</font>
+</center></td></tr></table>
+<pre><span class="s0">#cython: language_level=3</span>
+
+<span class="s0">from libc.stdint cimport uint32_t</span>
+<span class="s0">from cpython.pycapsule cimport PyCapsule_IsValid, PyCapsule_GetPointer</span>
+
+<span class="s0">import numpy as np</span>
+<span class="s0">cimport numpy as np</span>
+<span class="s0">cimport cython</span>
+
+<span class="s0">from numpy.random cimport bitgen_t</span>
+<span class="s0">from numpy.random import PCG64</span>
+
+<span class="s0">np.import_array()</span>
+
+
+<span class="s0">@cython.boundscheck(False)</span>
+<span class="s0">@cython.wraparound(False)</span>
+<span class="s0">def uniform_mean(Py_ssize_t n):</span>
+    <span class="s0">cdef Py_ssize_t i</span>
+    <span class="s0">cdef bitgen_t *rng</span>
+    <span class="s0">cdef const char *capsule_name = &quot;BitGenerator&quot;</span>
+    <span class="s0">cdef double[::1] random_values</span>
+    <span class="s0">cdef np.ndarray randoms</span>
+
+    <span class="s0">x = PCG64()</span>
+    <span class="s0">capsule = x.capsule</span>
+    <span class="s0">if not PyCapsule_IsValid(capsule, capsule_name):</span>
+        <span class="s0">raise ValueError(&quot;Invalid pointer to anon_func_state&quot;)</span>
+    <span class="s0">rng = &lt;bitgen_t *&gt; PyCapsule_GetPointer(capsule, capsule_name)</span>
+    <span class="s0">random_values = np.empty(n)</span>
+    <span class="s0"># Best practice is to acquire the lock whenever generating random values.</span>
+    <span class="s0"># This prevents other threads from modifying the state. Acquiring the lock</span>
+    <span class="s0"># is only necessary if the GIL is also released, as in this example.</span>
+    <span class="s0">with x.lock, nogil:</span>
+        <span class="s0">for i in range(n):</span>
+            <span class="s0">random_values[i] = rng.next_double(rng.state)</span>
+    <span class="s0">randoms = np.asarray(random_values)</span>
+    <span class="s0">return randoms.mean()</span>
+
+
+<span class="s0"># This function is declared nogil so it can be used without the GIL below</span>
+<span class="s0">cdef uint32_t bounded_uint(uint32_t lb, uint32_t ub, bitgen_t *rng) nogil:</span>
+    <span class="s0">cdef uint32_t mask, delta, val</span>
+    <span class="s0">mask = delta = ub - lb</span>
+    <span class="s0">mask |= mask &gt;&gt; 1</span>
+    <span class="s0">mask |= mask &gt;&gt; 2</span>
+    <span class="s0">mask |= mask &gt;&gt; 4</span>
+    <span class="s0">mask |= mask &gt;&gt; 8</span>
+    <span class="s0">mask |= mask &gt;&gt; 16</span>
+
+    <span class="s0">val = rng.next_uint32(rng.state) &amp; mask</span>
+    <span class="s0">while val &gt; delta:</span>
+        <span class="s0">val = rng.next_uint32(rng.state) &amp; mask</span>
+
+    <span class="s0">return lb + val</span>
+
+
+<span class="s0">@cython.boundscheck(False)</span>
+<span class="s0">@cython.wraparound(False)</span>
+<span class="s0">def bounded_uints(uint32_t lb, uint32_t ub, Py_ssize_t n):</span>
+    <span class="s0">cdef Py_ssize_t i</span>
+    <span class="s0">cdef bitgen_t *rng</span>
+    <span class="s0">cdef uint32_t[::1] out</span>
+    <span class="s0">cdef const char *capsule_name = &quot;BitGenerator&quot;</span>
+
+    <span class="s0">x = PCG64()</span>
+    <span class="s0">out = np.empty(n, dtype=np.uint32)</span>
+    <span class="s0">capsule = x.capsule</span>
+
+    <span class="s0">if not PyCapsule_IsValid(capsule, capsule_name):</span>
+        <span class="s0">raise ValueError(&quot;Invalid pointer to anon_func_state&quot;)</span>
+    <span class="s0">rng = &lt;bitgen_t *&gt;PyCapsule_GetPointer(capsule, capsule_name)</span>
+
+    <span class="s0">with x.lock, nogil:</span>
+        <span class="s0">for i in range(n):</span>
+            <span class="s0">out[i] = bounded_uint(lb, ub, rng)</span>
+    <span class="s0">return np.asarray(out)</span>
+</pre>
+</body>
+</html>

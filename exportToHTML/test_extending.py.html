@@ -1,0 +1,151 @@
+<html>
+<head>
+<title>test_extending.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #2aacb8;}
+.s4 { color: #7a7e85;}
+.s5 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_extending.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">shutil</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">import </span><span class="s1">sysconfig</span>
+<span class="s0">import </span><span class="s1">warnings</span>
+<span class="s0">from </span><span class="s1">importlib</span><span class="s2">.</span><span class="s1">util </span><span class="s0">import </span><span class="s1">module_from_spec</span><span class="s2">, </span><span class="s1">spec_from_file_location</span>
+
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">testing </span><span class="s0">import </span><span class="s1">IS_EDITABLE</span><span class="s2">, </span><span class="s1">IS_WASM</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">testing</span><span class="s2">.</span><span class="s1">_private</span><span class="s2">.</span><span class="s1">utils </span><span class="s0">import </span><span class="s1">run_subprocess</span>
+
+<span class="s0">try</span><span class="s2">:</span>
+    <span class="s0">import </span><span class="s1">cffi</span>
+<span class="s0">except </span><span class="s1">ImportError</span><span class="s2">:</span>
+    <span class="s1">cffi </span><span class="s2">= </span><span class="s0">None</span>
+
+<span class="s0">if </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">optimize </span><span class="s2">&gt; </span><span class="s3">1</span><span class="s2">:</span>
+    <span class="s4"># no docstrings present to inspect when PYTHONOPTIMIZE/Py_OptimizeFlag &gt; 1</span>
+    <span class="s4"># cffi cannot succeed</span>
+    <span class="s1">cffi </span><span class="s2">= </span><span class="s0">None</span>
+
+<span class="s0">try</span><span class="s2">:</span>
+    <span class="s0">with </span><span class="s1">warnings</span><span class="s2">.</span><span class="s1">catch_warnings</span><span class="s2">(</span><span class="s1">record</span><span class="s2">=</span><span class="s0">True</span><span class="s2">) </span><span class="s0">as </span><span class="s1">w</span><span class="s2">:</span>
+        <span class="s4"># numba issue gh-4733</span>
+        <span class="s1">warnings</span><span class="s2">.</span><span class="s1">filterwarnings</span><span class="s2">(</span><span class="s5">'always'</span><span class="s2">, </span><span class="s5">''</span><span class="s2">, </span><span class="s1">DeprecationWarning</span><span class="s2">)</span>
+        <span class="s0">import </span><span class="s1">numba</span>
+<span class="s0">except </span><span class="s2">(</span><span class="s1">ImportError</span><span class="s2">, </span><span class="s1">SystemError</span><span class="s2">):</span>
+    <span class="s4"># Certain numpy/numba versions trigger a SystemError due to a numba bug</span>
+    <span class="s1">numba </span><span class="s2">= </span><span class="s0">None</span>
+
+<span class="s0">try</span><span class="s2">:</span>
+    <span class="s0">import </span><span class="s1">cython</span>
+    <span class="s0">from </span><span class="s1">Cython</span><span class="s2">.</span><span class="s1">Compiler</span><span class="s2">.</span><span class="s1">Version </span><span class="s0">import </span><span class="s1">version </span><span class="s0">as </span><span class="s1">cython_version</span>
+<span class="s0">except </span><span class="s1">ImportError</span><span class="s2">:</span>
+    <span class="s1">cython </span><span class="s2">= </span><span class="s0">None</span>
+<span class="s0">else</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">_utils </span><span class="s0">import </span><span class="s1">_pep440</span>
+    <span class="s4"># Note: keep in sync with the one in pyproject.toml</span>
+    <span class="s1">required_version </span><span class="s2">= </span><span class="s5">'3.1.0'</span>
+    <span class="s0">if </span><span class="s1">_pep440</span><span class="s2">.</span><span class="s1">parse</span><span class="s2">(</span><span class="s1">cython_version</span><span class="s2">) &lt; </span><span class="s1">_pep440</span><span class="s2">.</span><span class="s1">Version</span><span class="s2">(</span><span class="s1">required_version</span><span class="s2">):</span>
+        <span class="s4"># too old or wrong cython, skip the test</span>
+        <span class="s1">cython </span><span class="s2">= </span><span class="s0">None</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span>
+    <span class="s1">IS_EDITABLE</span><span class="s2">,</span>
+    <span class="s1">reason</span><span class="s2">=</span><span class="s5">'Editable install cannot find .pxd headers'</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span>
+        <span class="s1">sys</span><span class="s2">.</span><span class="s1">platform </span><span class="s2">== </span><span class="s5">&quot;win32&quot; </span><span class="s0">and </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">maxsize </span><span class="s2">&lt; </span><span class="s3">2</span><span class="s2">**</span><span class="s3">32</span><span class="s2">,</span>
+        <span class="s1">reason</span><span class="s2">=</span><span class="s5">&quot;Failing in 32-bit Windows wheel build job, skip for now&quot;</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span><span class="s1">IS_WASM</span><span class="s2">, </span><span class="s1">reason</span><span class="s2">=</span><span class="s5">&quot;Can't start subprocess&quot;</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span><span class="s1">cython </span><span class="s0">is None</span><span class="s2">, </span><span class="s1">reason</span><span class="s2">=</span><span class="s5">&quot;requires cython&quot;</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span><span class="s1">sysconfig</span><span class="s2">.</span><span class="s1">get_platform</span><span class="s2">() == </span><span class="s5">'win-arm64'</span><span class="s2">,</span>
+                    <span class="s1">reason</span><span class="s2">=</span><span class="s5">'Meson unable to find MSVC linker on win-arm64'</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">slow</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">thread_unsafe</span><span class="s2">(</span>
+    <span class="s1">reason</span><span class="s2">=</span><span class="s5">&quot;building cython code in a subprocess doesn't make sense to do in many &quot;</span>
+           <span class="s5">&quot;threads and sometimes crashes&quot;</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_cython</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">):</span>
+    <span class="s0">import </span><span class="s1">glob</span>
+    <span class="s4"># build the examples in a temporary directory</span>
+    <span class="s1">srcdir </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">dirname</span><span class="s2">(</span><span class="s1">__file__</span><span class="s2">), </span><span class="s5">'..'</span><span class="s2">)</span>
+    <span class="s1">shutil</span><span class="s2">.</span><span class="s1">copytree</span><span class="s2">(</span><span class="s1">srcdir</span><span class="s2">, </span><span class="s1">tmp_path </span><span class="s2">/ </span><span class="s5">'random'</span><span class="s2">)</span>
+    <span class="s1">build_dir </span><span class="s2">= </span><span class="s1">tmp_path </span><span class="s2">/ </span><span class="s5">'random' </span><span class="s2">/ </span><span class="s5">'_examples' </span><span class="s2">/ </span><span class="s5">'cython'</span>
+    <span class="s1">target_dir </span><span class="s2">= </span><span class="s1">build_dir </span><span class="s2">/ </span><span class="s5">&quot;build&quot;</span>
+    <span class="s1">os</span><span class="s2">.</span><span class="s1">makedirs</span><span class="s2">(</span><span class="s1">target_dir</span><span class="s2">, </span><span class="s1">exist_ok</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s4"># Ensure we use the correct Python interpreter even when `meson` is</span>
+    <span class="s4"># installed in a different Python environment (see gh-24956)</span>
+    <span class="s1">native_file </span><span class="s2">= </span><span class="s1">str</span><span class="s2">(</span><span class="s1">build_dir </span><span class="s2">/ </span><span class="s5">'interpreter-native-file.ini'</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">native_file</span><span class="s2">, </span><span class="s5">'w'</span><span class="s2">) </span><span class="s0">as </span><span class="s1">f</span><span class="s2">:</span>
+        <span class="s1">f</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s5">&quot;[binaries]</span><span class="s0">\n</span><span class="s5">&quot;</span><span class="s2">)</span>
+        <span class="s1">f</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s5">f&quot;python = '</span><span class="s0">{</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">executable</span><span class="s0">}</span><span class="s5">'</span><span class="s0">\n</span><span class="s5">&quot;</span><span class="s2">)</span>
+        <span class="s1">f</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s5">f&quot;python3 = '</span><span class="s0">{</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">executable</span><span class="s0">}</span><span class="s5">'&quot;</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">platform </span><span class="s2">== </span><span class="s5">&quot;win32&quot;</span><span class="s2">:</span>
+        <span class="s1">run_subprocess</span><span class="s2">([</span><span class="s5">&quot;meson&quot;</span><span class="s2">, </span><span class="s5">&quot;setup&quot;</span><span class="s2">,</span>
+                        <span class="s5">&quot;--buildtype=release&quot;</span><span class="s2">,</span>
+                        <span class="s5">&quot;--vsenv&quot;</span><span class="s2">, </span><span class="s5">&quot;--native-file&quot;</span><span class="s2">, </span><span class="s1">native_file</span><span class="s2">,</span>
+                        <span class="s1">str</span><span class="s2">(</span><span class="s1">build_dir</span><span class="s2">)],</span>
+                       <span class="s1">target_dir</span><span class="s2">)</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">run_subprocess</span><span class="s2">([</span><span class="s5">&quot;meson&quot;</span><span class="s2">, </span><span class="s5">&quot;setup&quot;</span><span class="s2">,</span>
+                        <span class="s5">&quot;--native-file&quot;</span><span class="s2">, </span><span class="s1">native_file</span><span class="s2">, </span><span class="s1">str</span><span class="s2">(</span><span class="s1">build_dir</span><span class="s2">)],</span>
+                       <span class="s1">target_dir</span><span class="s2">)</span>
+    <span class="s1">run_subprocess</span><span class="s2">([</span><span class="s5">&quot;meson&quot;</span><span class="s2">, </span><span class="s5">&quot;compile&quot;</span><span class="s2">, </span><span class="s5">&quot;-vv&quot;</span><span class="s2">], </span><span class="s1">target_dir</span><span class="s2">)</span>
+
+    <span class="s4"># gh-16162: make sure numpy's __init__.pxd was used for cython</span>
+    <span class="s4"># not really part of this test, but it is a convenient place to check</span>
+
+    <span class="s1">g </span><span class="s2">= </span><span class="s1">glob</span><span class="s2">.</span><span class="s1">glob</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">target_dir </span><span class="s2">/ </span><span class="s5">&quot;*&quot; </span><span class="s2">/ </span><span class="s5">&quot;extending.pyx.c&quot;</span><span class="s2">))</span>
+    <span class="s0">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">g</span><span class="s2">[</span><span class="s3">0</span><span class="s2">]) </span><span class="s0">as </span><span class="s1">fid</span><span class="s2">:</span>
+        <span class="s1">txt_to_find </span><span class="s2">= </span><span class="s5">'NumPy API declarations from &quot;numpy/__init__'</span>
+        <span class="s0">for </span><span class="s1">line </span><span class="s0">in </span><span class="s1">fid</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">txt_to_find </span><span class="s0">in </span><span class="s1">line</span><span class="s2">:</span>
+                <span class="s0">break</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">assert False</span><span class="s2">, </span><span class="s5">f&quot;Could not find '</span><span class="s0">{</span><span class="s1">txt_to_find</span><span class="s0">}</span><span class="s5">' in C file, wrong pxd used&quot;</span>
+    <span class="s4"># import without adding the directory to sys.path</span>
+    <span class="s1">suffix </span><span class="s2">= </span><span class="s1">sysconfig</span><span class="s2">.</span><span class="s1">get_config_var</span><span class="s2">(</span><span class="s5">'EXT_SUFFIX'</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">load</span><span class="s2">(</span><span class="s1">modname</span><span class="s2">):</span>
+        <span class="s1">so </span><span class="s2">= (</span><span class="s1">target_dir </span><span class="s2">/ </span><span class="s1">modname</span><span class="s2">).</span><span class="s1">with_suffix</span><span class="s2">(</span><span class="s1">suffix</span><span class="s2">)</span>
+        <span class="s1">spec </span><span class="s2">= </span><span class="s1">spec_from_file_location</span><span class="s2">(</span><span class="s1">modname</span><span class="s2">, </span><span class="s1">so</span><span class="s2">)</span>
+        <span class="s1">mod </span><span class="s2">= </span><span class="s1">module_from_spec</span><span class="s2">(</span><span class="s1">spec</span><span class="s2">)</span>
+        <span class="s1">spec</span><span class="s2">.</span><span class="s1">loader</span><span class="s2">.</span><span class="s1">exec_module</span><span class="s2">(</span><span class="s1">mod</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">mod</span>
+
+    <span class="s4"># test that the module can be imported</span>
+    <span class="s1">load</span><span class="s2">(</span><span class="s5">&quot;extending&quot;</span><span class="s2">)</span>
+    <span class="s1">load</span><span class="s2">(</span><span class="s5">&quot;extending_cpp&quot;</span><span class="s2">)</span>
+    <span class="s4"># actually test the cython c-extension</span>
+    <span class="s1">extending_distributions </span><span class="s2">= </span><span class="s1">load</span><span class="s2">(</span><span class="s5">&quot;extending_distributions&quot;</span><span class="s2">)</span>
+    <span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">random </span><span class="s0">import </span><span class="s1">PCG64</span>
+    <span class="s1">values </span><span class="s2">= </span><span class="s1">extending_distributions</span><span class="s2">.</span><span class="s1">uniforms_ex</span><span class="s2">(</span><span class="s1">PCG64</span><span class="s2">(</span><span class="s3">0</span><span class="s2">), </span><span class="s3">10</span><span class="s2">, </span><span class="s5">'d'</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">values</span><span class="s2">.</span><span class="s1">shape </span><span class="s2">== (</span><span class="s3">10</span><span class="s2">,)</span>
+    <span class="s0">assert </span><span class="s1">values</span><span class="s2">.</span><span class="s1">dtype </span><span class="s2">== </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span>
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span><span class="s1">numba </span><span class="s0">is None or </span><span class="s1">cffi </span><span class="s0">is None</span><span class="s2">,</span>
+                    <span class="s1">reason</span><span class="s2">=</span><span class="s5">&quot;requires numba and cffi&quot;</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_numba</span><span class="s2">():</span>
+    <span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">_examples</span><span class="s2">.</span><span class="s1">numba </span><span class="s0">import </span><span class="s1">extending  </span><span class="s4"># noqa: F401</span>
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span><span class="s1">cffi </span><span class="s0">is None</span><span class="s2">, </span><span class="s1">reason</span><span class="s2">=</span><span class="s5">&quot;requires cffi&quot;</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_cffi</span><span class="s2">():</span>
+    <span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">random</span><span class="s2">.</span><span class="s1">_examples</span><span class="s2">.</span><span class="s1">cffi </span><span class="s0">import </span><span class="s1">extending  </span><span class="s4"># noqa: F401</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,384 @@
+<html>
+<head>
+<title>hashing.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #7a7e85;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+hashing.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+data hash pandas / numpy objects 
+&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">import </span><span class="s1">itertools</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">TYPE_CHECKING</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs</span><span class="s3">.</span><span class="s1">hashing </span><span class="s2">import </span><span class="s1">hash_object_array</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">common </span><span class="s2">import </span><span class="s1">is_list_like</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">dtypes </span><span class="s2">import </span><span class="s1">CategoricalDtype</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">generic </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">ABCDataFrame</span><span class="s3">,</span>
+    <span class="s1">ABCExtensionArray</span><span class="s3">,</span>
+    <span class="s1">ABCIndex</span><span class="s3">,</span>
+    <span class="s1">ABCMultiIndex</span><span class="s3">,</span>
+    <span class="s1">ABCSeries</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">collections</span><span class="s3">.</span><span class="s1">abc </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">Hashable</span><span class="s3">,</span>
+        <span class="s1">Iterable</span><span class="s3">,</span>
+        <span class="s1">Iterator</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_typing </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">ArrayLike</span><span class="s3">,</span>
+        <span class="s1">npt</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+    <span class="s2">from </span><span class="s1">pandas </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">DataFrame</span><span class="s3">,</span>
+        <span class="s1">Index</span><span class="s3">,</span>
+        <span class="s1">MultiIndex</span><span class="s3">,</span>
+        <span class="s1">Series</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+
+<span class="s4"># 16 byte long hashing key</span>
+<span class="s1">_default_hash_key </span><span class="s3">= </span><span class="s5">&quot;0123456789123456&quot;</span>
+
+
+<span class="s2">def </span><span class="s1">combine_hash_arrays</span><span class="s3">(</span>
+    <span class="s1">arrays</span><span class="s3">: </span><span class="s1">Iterator</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">], </span><span class="s1">num_items</span><span class="s3">: </span><span class="s1">int</span>
+<span class="s3">) </span><span class="s1">-&gt; npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint64</span><span class="s3">]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Parameters 
+    ---------- 
+    arrays : Iterator[np.ndarray] 
+    num_items : int 
+ 
+    Returns 
+    ------- 
+    np.ndarray[uint64] 
+ 
+    Should be the same as CPython's tupleobject.c 
+    &quot;&quot;&quot;</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s1">first </span><span class="s3">= </span><span class="s1">next</span><span class="s3">(</span><span class="s1">arrays</span><span class="s3">)</span>
+    <span class="s2">except </span><span class="s1">StopIteration</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint64</span><span class="s3">)</span>
+
+    <span class="s1">arrays </span><span class="s3">= </span><span class="s1">itertools</span><span class="s3">.</span><span class="s1">chain</span><span class="s3">([</span><span class="s1">first</span><span class="s3">], </span><span class="s1">arrays</span><span class="s3">)</span>
+
+    <span class="s1">mult </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint64</span><span class="s3">(</span><span class="s6">1000003</span><span class="s3">)</span>
+    <span class="s1">out </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">zeros_like</span><span class="s3">(</span><span class="s1">first</span><span class="s3">) + </span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint64</span><span class="s3">(</span><span class="s6">0x345678</span><span class="s3">)</span>
+    <span class="s1">last_i </span><span class="s3">= </span><span class="s6">0</span>
+    <span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">a </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">arrays</span><span class="s3">):</span>
+        <span class="s1">inverse_i </span><span class="s3">= </span><span class="s1">num_items </span><span class="s3">- </span><span class="s1">i</span>
+        <span class="s1">out </span><span class="s3">^= </span><span class="s1">a</span>
+        <span class="s1">out </span><span class="s3">*= </span><span class="s1">mult</span>
+        <span class="s1">mult </span><span class="s3">+= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint64</span><span class="s3">(</span><span class="s6">82520 </span><span class="s3">+ </span><span class="s1">inverse_i </span><span class="s3">+ </span><span class="s1">inverse_i</span><span class="s3">)</span>
+        <span class="s1">last_i </span><span class="s3">= </span><span class="s1">i</span>
+    <span class="s2">assert </span><span class="s1">last_i </span><span class="s3">+ </span><span class="s6">1 </span><span class="s3">== </span><span class="s1">num_items</span><span class="s3">, </span><span class="s5">&quot;Fed in wrong num_items&quot;</span>
+    <span class="s1">out </span><span class="s3">+= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint64</span><span class="s3">(</span><span class="s6">97531</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">out</span>
+
+
+<span class="s2">def </span><span class="s1">hash_pandas_object</span><span class="s3">(</span>
+    <span class="s1">obj</span><span class="s3">: </span><span class="s1">Index </span><span class="s3">| </span><span class="s1">DataFrame </span><span class="s3">| </span><span class="s1">Series</span><span class="s3">,</span>
+    <span class="s1">index</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">encoding</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s5">&quot;utf8&quot;</span><span class="s3">,</span>
+    <span class="s1">hash_key</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s1">_default_hash_key</span><span class="s3">,</span>
+    <span class="s1">categorize</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; Series</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Return a data hash of the Index/Series/DataFrame. 
+ 
+    The hash is computed element-wise using the underlying data values, 
+    and optionally includes the index when hashing a Series or DataFrame. 
+ 
+    Parameters 
+    ---------- 
+    obj : Index, Series, or DataFrame 
+        The pandas object to hash. 
+    index : bool, default True 
+        Include the index in the hash (if Series/DataFrame). 
+    encoding : str, default 'utf8' 
+        Encoding for data &amp; key when strings. 
+    hash_key : str, default _default_hash_key 
+        Hash_key for string key to encode. 
+    categorize : bool, default True 
+        Whether to first categorize object arrays before hashing. This is more 
+        efficient when the array contains duplicate values. 
+ 
+    Returns 
+    ------- 
+    Series of uint64 
+        Same length as the object. 
+ 
+    See Also 
+    -------- 
+    util.hash_array : Return a hash of the given array. 
+    util.hash_tuples : Hash a MultiIndex or listlike-of-tuples efficiently. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; pd.util.hash_pandas_object(pd.Series([1, 2, 3])) 
+    0    14639053686158035780 
+    1     3869563279212530728 
+    2      393322362522515241 
+    dtype: uint64 
+    &quot;&quot;&quot;</span>
+    <span class="s2">from </span><span class="s1">pandas </span><span class="s2">import </span><span class="s1">Series</span>
+
+    <span class="s2">if </span><span class="s1">hash_key </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">hash_key </span><span class="s3">= </span><span class="s1">_default_hash_key</span>
+
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">, </span><span class="s1">ABCMultiIndex</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">Series</span><span class="s3">(</span><span class="s1">hash_tuples</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">, </span><span class="s1">hash_key</span><span class="s3">), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;uint64&quot;</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">, </span><span class="s1">ABCIndex</span><span class="s3">):</span>
+        <span class="s1">h </span><span class="s3">= </span><span class="s1">hash_array</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">.</span><span class="s1">_values</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">, </span><span class="s1">hash_key</span><span class="s3">, </span><span class="s1">categorize</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span>
+            <span class="s5">&quot;uint64&quot;</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">False</span>
+        <span class="s3">)</span>
+        <span class="s1">ser </span><span class="s3">= </span><span class="s1">Series</span><span class="s3">(</span><span class="s1">h</span><span class="s3">, </span><span class="s1">index</span><span class="s3">=</span><span class="s1">obj</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;uint64&quot;</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">, </span><span class="s1">ABCSeries</span><span class="s3">):</span>
+        <span class="s1">h </span><span class="s3">= </span><span class="s1">hash_array</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">.</span><span class="s1">_values</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">, </span><span class="s1">hash_key</span><span class="s3">, </span><span class="s1">categorize</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span>
+            <span class="s5">&quot;uint64&quot;</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">False</span>
+        <span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">index</span><span class="s3">:</span>
+            <span class="s1">index_iter </span><span class="s3">= (</span>
+                <span class="s1">hash_pandas_object</span><span class="s3">(</span>
+                    <span class="s1">obj</span><span class="s3">.</span><span class="s1">index</span><span class="s3">,</span>
+                    <span class="s1">index</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+                    <span class="s1">encoding</span><span class="s3">=</span><span class="s1">encoding</span><span class="s3">,</span>
+                    <span class="s1">hash_key</span><span class="s3">=</span><span class="s1">hash_key</span><span class="s3">,</span>
+                    <span class="s1">categorize</span><span class="s3">=</span><span class="s1">categorize</span><span class="s3">,</span>
+                <span class="s3">).</span><span class="s1">_values</span>
+                <span class="s2">for </span><span class="s1">_ </span><span class="s2">in </span><span class="s3">[</span><span class="s2">None</span><span class="s3">]</span>
+            <span class="s3">)</span>
+            <span class="s1">arrays </span><span class="s3">= </span><span class="s1">itertools</span><span class="s3">.</span><span class="s1">chain</span><span class="s3">([</span><span class="s1">h</span><span class="s3">], </span><span class="s1">index_iter</span><span class="s3">)</span>
+            <span class="s1">h </span><span class="s3">= </span><span class="s1">combine_hash_arrays</span><span class="s3">(</span><span class="s1">arrays</span><span class="s3">, </span><span class="s6">2</span><span class="s3">)</span>
+
+        <span class="s1">ser </span><span class="s3">= </span><span class="s1">Series</span><span class="s3">(</span><span class="s1">h</span><span class="s3">, </span><span class="s1">index</span><span class="s3">=</span><span class="s1">obj</span><span class="s3">.</span><span class="s1">index</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;uint64&quot;</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">, </span><span class="s1">ABCDataFrame</span><span class="s3">):</span>
+        <span class="s1">hashes </span><span class="s3">= (</span>
+            <span class="s1">hash_array</span><span class="s3">(</span><span class="s1">series</span><span class="s3">.</span><span class="s1">_values</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">, </span><span class="s1">hash_key</span><span class="s3">, </span><span class="s1">categorize</span><span class="s3">)</span>
+            <span class="s2">for </span><span class="s1">_</span><span class="s3">, </span><span class="s1">series </span><span class="s2">in </span><span class="s1">obj</span><span class="s3">.</span><span class="s1">items</span><span class="s3">()</span>
+        <span class="s3">)</span>
+        <span class="s1">num_items </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">.</span><span class="s1">columns</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">index</span><span class="s3">:</span>
+            <span class="s1">index_hash_generator </span><span class="s3">= (</span>
+                <span class="s1">hash_pandas_object</span><span class="s3">(</span>
+                    <span class="s1">obj</span><span class="s3">.</span><span class="s1">index</span><span class="s3">,</span>
+                    <span class="s1">index</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+                    <span class="s1">encoding</span><span class="s3">=</span><span class="s1">encoding</span><span class="s3">,</span>
+                    <span class="s1">hash_key</span><span class="s3">=</span><span class="s1">hash_key</span><span class="s3">,</span>
+                    <span class="s1">categorize</span><span class="s3">=</span><span class="s1">categorize</span><span class="s3">,</span>
+                <span class="s3">).</span><span class="s1">_values</span>
+                <span class="s2">for </span><span class="s1">_ </span><span class="s2">in </span><span class="s3">[</span><span class="s2">None</span><span class="s3">]</span>
+            <span class="s3">)</span>
+            <span class="s1">num_items </span><span class="s3">+= </span><span class="s6">1</span>
+
+            <span class="s4"># keep `hashes` specifically a generator to keep mypy happy</span>
+            <span class="s1">_hashes </span><span class="s3">= </span><span class="s1">itertools</span><span class="s3">.</span><span class="s1">chain</span><span class="s3">(</span><span class="s1">hashes</span><span class="s3">, </span><span class="s1">index_hash_generator</span><span class="s3">)</span>
+            <span class="s1">hashes </span><span class="s3">= (</span><span class="s1">x </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">_hashes</span><span class="s3">)</span>
+        <span class="s1">h </span><span class="s3">= </span><span class="s1">combine_hash_arrays</span><span class="s3">(</span><span class="s1">hashes</span><span class="s3">, </span><span class="s1">num_items</span><span class="s3">)</span>
+
+        <span class="s1">ser </span><span class="s3">= </span><span class="s1">Series</span><span class="s3">(</span><span class="s1">h</span><span class="s3">, </span><span class="s1">index</span><span class="s3">=</span><span class="s1">obj</span><span class="s3">.</span><span class="s1">index</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;uint64&quot;</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span><span class="s5">f&quot;Unexpected type for hashing </span><span class="s2">{</span><span class="s1">type</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">)</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">ser</span>
+
+
+<span class="s2">def </span><span class="s1">hash_tuples</span><span class="s3">(</span>
+    <span class="s1">vals</span><span class="s3">: </span><span class="s1">MultiIndex </span><span class="s3">| </span><span class="s1">Iterable</span><span class="s3">[</span><span class="s1">tuple</span><span class="s3">[</span><span class="s1">Hashable</span><span class="s3">, ...]],</span>
+    <span class="s1">encoding</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s5">&quot;utf8&quot;</span><span class="s3">,</span>
+    <span class="s1">hash_key</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s1">_default_hash_key</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint64</span><span class="s3">]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Hash a MultiIndex / listlike-of-tuples efficiently. 
+ 
+    Parameters 
+    ---------- 
+    vals : MultiIndex or listlike-of-tuples 
+    encoding : str, default 'utf8' 
+    hash_key : str, default _default_hash_key 
+ 
+    Returns 
+    ------- 
+    ndarray[np.uint64] of hashed values 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if not </span><span class="s1">is_list_like</span><span class="s3">(</span><span class="s1">vals</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span><span class="s5">&quot;must be convertible to a list-of-tuples&quot;</span><span class="s3">)</span>
+
+    <span class="s2">from </span><span class="s1">pandas </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">Categorical</span><span class="s3">,</span>
+        <span class="s1">MultiIndex</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+    <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">vals</span><span class="s3">, </span><span class="s1">ABCMultiIndex</span><span class="s3">):</span>
+        <span class="s1">mi </span><span class="s3">= </span><span class="s1">MultiIndex</span><span class="s3">.</span><span class="s1">from_tuples</span><span class="s3">(</span><span class="s1">vals</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">mi </span><span class="s3">= </span><span class="s1">vals</span>
+
+    <span class="s4"># create a list-of-Categoricals</span>
+    <span class="s1">cat_vals </span><span class="s3">= [</span>
+        <span class="s1">Categorical</span><span class="s3">.</span><span class="s1">_simple_new</span><span class="s3">(</span>
+            <span class="s1">mi</span><span class="s3">.</span><span class="s1">codes</span><span class="s3">[</span><span class="s1">level</span><span class="s3">],</span>
+            <span class="s1">CategoricalDtype</span><span class="s3">(</span><span class="s1">categories</span><span class="s3">=</span><span class="s1">mi</span><span class="s3">.</span><span class="s1">levels</span><span class="s3">[</span><span class="s1">level</span><span class="s3">], </span><span class="s1">ordered</span><span class="s3">=</span><span class="s2">False</span><span class="s3">),</span>
+        <span class="s3">)</span>
+        <span class="s2">for </span><span class="s1">level </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">mi</span><span class="s3">.</span><span class="s1">nlevels</span><span class="s3">)</span>
+    <span class="s3">]</span>
+
+    <span class="s4"># hash the list-of-ndarrays</span>
+    <span class="s1">hashes </span><span class="s3">= (</span>
+        <span class="s1">cat</span><span class="s3">.</span><span class="s1">_hash_pandas_object</span><span class="s3">(</span><span class="s1">encoding</span><span class="s3">=</span><span class="s1">encoding</span><span class="s3">, </span><span class="s1">hash_key</span><span class="s3">=</span><span class="s1">hash_key</span><span class="s3">, </span><span class="s1">categorize</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+        <span class="s2">for </span><span class="s1">cat </span><span class="s2">in </span><span class="s1">cat_vals</span>
+    <span class="s3">)</span>
+    <span class="s1">h </span><span class="s3">= </span><span class="s1">combine_hash_arrays</span><span class="s3">(</span><span class="s1">hashes</span><span class="s3">, </span><span class="s1">len</span><span class="s3">(</span><span class="s1">cat_vals</span><span class="s3">))</span>
+
+    <span class="s2">return </span><span class="s1">h</span>
+
+
+<span class="s2">def </span><span class="s1">hash_array</span><span class="s3">(</span>
+    <span class="s1">vals</span><span class="s3">: </span><span class="s1">ArrayLike</span><span class="s3">,</span>
+    <span class="s1">encoding</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s5">&quot;utf8&quot;</span><span class="s3">,</span>
+    <span class="s1">hash_key</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s1">_default_hash_key</span><span class="s3">,</span>
+    <span class="s1">categorize</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint64</span><span class="s3">]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Given a 1d array, return an array of deterministic integers. 
+ 
+    Parameters 
+    ---------- 
+    vals : ndarray or ExtensionArray 
+        The input array to hash. 
+    encoding : str, default 'utf8' 
+        Encoding for data &amp; key when strings. 
+    hash_key : str, default _default_hash_key 
+        Hash_key for string key to encode. 
+    categorize : bool, default True 
+        Whether to first categorize object arrays before hashing. This is more 
+        efficient when the array contains duplicate values. 
+ 
+    Returns 
+    ------- 
+    ndarray[np.uint64, ndim=1] 
+        Hashed values, same length as the vals. 
+ 
+    See Also 
+    -------- 
+    util.hash_pandas_object : Return a data hash of the Index/Series/DataFrame. 
+    util.hash_tuples : Hash a MultiIndex / listlike-of-tuples efficiently. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; pd.util.hash_array(np.array([1, 2, 3])) 
+    array([ 6238072747940578789, 15839785061582574730,  2185194620014831856], 
+      dtype=uint64) 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if not </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">vals</span><span class="s3">, </span><span class="s5">&quot;dtype&quot;</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span><span class="s5">&quot;must pass an ndarray-like&quot;</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">vals</span><span class="s3">, </span><span class="s1">ABCExtensionArray</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">vals</span><span class="s3">.</span><span class="s1">_hash_pandas_object</span><span class="s3">(</span>
+            <span class="s1">encoding</span><span class="s3">=</span><span class="s1">encoding</span><span class="s3">, </span><span class="s1">hash_key</span><span class="s3">=</span><span class="s1">hash_key</span><span class="s3">, </span><span class="s1">categorize</span><span class="s3">=</span><span class="s1">categorize</span>
+        <span class="s3">)</span>
+
+    <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">vals</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">):</span>
+        <span class="s4"># GH#42003</span>
+        <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span>
+            <span class="s5">&quot;hash_array requires np.ndarray or ExtensionArray, not &quot;</span>
+            <span class="s5">f&quot;</span><span class="s2">{</span><span class="s1">type</span><span class="s3">(</span><span class="s1">vals</span><span class="s3">).</span><span class="s1">__name__</span><span class="s2">}</span><span class="s5">. Use hash_pandas_object instead.&quot;</span>
+        <span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">_hash_ndarray</span><span class="s3">(</span><span class="s1">vals</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">, </span><span class="s1">hash_key</span><span class="s3">, </span><span class="s1">categorize</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_hash_ndarray</span><span class="s3">(</span>
+    <span class="s1">vals</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">,</span>
+    <span class="s1">encoding</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s5">&quot;utf8&quot;</span><span class="s3">,</span>
+    <span class="s1">hash_key</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s1">_default_hash_key</span><span class="s3">,</span>
+    <span class="s1">categorize</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint64</span><span class="s3">]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    See hash_array.__doc__. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">vals</span><span class="s3">.</span><span class="s1">dtype</span>
+
+    <span class="s4"># _hash_ndarray only takes 64-bit values, so handle 128-bit by parts</span>
+    <span class="s2">if </span><span class="s1">np</span><span class="s3">.</span><span class="s1">issubdtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">complex128</span><span class="s3">):</span>
+        <span class="s1">hash_real </span><span class="s3">= </span><span class="s1">_hash_ndarray</span><span class="s3">(</span><span class="s1">vals</span><span class="s3">.</span><span class="s1">real</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">, </span><span class="s1">hash_key</span><span class="s3">, </span><span class="s1">categorize</span><span class="s3">)</span>
+        <span class="s1">hash_imag </span><span class="s3">= </span><span class="s1">_hash_ndarray</span><span class="s3">(</span><span class="s1">vals</span><span class="s3">.</span><span class="s1">imag</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">, </span><span class="s1">hash_key</span><span class="s3">, </span><span class="s1">categorize</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">hash_real </span><span class="s3">+ </span><span class="s6">23 </span><span class="s3">* </span><span class="s1">hash_imag</span>
+
+    <span class="s4"># First, turn whatever array this is into unsigned 64-bit ints, if we can</span>
+    <span class="s4"># manage it.</span>
+    <span class="s2">if </span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">bool</span><span class="s3">:</span>
+        <span class="s1">vals </span><span class="s3">= </span><span class="s1">vals</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s5">&quot;u8&quot;</span><span class="s3">)</span>
+    <span class="s2">elif </span><span class="s1">issubclass</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">type</span><span class="s3">, (</span><span class="s1">np</span><span class="s3">.</span><span class="s1">datetime64</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">timedelta64</span><span class="s3">)):</span>
+        <span class="s1">vals </span><span class="s3">= </span><span class="s1">vals</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s5">&quot;i8&quot;</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s5">&quot;u8&quot;</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+    <span class="s2">elif </span><span class="s1">issubclass</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">type</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">number</span><span class="s3">) </span><span class="s2">and </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">&lt;= </span><span class="s6">8</span><span class="s3">:</span>
+        <span class="s1">vals </span><span class="s3">= </span><span class="s1">vals</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s5">f&quot;u</span><span class="s2">{</span><span class="s1">vals</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s5">&quot;u8&quot;</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s4"># With repeated values, its MUCH faster to categorize object dtypes,</span>
+        <span class="s4"># then hash and rename categories. We allow skipping the categorization</span>
+        <span class="s4"># when the values are known/likely to be unique.</span>
+        <span class="s2">if </span><span class="s1">categorize</span><span class="s3">:</span>
+            <span class="s2">from </span><span class="s1">pandas </span><span class="s2">import </span><span class="s3">(</span>
+                <span class="s1">Categorical</span><span class="s3">,</span>
+                <span class="s1">Index</span><span class="s3">,</span>
+                <span class="s1">factorize</span><span class="s3">,</span>
+            <span class="s3">)</span>
+
+            <span class="s1">codes</span><span class="s3">, </span><span class="s1">categories </span><span class="s3">= </span><span class="s1">factorize</span><span class="s3">(</span><span class="s1">vals</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+            <span class="s1">tdtype </span><span class="s3">= </span><span class="s1">CategoricalDtype</span><span class="s3">(</span>
+                <span class="s1">categories</span><span class="s3">=</span><span class="s1">Index</span><span class="s3">(</span><span class="s1">categories</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">False</span><span class="s3">), </span><span class="s1">ordered</span><span class="s3">=</span><span class="s2">False</span>
+            <span class="s3">)</span>
+            <span class="s1">cat </span><span class="s3">= </span><span class="s1">Categorical</span><span class="s3">.</span><span class="s1">_simple_new</span><span class="s3">(</span><span class="s1">codes</span><span class="s3">, </span><span class="s1">tdtype</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">cat</span><span class="s3">.</span><span class="s1">_hash_pandas_object</span><span class="s3">(</span>
+                <span class="s1">encoding</span><span class="s3">=</span><span class="s1">encoding</span><span class="s3">, </span><span class="s1">hash_key</span><span class="s3">=</span><span class="s1">hash_key</span><span class="s3">, </span><span class="s1">categorize</span><span class="s3">=</span><span class="s2">False</span>
+            <span class="s3">)</span>
+
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">vals </span><span class="s3">= </span><span class="s1">hash_object_array</span><span class="s3">(</span><span class="s1">vals</span><span class="s3">, </span><span class="s1">hash_key</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s1">TypeError</span><span class="s3">:</span>
+            <span class="s4"># we have mixed types</span>
+            <span class="s1">vals </span><span class="s3">= </span><span class="s1">hash_object_array</span><span class="s3">(</span>
+                <span class="s1">vals</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">str</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">), </span><span class="s1">hash_key</span><span class="s3">, </span><span class="s1">encoding</span>
+            <span class="s3">)</span>
+
+    <span class="s4"># Then, redistribute these 64-bit ints within the space of 64-bit ints</span>
+    <span class="s1">vals </span><span class="s3">^= </span><span class="s1">vals </span><span class="s3">&gt;&gt; </span><span class="s6">30</span>
+    <span class="s1">vals </span><span class="s3">*= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint64</span><span class="s3">(</span><span class="s6">0xBF58476D1CE4E5B9</span><span class="s3">)</span>
+    <span class="s1">vals </span><span class="s3">^= </span><span class="s1">vals </span><span class="s3">&gt;&gt; </span><span class="s6">27</span>
+    <span class="s1">vals </span><span class="s3">*= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint64</span><span class="s3">(</span><span class="s6">0x94D049BB133111EB</span><span class="s3">)</span>
+    <span class="s1">vals </span><span class="s3">^= </span><span class="s1">vals </span><span class="s3">&gt;&gt; </span><span class="s6">31</span>
+    <span class="s4"># error: Incompatible return value type (got &quot;Any | ndarray[tuple[int, ...],</span>
+    <span class="s4"># dtype[signedinteger[Any]]]&quot;, expected &quot;ndarray[tuple[int, ...],</span>
+    <span class="s4"># dtype[unsignedinteger[_64Bit]]]&quot;)</span>
+    <span class="s2">return </span><span class="s1">vals  </span><span class="s4"># type: ignore[return-value]</span>
+</pre>
+</body>
+</html>

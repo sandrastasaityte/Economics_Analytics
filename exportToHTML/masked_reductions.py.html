@@ -1,0 +1,237 @@
+<html>
+<head>
+<title>masked_reductions.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #2aacb8;}
+.s5 { color: #6aab73;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+masked_reductions.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+masked_reductions.py is for reduction algorithms using a mask-based approach 
+for missing values. 
+&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">TYPE_CHECKING</span>
+<span class="s2">import </span><span class="s1">warnings</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">lib</span><span class="s3">,</span>
+    <span class="s1">missing </span><span class="s2">as </span><span class="s1">libmissing</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">nanops </span><span class="s2">import </span><span class="s1">check_below_min_count</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">collections</span><span class="s3">.</span><span class="s1">abc </span><span class="s2">import </span><span class="s1">Callable</span>
+
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_typing </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">AxisInt</span><span class="s3">,</span>
+        <span class="s1">npt</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_reductions</span><span class="s3">(</span>
+    <span class="s1">func</span><span class="s3">: </span><span class="s1">Callable</span><span class="s3">,</span>
+    <span class="s1">values</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">,</span>
+    <span class="s1">mask</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">bool_</span><span class="s3">],</span>
+    <span class="s3">*,</span>
+    <span class="s1">skipna</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">min_count</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s4">0</span><span class="s3">,</span>
+    <span class="s1">axis</span><span class="s3">: </span><span class="s1">AxisInt </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">initial</span><span class="s3">: </span><span class="s1">object </span><span class="s3">| </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">NoDefault </span><span class="s3">= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">no_default</span><span class="s3">,</span>
+    <span class="s3">**</span><span class="s1">kwargs</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Sum, mean or product for 1D masked array. 
+ 
+    Parameters 
+    ---------- 
+    func : np.sum or np.prod 
+    values : np.ndarray 
+        Numpy array with the values (can be of any dtype that support the 
+        operation). 
+    mask : np.ndarray[bool] 
+        Boolean numpy array (True values indicate missing values). 
+    skipna : bool, default True 
+        Whether to skip NA. 
+    min_count : int, default 0 
+        The required number of valid values to perform the operation. If fewer than 
+        ``min_count`` non-NA values are present the result will be NA. 
+    axis : int, optional, default None 
+    initial : scalar, optional 
+        Starting value for the reduction. NumPy has a default value for most 
+        data types, but for object-dtype arrays we need to specify it explicitly 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">initial </span><span class="s2">is not </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">no_default</span><span class="s3">:</span>
+        <span class="s1">kwargs</span><span class="s3">[</span><span class="s5">&quot;initial&quot;</span><span class="s3">] = </span><span class="s1">initial</span>
+
+    <span class="s2">if not </span><span class="s1">skipna</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">mask</span><span class="s3">.</span><span class="s1">any</span><span class="s3">() </span><span class="s2">or </span><span class="s1">check_below_min_count</span><span class="s3">(</span><span class="s1">values</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s1">min_count</span><span class="s3">):</span>
+            <span class="s2">return </span><span class="s1">libmissing</span><span class="s3">.</span><span class="s1">NA</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">func</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">=</span><span class="s1">axis</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">check_below_min_count</span><span class="s3">(</span><span class="s1">values</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">, </span><span class="s1">mask</span><span class="s3">, </span><span class="s1">min_count</span><span class="s3">) </span><span class="s2">and </span><span class="s3">(</span>
+            <span class="s1">axis </span><span class="s2">is None or </span><span class="s1">values</span><span class="s3">.</span><span class="s1">ndim </span><span class="s3">== </span><span class="s4">1</span>
+        <span class="s3">):</span>
+            <span class="s2">return </span><span class="s1">libmissing</span><span class="s3">.</span><span class="s1">NA</span>
+
+        <span class="s2">return </span><span class="s1">func</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, </span><span class="s1">where</span><span class="s3">=~</span><span class="s1">mask</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">=</span><span class="s1">axis</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">sum</span><span class="s3">(</span>
+    <span class="s1">values</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">,</span>
+    <span class="s1">mask</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">bool_</span><span class="s3">],</span>
+    <span class="s3">*,</span>
+    <span class="s1">skipna</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">min_count</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s4">0</span><span class="s3">,</span>
+    <span class="s1">axis</span><span class="s3">: </span><span class="s1">AxisInt </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">initial</span><span class="s3">: </span><span class="s1">object </span><span class="s3">| </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">NoDefault </span><span class="s3">= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">no_default</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s2">return </span><span class="s1">_reductions</span><span class="s3">(</span>
+        <span class="s1">np</span><span class="s3">.</span><span class="s1">sum</span><span class="s3">,</span>
+        <span class="s1">values</span><span class="s3">=</span><span class="s1">values</span><span class="s3">,</span>
+        <span class="s1">mask</span><span class="s3">=</span><span class="s1">mask</span><span class="s3">,</span>
+        <span class="s1">skipna</span><span class="s3">=</span><span class="s1">skipna</span><span class="s3">,</span>
+        <span class="s1">min_count</span><span class="s3">=</span><span class="s1">min_count</span><span class="s3">,</span>
+        <span class="s1">axis</span><span class="s3">=</span><span class="s1">axis</span><span class="s3">,</span>
+        <span class="s1">initial</span><span class="s3">=</span><span class="s1">initial</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">prod</span><span class="s3">(</span>
+    <span class="s1">values</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">,</span>
+    <span class="s1">mask</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">bool_</span><span class="s3">],</span>
+    <span class="s3">*,</span>
+    <span class="s1">skipna</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">min_count</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s4">0</span><span class="s3">,</span>
+    <span class="s1">axis</span><span class="s3">: </span><span class="s1">AxisInt </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s2">return </span><span class="s1">_reductions</span><span class="s3">(</span>
+        <span class="s1">np</span><span class="s3">.</span><span class="s1">prod</span><span class="s3">, </span><span class="s1">values</span><span class="s3">=</span><span class="s1">values</span><span class="s3">, </span><span class="s1">mask</span><span class="s3">=</span><span class="s1">mask</span><span class="s3">, </span><span class="s1">skipna</span><span class="s3">=</span><span class="s1">skipna</span><span class="s3">, </span><span class="s1">min_count</span><span class="s3">=</span><span class="s1">min_count</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">=</span><span class="s1">axis</span>
+    <span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_minmax</span><span class="s3">(</span>
+    <span class="s1">func</span><span class="s3">: </span><span class="s1">Callable</span><span class="s3">,</span>
+    <span class="s1">values</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">,</span>
+    <span class="s1">mask</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">bool_</span><span class="s3">],</span>
+    <span class="s3">*,</span>
+    <span class="s1">skipna</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">axis</span><span class="s3">: </span><span class="s1">AxisInt </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Reduction for 1D masked array. 
+ 
+    Parameters 
+    ---------- 
+    func : np.min or np.max 
+    values : np.ndarray 
+        Numpy array with the values (can be of any dtype that support the 
+        operation). 
+    mask : np.ndarray[bool] 
+        Boolean numpy array (True values indicate missing values). 
+    skipna : bool, default True 
+        Whether to skip NA. 
+    axis : int, optional, default None 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if not </span><span class="s1">skipna</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">mask</span><span class="s3">.</span><span class="s1">any</span><span class="s3">() </span><span class="s2">or not </span><span class="s1">values</span><span class="s3">.</span><span class="s1">size</span><span class="s3">:</span>
+            <span class="s6"># min/max with empty array raise in numpy, pandas returns NA</span>
+            <span class="s2">return </span><span class="s1">libmissing</span><span class="s3">.</span><span class="s1">NA</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">func</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">=</span><span class="s1">axis</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">subset </span><span class="s3">= </span><span class="s1">values</span><span class="s3">[~</span><span class="s1">mask</span><span class="s3">]</span>
+        <span class="s2">if </span><span class="s1">subset</span><span class="s3">.</span><span class="s1">size</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">func</span><span class="s3">(</span><span class="s1">subset</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">=</span><span class="s1">axis</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s6"># min/max with empty array raise in numpy, pandas returns NA</span>
+            <span class="s2">return </span><span class="s1">libmissing</span><span class="s3">.</span><span class="s1">NA</span>
+
+
+<span class="s2">def </span><span class="s1">min</span><span class="s3">(</span>
+    <span class="s1">values</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">,</span>
+    <span class="s1">mask</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">bool_</span><span class="s3">],</span>
+    <span class="s3">*,</span>
+    <span class="s1">skipna</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">axis</span><span class="s3">: </span><span class="s1">AxisInt </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s2">return </span><span class="s1">_minmax</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">min</span><span class="s3">, </span><span class="s1">values</span><span class="s3">=</span><span class="s1">values</span><span class="s3">, </span><span class="s1">mask</span><span class="s3">=</span><span class="s1">mask</span><span class="s3">, </span><span class="s1">skipna</span><span class="s3">=</span><span class="s1">skipna</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">=</span><span class="s1">axis</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">max</span><span class="s3">(</span>
+    <span class="s1">values</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">,</span>
+    <span class="s1">mask</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">bool_</span><span class="s3">],</span>
+    <span class="s3">*,</span>
+    <span class="s1">skipna</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">axis</span><span class="s3">: </span><span class="s1">AxisInt </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s2">return </span><span class="s1">_minmax</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">max</span><span class="s3">, </span><span class="s1">values</span><span class="s3">=</span><span class="s1">values</span><span class="s3">, </span><span class="s1">mask</span><span class="s3">=</span><span class="s1">mask</span><span class="s3">, </span><span class="s1">skipna</span><span class="s3">=</span><span class="s1">skipna</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">=</span><span class="s1">axis</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">mean</span><span class="s3">(</span>
+    <span class="s1">values</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">,</span>
+    <span class="s1">mask</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">bool_</span><span class="s3">],</span>
+    <span class="s3">*,</span>
+    <span class="s1">skipna</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">axis</span><span class="s3">: </span><span class="s1">AxisInt </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s2">if not </span><span class="s1">values</span><span class="s3">.</span><span class="s1">size </span><span class="s2">or </span><span class="s1">mask</span><span class="s3">.</span><span class="s1">all</span><span class="s3">():</span>
+        <span class="s2">return </span><span class="s1">libmissing</span><span class="s3">.</span><span class="s1">NA</span>
+    <span class="s2">return </span><span class="s1">_reductions</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">mean</span><span class="s3">, </span><span class="s1">values</span><span class="s3">=</span><span class="s1">values</span><span class="s3">, </span><span class="s1">mask</span><span class="s3">=</span><span class="s1">mask</span><span class="s3">, </span><span class="s1">skipna</span><span class="s3">=</span><span class="s1">skipna</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">=</span><span class="s1">axis</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">var</span><span class="s3">(</span>
+    <span class="s1">values</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">,</span>
+    <span class="s1">mask</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">bool_</span><span class="s3">],</span>
+    <span class="s3">*,</span>
+    <span class="s1">skipna</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">axis</span><span class="s3">: </span><span class="s1">AxisInt </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">ddof</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s4">1</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s2">if not </span><span class="s1">values</span><span class="s3">.</span><span class="s1">size </span><span class="s2">or </span><span class="s1">mask</span><span class="s3">.</span><span class="s1">all</span><span class="s3">():</span>
+        <span class="s2">return </span><span class="s1">libmissing</span><span class="s3">.</span><span class="s1">NA</span>
+
+    <span class="s2">with </span><span class="s1">warnings</span><span class="s3">.</span><span class="s1">catch_warnings</span><span class="s3">():</span>
+        <span class="s1">warnings</span><span class="s3">.</span><span class="s1">simplefilter</span><span class="s3">(</span><span class="s5">&quot;ignore&quot;</span><span class="s3">, </span><span class="s1">RuntimeWarning</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">_reductions</span><span class="s3">(</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">var</span><span class="s3">, </span><span class="s1">values</span><span class="s3">=</span><span class="s1">values</span><span class="s3">, </span><span class="s1">mask</span><span class="s3">=</span><span class="s1">mask</span><span class="s3">, </span><span class="s1">skipna</span><span class="s3">=</span><span class="s1">skipna</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">=</span><span class="s1">axis</span><span class="s3">, </span><span class="s1">ddof</span><span class="s3">=</span><span class="s1">ddof</span>
+        <span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">std</span><span class="s3">(</span>
+    <span class="s1">values</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">,</span>
+    <span class="s1">mask</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">bool_</span><span class="s3">],</span>
+    <span class="s3">*,</span>
+    <span class="s1">skipna</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">axis</span><span class="s3">: </span><span class="s1">AxisInt </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">ddof</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s4">1</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s2">if not </span><span class="s1">values</span><span class="s3">.</span><span class="s1">size </span><span class="s2">or </span><span class="s1">mask</span><span class="s3">.</span><span class="s1">all</span><span class="s3">():</span>
+        <span class="s2">return </span><span class="s1">libmissing</span><span class="s3">.</span><span class="s1">NA</span>
+
+    <span class="s2">with </span><span class="s1">warnings</span><span class="s3">.</span><span class="s1">catch_warnings</span><span class="s3">():</span>
+        <span class="s1">warnings</span><span class="s3">.</span><span class="s1">simplefilter</span><span class="s3">(</span><span class="s5">&quot;ignore&quot;</span><span class="s3">, </span><span class="s1">RuntimeWarning</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">_reductions</span><span class="s3">(</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">std</span><span class="s3">, </span><span class="s1">values</span><span class="s3">=</span><span class="s1">values</span><span class="s3">, </span><span class="s1">mask</span><span class="s3">=</span><span class="s1">mask</span><span class="s3">, </span><span class="s1">skipna</span><span class="s3">=</span><span class="s1">skipna</span><span class="s3">, </span><span class="s1">axis</span><span class="s3">=</span><span class="s1">axis</span><span class="s3">, </span><span class="s1">ddof</span><span class="s3">=</span><span class="s1">ddof</span>
+        <span class="s3">)</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,225 @@
+<html>
+<head>
+<title>datavalidation.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #5f826b; font-style: italic;}
+.s5 { color: #2aacb8;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+datavalidation.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright (c) 2010-2024 openpyxl</span>
+
+<span class="s2">from </span><span class="s1">collections </span><span class="s2">import </span><span class="s1">defaultdict</span>
+<span class="s2">from </span><span class="s1">itertools </span><span class="s2">import </span><span class="s1">chain</span>
+<span class="s2">from </span><span class="s1">operator </span><span class="s2">import </span><span class="s1">itemgetter</span>
+
+<span class="s2">from </span><span class="s1">openpyxl</span><span class="s3">.</span><span class="s1">descriptors</span><span class="s3">.</span><span class="s1">serialisable </span><span class="s2">import </span><span class="s1">Serialisable</span>
+<span class="s2">from </span><span class="s1">openpyxl</span><span class="s3">.</span><span class="s1">descriptors </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">Bool</span><span class="s3">,</span>
+    <span class="s1">NoneSet</span><span class="s3">,</span>
+    <span class="s1">String</span><span class="s3">,</span>
+    <span class="s1">Sequence</span><span class="s3">,</span>
+    <span class="s1">Alias</span><span class="s3">,</span>
+    <span class="s1">Integer</span><span class="s3">,</span>
+    <span class="s1">Convertible</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">openpyxl</span><span class="s3">.</span><span class="s1">descriptors</span><span class="s3">.</span><span class="s1">nested </span><span class="s2">import </span><span class="s1">NestedText</span>
+
+<span class="s2">from </span><span class="s1">openpyxl</span><span class="s3">.</span><span class="s1">utils </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">rows_from_range</span><span class="s3">,</span>
+    <span class="s1">coordinate_to_tuple</span><span class="s3">,</span>
+    <span class="s1">get_column_letter</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">collapse_cell_addresses</span><span class="s3">(</span><span class="s1">cells</span><span class="s3">, </span><span class="s1">input_ranges</span><span class="s3">=()):</span>
+    <span class="s4">&quot;&quot;&quot; Collapse a collection of cell co-ordinates down into an optimal 
+        range or collection of ranges. 
+ 
+        E.g. Cells A1, A2, A3, B1, B2 and B3 should have the data-validation 
+        object applied, attempt to collapse down to a single range, A1:B3. 
+ 
+        Currently only collapsing contiguous vertical ranges (i.e. above 
+        example results in A1:A3 B1:B3). 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">ranges </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">input_ranges</span><span class="s3">)</span>
+
+    <span class="s0"># convert cell into row, col tuple</span>
+    <span class="s1">raw_coords </span><span class="s3">= (</span><span class="s1">coordinate_to_tuple</span><span class="s3">(</span><span class="s1">cell</span><span class="s3">) </span><span class="s2">for </span><span class="s1">cell </span><span class="s2">in </span><span class="s1">cells</span><span class="s3">)</span>
+
+    <span class="s0"># group by column in order</span>
+    <span class="s1">grouped_coords </span><span class="s3">= </span><span class="s1">defaultdict</span><span class="s3">(</span><span class="s1">list</span><span class="s3">)</span>
+    <span class="s2">for </span><span class="s1">row</span><span class="s3">, </span><span class="s1">col </span><span class="s2">in </span><span class="s1">sorted</span><span class="s3">(</span><span class="s1">raw_coords</span><span class="s3">, </span><span class="s1">key</span><span class="s3">=</span><span class="s1">itemgetter</span><span class="s3">(</span><span class="s5">1</span><span class="s3">)):</span>
+        <span class="s1">grouped_coords</span><span class="s3">[</span><span class="s1">col</span><span class="s3">].</span><span class="s1">append</span><span class="s3">(</span><span class="s1">row</span><span class="s3">)</span>
+
+    <span class="s0"># create range string from first and last row in column</span>
+    <span class="s2">for </span><span class="s1">col</span><span class="s3">, </span><span class="s1">cells </span><span class="s2">in </span><span class="s1">grouped_coords</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+        <span class="s1">col </span><span class="s3">= </span><span class="s1">get_column_letter</span><span class="s3">(</span><span class="s1">col</span><span class="s3">)</span>
+        <span class="s1">fmt </span><span class="s3">= </span><span class="s6">&quot;{0}{1}:{2}{3}&quot;</span>
+        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">cells</span><span class="s3">) == </span><span class="s5">1</span><span class="s3">:</span>
+            <span class="s1">fmt </span><span class="s3">= </span><span class="s6">&quot;{0}{1}&quot;</span>
+        <span class="s1">r </span><span class="s3">= </span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">col</span><span class="s3">, </span><span class="s1">min</span><span class="s3">(</span><span class="s1">cells</span><span class="s3">), </span><span class="s1">col</span><span class="s3">, </span><span class="s1">max</span><span class="s3">(</span><span class="s1">cells</span><span class="s3">))</span>
+        <span class="s1">ranges</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">r</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s6">&quot; &quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">ranges</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">expand_cell_ranges</span><span class="s3">(</span><span class="s1">range_string</span><span class="s3">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Expand cell ranges to a sequence of addresses. 
+    Reverse of collapse_cell_addresses 
+    Eg. converts &quot;A1:A2 B1:B2&quot; to (A1, A2, B1, B2) 
+    &quot;&quot;&quot;</span>
+    <span class="s0"># expand ranges to rows and then flatten</span>
+    <span class="s1">rows </span><span class="s3">= (</span><span class="s1">rows_from_range</span><span class="s3">(</span><span class="s1">rs</span><span class="s3">) </span><span class="s2">for </span><span class="s1">rs </span><span class="s2">in </span><span class="s1">range_string</span><span class="s3">.</span><span class="s1">split</span><span class="s3">()) </span><span class="s0"># list of rows</span>
+    <span class="s1">cells </span><span class="s3">= (</span><span class="s1">chain</span><span class="s3">(*</span><span class="s1">row</span><span class="s3">) </span><span class="s2">for </span><span class="s1">row </span><span class="s2">in </span><span class="s1">rows</span><span class="s3">) </span><span class="s0"># flatten rows</span>
+    <span class="s2">return </span><span class="s1">set</span><span class="s3">(</span><span class="s1">chain</span><span class="s3">(*</span><span class="s1">cells</span><span class="s3">))</span>
+
+
+<span class="s2">from </span><span class="s3">.</span><span class="s1">cell_range </span><span class="s2">import </span><span class="s1">MultiCellRange</span>
+
+
+<span class="s2">class </span><span class="s1">DataValidation</span><span class="s3">(</span><span class="s1">Serialisable</span><span class="s3">):</span>
+
+    <span class="s1">tagname </span><span class="s3">= </span><span class="s6">&quot;dataValidation&quot;</span>
+
+    <span class="s1">sqref </span><span class="s3">= </span><span class="s1">Convertible</span><span class="s3">(</span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">MultiCellRange</span><span class="s3">)</span>
+    <span class="s1">cells </span><span class="s3">= </span><span class="s1">Alias</span><span class="s3">(</span><span class="s6">&quot;sqref&quot;</span><span class="s3">)</span>
+    <span class="s1">ranges </span><span class="s3">= </span><span class="s1">Alias</span><span class="s3">(</span><span class="s6">&quot;sqref&quot;</span><span class="s3">)</span>
+
+    <span class="s1">showDropDown </span><span class="s3">= </span><span class="s1">Bool</span><span class="s3">(</span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">hide_drop_down </span><span class="s3">= </span><span class="s1">Alias</span><span class="s3">(</span><span class="s6">'showDropDown'</span><span class="s3">)</span>
+    <span class="s1">showInputMessage </span><span class="s3">= </span><span class="s1">Bool</span><span class="s3">(</span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">showErrorMessage </span><span class="s3">= </span><span class="s1">Bool</span><span class="s3">(</span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">allowBlank </span><span class="s3">= </span><span class="s1">Bool</span><span class="s3">(</span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">allow_blank </span><span class="s3">= </span><span class="s1">Alias</span><span class="s3">(</span><span class="s6">'allowBlank'</span><span class="s3">)</span>
+
+    <span class="s1">errorTitle </span><span class="s3">= </span><span class="s1">String</span><span class="s3">(</span><span class="s1">allow_none </span><span class="s3">= </span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">error </span><span class="s3">= </span><span class="s1">String</span><span class="s3">(</span><span class="s1">allow_none </span><span class="s3">= </span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">promptTitle </span><span class="s3">= </span><span class="s1">String</span><span class="s3">(</span><span class="s1">allow_none </span><span class="s3">= </span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">prompt </span><span class="s3">= </span><span class="s1">String</span><span class="s3">(</span><span class="s1">allow_none </span><span class="s3">= </span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">formula1 </span><span class="s3">= </span><span class="s1">NestedText</span><span class="s3">(</span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">str</span><span class="s3">)</span>
+    <span class="s1">formula2 </span><span class="s3">= </span><span class="s1">NestedText</span><span class="s3">(</span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">str</span><span class="s3">)</span>
+
+    <span class="s1">type </span><span class="s3">= </span><span class="s1">NoneSet</span><span class="s3">(</span><span class="s1">values</span><span class="s3">=(</span><span class="s6">&quot;whole&quot;</span><span class="s3">, </span><span class="s6">&quot;decimal&quot;</span><span class="s3">, </span><span class="s6">&quot;list&quot;</span><span class="s3">, </span><span class="s6">&quot;date&quot;</span><span class="s3">, </span><span class="s6">&quot;time&quot;</span><span class="s3">,</span>
+                           <span class="s6">&quot;textLength&quot;</span><span class="s3">, </span><span class="s6">&quot;custom&quot;</span><span class="s3">))</span>
+    <span class="s1">errorStyle </span><span class="s3">= </span><span class="s1">NoneSet</span><span class="s3">(</span><span class="s1">values</span><span class="s3">=(</span><span class="s6">&quot;stop&quot;</span><span class="s3">, </span><span class="s6">&quot;warning&quot;</span><span class="s3">, </span><span class="s6">&quot;information&quot;</span><span class="s3">))</span>
+    <span class="s1">imeMode </span><span class="s3">= </span><span class="s1">NoneSet</span><span class="s3">(</span><span class="s1">values</span><span class="s3">=(</span><span class="s6">&quot;noControl&quot;</span><span class="s3">, </span><span class="s6">&quot;off&quot;</span><span class="s3">, </span><span class="s6">&quot;on&quot;</span><span class="s3">, </span><span class="s6">&quot;disabled&quot;</span><span class="s3">,</span>
+                              <span class="s6">&quot;hiragana&quot;</span><span class="s3">, </span><span class="s6">&quot;fullKatakana&quot;</span><span class="s3">, </span><span class="s6">&quot;halfKatakana&quot;</span><span class="s3">, </span><span class="s6">&quot;fullAlpha&quot;</span><span class="s3">,</span><span class="s6">&quot;halfAlpha&quot;</span><span class="s3">,</span>
+                              <span class="s6">&quot;fullHangul&quot;</span><span class="s3">, </span><span class="s6">&quot;halfHangul&quot;</span><span class="s3">))</span>
+    <span class="s1">operator </span><span class="s3">= </span><span class="s1">NoneSet</span><span class="s3">(</span><span class="s1">values</span><span class="s3">=(</span><span class="s6">&quot;between&quot;</span><span class="s3">, </span><span class="s6">&quot;notBetween&quot;</span><span class="s3">, </span><span class="s6">&quot;equal&quot;</span><span class="s3">, </span><span class="s6">&quot;notEqual&quot;</span><span class="s3">,</span>
+                               <span class="s6">&quot;lessThan&quot;</span><span class="s3">, </span><span class="s6">&quot;lessThanOrEqual&quot;</span><span class="s3">, </span><span class="s6">&quot;greaterThan&quot;</span><span class="s3">, </span><span class="s6">&quot;greaterThanOrEqual&quot;</span><span class="s3">))</span>
+    <span class="s1">validation_type </span><span class="s3">= </span><span class="s1">Alias</span><span class="s3">(</span><span class="s6">'type'</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">,</span>
+                 <span class="s1">type</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">formula1</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">formula2</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">showErrorMessage</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+                 <span class="s1">showInputMessage</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+                 <span class="s1">showDropDown</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+                 <span class="s1">allowBlank</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+                 <span class="s1">sqref</span><span class="s3">=(),</span>
+                 <span class="s1">promptTitle</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">errorStyle</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">error</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">prompt</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">errorTitle</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">imeMode</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">operator</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">allow_blank</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">sqref </span><span class="s3">= </span><span class="s1">sqref</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">showDropDown </span><span class="s3">= </span><span class="s1">showDropDown</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">imeMode </span><span class="s3">= </span><span class="s1">imeMode</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">operator </span><span class="s3">= </span><span class="s1">operator</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">formula1 </span><span class="s3">= </span><span class="s1">formula1</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">formula2 </span><span class="s3">= </span><span class="s1">formula2</span>
+        <span class="s2">if </span><span class="s1">allow_blank </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">allowBlank </span><span class="s3">= </span><span class="s1">allow_blank</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">allowBlank </span><span class="s3">= </span><span class="s1">allowBlank</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">showErrorMessage </span><span class="s3">= </span><span class="s1">showErrorMessage</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">showInputMessage </span><span class="s3">= </span><span class="s1">showInputMessage</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">type </span><span class="s3">= </span><span class="s1">type</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">promptTitle </span><span class="s3">= </span><span class="s1">promptTitle</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">errorStyle </span><span class="s3">= </span><span class="s1">errorStyle</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">error </span><span class="s3">= </span><span class="s1">error</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">prompt </span><span class="s3">= </span><span class="s1">prompt</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">errorTitle </span><span class="s3">= </span><span class="s1">errorTitle</span>
+
+
+    <span class="s2">def </span><span class="s1">add</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">cell</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot;Adds a cell or cell coordinate to this validator&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">cell</span><span class="s3">, </span><span class="s6">&quot;coordinate&quot;</span><span class="s3">):</span>
+            <span class="s1">cell </span><span class="s3">= </span><span class="s1">cell</span><span class="s3">.</span><span class="s1">coordinate</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">sqref </span><span class="s3">+= </span><span class="s1">cell</span>
+
+
+    <span class="s2">def </span><span class="s1">__contains__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">cell</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">cell</span><span class="s3">, </span><span class="s6">&quot;coordinate&quot;</span><span class="s3">):</span>
+            <span class="s1">cell </span><span class="s3">= </span><span class="s1">cell</span><span class="s3">.</span><span class="s1">coordinate</span>
+        <span class="s2">return </span><span class="s1">cell </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">sqref</span>
+
+
+<span class="s2">class </span><span class="s1">DataValidationList</span><span class="s3">(</span><span class="s1">Serialisable</span><span class="s3">):</span>
+
+    <span class="s1">tagname </span><span class="s3">= </span><span class="s6">&quot;dataValidations&quot;</span>
+
+    <span class="s1">disablePrompts </span><span class="s3">= </span><span class="s1">Bool</span><span class="s3">(</span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">xWindow </span><span class="s3">= </span><span class="s1">Integer</span><span class="s3">(</span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">yWindow </span><span class="s3">= </span><span class="s1">Integer</span><span class="s3">(</span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">dataValidation </span><span class="s3">= </span><span class="s1">Sequence</span><span class="s3">(</span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">DataValidation</span><span class="s3">)</span>
+
+    <span class="s1">__elements__ </span><span class="s3">= (</span><span class="s6">'dataValidation'</span><span class="s3">,)</span>
+    <span class="s1">__attrs__ </span><span class="s3">= (</span><span class="s6">'disablePrompts'</span><span class="s3">, </span><span class="s6">'xWindow'</span><span class="s3">, </span><span class="s6">'yWindow'</span><span class="s3">, </span><span class="s6">'count'</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">,</span>
+                 <span class="s1">disablePrompts</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">xWindow</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">yWindow</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">count</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">dataValidation</span><span class="s3">=(),</span>
+                <span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">disablePrompts </span><span class="s3">= </span><span class="s1">disablePrompts</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">xWindow </span><span class="s3">= </span><span class="s1">xWindow</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">yWindow </span><span class="s3">= </span><span class="s1">yWindow</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">dataValidation </span><span class="s3">= </span><span class="s1">dataValidation</span>
+
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">count</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">__len__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">dataValidation</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">append</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dv</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">dataValidation</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">dv</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">to_tree</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">tagname</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Need to skip validations that have no cell ranges 
+        &quot;&quot;&quot;</span>
+        <span class="s1">ranges </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">dataValidation </span><span class="s0"># copy</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">dataValidation </span><span class="s3">= [</span><span class="s1">r </span><span class="s2">for </span><span class="s1">r </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">dataValidation </span><span class="s2">if </span><span class="s1">bool</span><span class="s3">(</span><span class="s1">r</span><span class="s3">.</span><span class="s1">sqref</span><span class="s3">)]</span>
+        <span class="s1">xml </span><span class="s3">= </span><span class="s1">super</span><span class="s3">().</span><span class="s1">to_tree</span><span class="s3">(</span><span class="s1">tagname</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">dataValidation </span><span class="s3">= </span><span class="s1">ranges</span>
+        <span class="s2">return </span><span class="s1">xml</span>
+</pre>
+</body>
+</html>

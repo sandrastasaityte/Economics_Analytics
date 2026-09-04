@@ -1,0 +1,541 @@
+<html>
+<head>
+<title>test_base_indexer.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #2aacb8;}
+.s5 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_base_indexer.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">from </span><span class="s1">pandas </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">DataFrame</span><span class="s2">,</span>
+    <span class="s1">MultiIndex</span><span class="s2">,</span>
+    <span class="s1">Series</span><span class="s2">,</span>
+    <span class="s1">concat</span><span class="s2">,</span>
+    <span class="s1">date_range</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">import </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_testing </span><span class="s0">as </span><span class="s1">tm</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">api</span><span class="s2">.</span><span class="s1">indexers </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">BaseIndexer</span><span class="s2">,</span>
+    <span class="s1">FixedForwardWindowIndexer</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">indexers</span><span class="s2">.</span><span class="s1">objects </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">ExpandingIndexer</span><span class="s2">,</span>
+    <span class="s1">FixedWindowIndexer</span><span class="s2">,</span>
+    <span class="s1">VariableOffsetWindowIndexer</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">tseries</span><span class="s2">.</span><span class="s1">offsets </span><span class="s0">import </span><span class="s1">BusinessDay</span>
+
+
+<span class="s0">def </span><span class="s1">test_bad_get_window_bounds_signature</span><span class="s2">():</span>
+    <span class="s0">class </span><span class="s1">BadIndexer</span><span class="s2">(</span><span class="s1">BaseIndexer</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">get_window_bounds</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+            <span class="s0">return None</span>
+
+    <span class="s1">indexer </span><span class="s2">= </span><span class="s1">BadIndexer</span><span class="s2">()</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s3">&quot;BadIndexer does not implement&quot;</span><span class="s2">):</span>
+        <span class="s1">Series</span><span class="s2">(</span><span class="s1">range</span><span class="s2">(</span><span class="s4">5</span><span class="s2">)).</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">indexer</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_expanding_indexer</span><span class="s2">():</span>
+    <span class="s1">s </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">range</span><span class="s2">(</span><span class="s4">10</span><span class="s2">))</span>
+    <span class="s1">indexer </span><span class="s2">= </span><span class="s1">ExpandingIndexer</span><span class="s2">()</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">s</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">indexer</span><span class="s2">).</span><span class="s1">mean</span><span class="s2">()</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">s</span><span class="s2">.</span><span class="s1">expanding</span><span class="s2">().</span><span class="s1">mean</span><span class="s2">()</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_series_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_indexer_constructor_arg</span><span class="s2">():</span>
+    <span class="s5"># Example found in computation.rst</span>
+    <span class="s1">use_expanding </span><span class="s2">= [</span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">, </span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">, </span><span class="s0">True</span><span class="s2">]</span>
+    <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">({</span><span class="s3">&quot;values&quot;</span><span class="s2">: </span><span class="s1">range</span><span class="s2">(</span><span class="s4">5</span><span class="s2">)})</span>
+
+    <span class="s0">class </span><span class="s1">CustomIndexer</span><span class="s2">(</span><span class="s1">BaseIndexer</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">get_window_bounds</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">num_values</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">center</span><span class="s2">, </span><span class="s1">closed</span><span class="s2">, </span><span class="s1">step</span><span class="s2">):</span>
+            <span class="s1">start </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">empty</span><span class="s2">(</span><span class="s1">num_values</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+            <span class="s1">end </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">empty</span><span class="s2">(</span><span class="s1">num_values</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+            <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">num_values</span><span class="s2">):</span>
+                <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">use_expanding</span><span class="s2">[</span><span class="s1">i</span><span class="s2">]:</span>
+                    <span class="s1">start</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s4">0</span>
+                    <span class="s1">end</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s1">i </span><span class="s2">+ </span><span class="s4">1</span>
+                <span class="s0">else</span><span class="s2">:</span>
+                    <span class="s1">start</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s1">i</span>
+                    <span class="s1">end</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s1">i </span><span class="s2">+ </span><span class="s1">self</span><span class="s2">.</span><span class="s1">window_size</span>
+            <span class="s0">return </span><span class="s1">start</span><span class="s2">, </span><span class="s1">end</span>
+
+    <span class="s1">indexer </span><span class="s2">= </span><span class="s1">CustomIndexer</span><span class="s2">(</span><span class="s1">window_size</span><span class="s2">=</span><span class="s4">1</span><span class="s2">, </span><span class="s1">use_expanding</span><span class="s2">=</span><span class="s1">use_expanding</span><span class="s2">)</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">df</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">indexer</span><span class="s2">).</span><span class="s1">sum</span><span class="s2">()</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">({</span><span class="s3">&quot;values&quot;</span><span class="s2">: [</span><span class="s4">0.0</span><span class="s2">, </span><span class="s4">1.0</span><span class="s2">, </span><span class="s4">3.0</span><span class="s2">, </span><span class="s4">3.0</span><span class="s2">, </span><span class="s4">10.0</span><span class="s2">]})</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_frame_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_indexer_accepts_rolling_args</span><span class="s2">():</span>
+    <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">({</span><span class="s3">&quot;values&quot;</span><span class="s2">: </span><span class="s1">range</span><span class="s2">(</span><span class="s4">5</span><span class="s2">)})</span>
+
+    <span class="s0">class </span><span class="s1">CustomIndexer</span><span class="s2">(</span><span class="s1">BaseIndexer</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">get_window_bounds</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">num_values</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">center</span><span class="s2">, </span><span class="s1">closed</span><span class="s2">, </span><span class="s1">step</span><span class="s2">):</span>
+            <span class="s1">start </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">empty</span><span class="s2">(</span><span class="s1">num_values</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+            <span class="s1">end </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">empty</span><span class="s2">(</span><span class="s1">num_values</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+            <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">num_values</span><span class="s2">):</span>
+                <span class="s0">if </span><span class="s2">(</span>
+                    <span class="s1">center</span>
+                    <span class="s0">and </span><span class="s1">min_periods </span><span class="s2">== </span><span class="s4">1</span>
+                    <span class="s0">and </span><span class="s1">closed </span><span class="s2">== </span><span class="s3">&quot;both&quot;</span>
+                    <span class="s0">and </span><span class="s1">step </span><span class="s2">== </span><span class="s4">1</span>
+                    <span class="s0">and </span><span class="s1">i </span><span class="s2">== </span><span class="s4">2</span>
+                <span class="s2">):</span>
+                    <span class="s1">start</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s4">0</span>
+                    <span class="s1">end</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s1">num_values</span>
+                <span class="s0">else</span><span class="s2">:</span>
+                    <span class="s1">start</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s1">i</span>
+                    <span class="s1">end</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s1">i </span><span class="s2">+ </span><span class="s1">self</span><span class="s2">.</span><span class="s1">window_size</span>
+            <span class="s0">return </span><span class="s1">start</span><span class="s2">, </span><span class="s1">end</span>
+
+    <span class="s1">indexer </span><span class="s2">= </span><span class="s1">CustomIndexer</span><span class="s2">(</span><span class="s1">window_size</span><span class="s2">=</span><span class="s4">1</span><span class="s2">)</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">df</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span>
+        <span class="s1">indexer</span><span class="s2">, </span><span class="s1">center</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s4">1</span><span class="s2">, </span><span class="s1">closed</span><span class="s2">=</span><span class="s3">&quot;both&quot;</span><span class="s2">, </span><span class="s1">step</span><span class="s2">=</span><span class="s4">1</span>
+    <span class="s2">).</span><span class="s1">sum</span><span class="s2">()</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">({</span><span class="s3">&quot;values&quot;</span><span class="s2">: [</span><span class="s4">0.0</span><span class="s2">, </span><span class="s4">1.0</span><span class="s2">, </span><span class="s4">10.0</span><span class="s2">, </span><span class="s4">3.0</span><span class="s2">, </span><span class="s4">4.0</span><span class="s2">]})</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_frame_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s3">&quot;func,np_func,expected,np_kwargs&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s2">(</span><span class="s3">&quot;count&quot;</span><span class="s2">, </span><span class="s1">len</span><span class="s2">, [</span><span class="s4">3.0</span><span class="s2">, </span><span class="s4">3.0</span><span class="s2">, </span><span class="s4">3.0</span><span class="s2">, </span><span class="s4">3.0</span><span class="s2">, </span><span class="s4">3.0</span><span class="s2">, </span><span class="s4">3.0</span><span class="s2">, </span><span class="s4">3.0</span><span class="s2">, </span><span class="s4">3.0</span><span class="s2">, </span><span class="s4">2.0</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">], {}),</span>
+        <span class="s2">(</span><span class="s3">&quot;min&quot;</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">min</span><span class="s2">, [</span><span class="s4">0.0</span><span class="s2">, </span><span class="s4">1.0</span><span class="s2">, </span><span class="s4">2.0</span><span class="s2">, </span><span class="s4">3.0</span><span class="s2">, </span><span class="s4">4.0</span><span class="s2">, </span><span class="s4">6.0</span><span class="s2">, </span><span class="s4">6.0</span><span class="s2">, </span><span class="s4">7.0</span><span class="s2">, </span><span class="s4">8.0</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">], {}),</span>
+        <span class="s2">(</span>
+            <span class="s3">&quot;max&quot;</span><span class="s2">,</span>
+            <span class="s1">np</span><span class="s2">.</span><span class="s1">max</span><span class="s2">,</span>
+            <span class="s2">[</span><span class="s4">2.0</span><span class="s2">, </span><span class="s4">3.0</span><span class="s2">, </span><span class="s4">4.0</span><span class="s2">, </span><span class="s4">100.0</span><span class="s2">, </span><span class="s4">100.0</span><span class="s2">, </span><span class="s4">100.0</span><span class="s2">, </span><span class="s4">8.0</span><span class="s2">, </span><span class="s4">9.0</span><span class="s2">, </span><span class="s4">9.0</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">],</span>
+            <span class="s2">{},</span>
+        <span class="s2">),</span>
+        <span class="s2">(</span>
+            <span class="s3">&quot;std&quot;</span><span class="s2">,</span>
+            <span class="s1">np</span><span class="s2">.</span><span class="s1">std</span><span class="s2">,</span>
+            <span class="s2">[</span>
+                <span class="s4">1.0</span><span class="s2">,</span>
+                <span class="s4">1.0</span><span class="s2">,</span>
+                <span class="s4">1.0</span><span class="s2">,</span>
+                <span class="s4">55.71654452</span><span class="s2">,</span>
+                <span class="s4">54.85739087</span><span class="s2">,</span>
+                <span class="s4">53.9845657</span><span class="s2">,</span>
+                <span class="s4">1.0</span><span class="s2">,</span>
+                <span class="s4">1.0</span><span class="s2">,</span>
+                <span class="s4">0.70710678</span><span class="s2">,</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">,</span>
+            <span class="s2">],</span>
+            <span class="s2">{</span><span class="s3">&quot;ddof&quot;</span><span class="s2">: </span><span class="s4">1</span><span class="s2">},</span>
+        <span class="s2">),</span>
+        <span class="s2">(</span>
+            <span class="s3">&quot;var&quot;</span><span class="s2">,</span>
+            <span class="s1">np</span><span class="s2">.</span><span class="s1">var</span><span class="s2">,</span>
+            <span class="s2">[</span>
+                <span class="s4">1.0</span><span class="s2">,</span>
+                <span class="s4">1.0</span><span class="s2">,</span>
+                <span class="s4">1.0</span><span class="s2">,</span>
+                <span class="s4">3104.333333</span><span class="s2">,</span>
+                <span class="s4">3009.333333</span><span class="s2">,</span>
+                <span class="s4">2914.333333</span><span class="s2">,</span>
+                <span class="s4">1.0</span><span class="s2">,</span>
+                <span class="s4">1.0</span><span class="s2">,</span>
+                <span class="s4">0.500000</span><span class="s2">,</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">,</span>
+            <span class="s2">],</span>
+            <span class="s2">{</span><span class="s3">&quot;ddof&quot;</span><span class="s2">: </span><span class="s4">1</span><span class="s2">},</span>
+        <span class="s2">),</span>
+        <span class="s2">(</span>
+            <span class="s3">&quot;median&quot;</span><span class="s2">,</span>
+            <span class="s1">np</span><span class="s2">.</span><span class="s1">median</span><span class="s2">,</span>
+            <span class="s2">[</span><span class="s4">1.0</span><span class="s2">, </span><span class="s4">2.0</span><span class="s2">, </span><span class="s4">3.0</span><span class="s2">, </span><span class="s4">4.0</span><span class="s2">, </span><span class="s4">6.0</span><span class="s2">, </span><span class="s4">7.0</span><span class="s2">, </span><span class="s4">7.0</span><span class="s2">, </span><span class="s4">8.0</span><span class="s2">, </span><span class="s4">8.5</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">],</span>
+            <span class="s2">{},</span>
+        <span class="s2">),</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_rolling_forward_window</span><span class="s2">(</span>
+    <span class="s1">frame_or_series</span><span class="s2">, </span><span class="s1">func</span><span class="s2">, </span><span class="s1">np_func</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">, </span><span class="s1">np_kwargs</span><span class="s2">, </span><span class="s1">step</span>
+<span class="s2">):</span>
+    <span class="s5"># GH 32865</span>
+    <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">10.0</span><span class="s2">)</span>
+    <span class="s1">values</span><span class="s2">[</span><span class="s4">5</span><span class="s2">] = </span><span class="s4">100.0</span>
+
+    <span class="s1">indexer </span><span class="s2">= </span><span class="s1">FixedForwardWindowIndexer</span><span class="s2">(</span><span class="s1">window_size</span><span class="s2">=</span><span class="s4">3</span><span class="s2">)</span>
+
+    <span class="s1">match </span><span class="s2">= </span><span class="s3">&quot;Forward-looking windows can't have center=True&quot;</span>
+    <span class="s1">rolling </span><span class="s2">= </span><span class="s1">frame_or_series</span><span class="s2">(</span><span class="s1">values</span><span class="s2">).</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">window</span><span class="s2">=</span><span class="s1">indexer</span><span class="s2">, </span><span class="s1">center</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">match</span><span class="s2">):</span>
+        <span class="s1">getattr</span><span class="s2">(</span><span class="s1">rolling</span><span class="s2">, </span><span class="s1">func</span><span class="s2">)()</span>
+
+    <span class="s1">match </span><span class="s2">= </span><span class="s3">&quot;Forward-looking windows don't support setting the closed argument&quot;</span>
+    <span class="s1">rolling </span><span class="s2">= </span><span class="s1">frame_or_series</span><span class="s2">(</span><span class="s1">values</span><span class="s2">).</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">window</span><span class="s2">=</span><span class="s1">indexer</span><span class="s2">, </span><span class="s1">closed</span><span class="s2">=</span><span class="s3">&quot;right&quot;</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">match</span><span class="s2">):</span>
+        <span class="s1">getattr</span><span class="s2">(</span><span class="s1">rolling</span><span class="s2">, </span><span class="s1">func</span><span class="s2">)()</span>
+
+    <span class="s1">rolling </span><span class="s2">= </span><span class="s1">frame_or_series</span><span class="s2">(</span><span class="s1">values</span><span class="s2">).</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">window</span><span class="s2">=</span><span class="s1">indexer</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s4">2</span><span class="s2">, </span><span class="s1">step</span><span class="s2">=</span><span class="s1">step</span><span class="s2">)</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">rolling</span><span class="s2">, </span><span class="s1">func</span><span class="s2">)()</span>
+
+    <span class="s5"># Check that the function output matches the explicitly provided array</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">frame_or_series</span><span class="s2">(</span><span class="s1">expected</span><span class="s2">)[::</span><span class="s1">step</span><span class="s2">]</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s5"># Check that the rolling function output matches applying an alternative</span>
+    <span class="s5"># function to the rolling window object</span>
+    <span class="s1">expected2 </span><span class="s2">= </span><span class="s1">frame_or_series</span><span class="s2">(</span><span class="s1">rolling</span><span class="s2">.</span><span class="s1">apply</span><span class="s2">(</span><span class="s0">lambda </span><span class="s1">x</span><span class="s2">: </span><span class="s1">np_func</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, **</span><span class="s1">np_kwargs</span><span class="s2">)))</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected2</span><span class="s2">)</span>
+
+    <span class="s5"># Check that the function output matches applying an alternative function</span>
+    <span class="s5"># if min_periods isn't specified</span>
+    <span class="s5"># GH 39604: After count-min_periods deprecation, apply(lambda x: len(x))</span>
+    <span class="s5"># is equivalent to count after setting min_periods=0</span>
+    <span class="s1">min_periods </span><span class="s2">= </span><span class="s4">0 </span><span class="s0">if </span><span class="s1">func </span><span class="s2">== </span><span class="s3">&quot;count&quot; </span><span class="s0">else None</span>
+    <span class="s1">rolling3 </span><span class="s2">= </span><span class="s1">frame_or_series</span><span class="s2">(</span><span class="s1">values</span><span class="s2">).</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">window</span><span class="s2">=</span><span class="s1">indexer</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s1">min_periods</span><span class="s2">)</span>
+    <span class="s1">result3 </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">rolling3</span><span class="s2">, </span><span class="s1">func</span><span class="s2">)()</span>
+    <span class="s1">expected3 </span><span class="s2">= </span><span class="s1">frame_or_series</span><span class="s2">(</span><span class="s1">rolling3</span><span class="s2">.</span><span class="s1">apply</span><span class="s2">(</span><span class="s0">lambda </span><span class="s1">x</span><span class="s2">: </span><span class="s1">np_func</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, **</span><span class="s1">np_kwargs</span><span class="s2">)))</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">result3</span><span class="s2">, </span><span class="s1">expected3</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_rolling_forward_skewness</span><span class="s2">(</span><span class="s1">frame_or_series</span><span class="s2">, </span><span class="s1">step</span><span class="s2">):</span>
+    <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">10.0</span><span class="s2">)</span>
+    <span class="s1">values</span><span class="s2">[</span><span class="s4">5</span><span class="s2">] = </span><span class="s4">100.0</span>
+
+    <span class="s1">indexer </span><span class="s2">= </span><span class="s1">FixedForwardWindowIndexer</span><span class="s2">(</span><span class="s1">window_size</span><span class="s2">=</span><span class="s4">5</span><span class="s2">)</span>
+    <span class="s1">rolling </span><span class="s2">= </span><span class="s1">frame_or_series</span><span class="s2">(</span><span class="s1">values</span><span class="s2">).</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">window</span><span class="s2">=</span><span class="s1">indexer</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s4">3</span><span class="s2">, </span><span class="s1">step</span><span class="s2">=</span><span class="s1">step</span><span class="s2">)</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">rolling</span><span class="s2">.</span><span class="s1">skew</span><span class="s2">()</span>
+
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">frame_or_series</span><span class="s2">(</span>
+        <span class="s2">[</span>
+            <span class="s4">0.0</span><span class="s2">,</span>
+            <span class="s4">2.232396</span><span class="s2">,</span>
+            <span class="s4">2.229508</span><span class="s2">,</span>
+            <span class="s4">2.228340</span><span class="s2">,</span>
+            <span class="s4">2.229091</span><span class="s2">,</span>
+            <span class="s4">2.231989</span><span class="s2">,</span>
+            <span class="s4">0.0</span><span class="s2">,</span>
+            <span class="s4">0.0</span><span class="s2">,</span>
+            <span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">,</span>
+            <span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">,</span>
+        <span class="s2">]</span>
+    <span class="s2">)[::</span><span class="s1">step</span><span class="s2">]</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s3">&quot;func,expected&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s2">(</span><span class="s3">&quot;cov&quot;</span><span class="s2">, [</span><span class="s4">2.0</span><span class="s2">, </span><span class="s4">2.0</span><span class="s2">, </span><span class="s4">2.0</span><span class="s2">, </span><span class="s4">97.0</span><span class="s2">, </span><span class="s4">2.0</span><span class="s2">, -</span><span class="s4">93.0</span><span class="s2">, </span><span class="s4">2.0</span><span class="s2">, </span><span class="s4">2.0</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">]),</span>
+        <span class="s2">(</span>
+            <span class="s3">&quot;corr&quot;</span><span class="s2">,</span>
+            <span class="s2">[</span>
+                <span class="s4">1.0</span><span class="s2">,</span>
+                <span class="s4">1.0</span><span class="s2">,</span>
+                <span class="s4">1.0</span><span class="s2">,</span>
+                <span class="s4">0.8704775290207161</span><span class="s2">,</span>
+                <span class="s4">0.018229084250926637</span><span class="s2">,</span>
+                <span class="s2">-</span><span class="s4">0.861357304646493</span><span class="s2">,</span>
+                <span class="s4">1.0</span><span class="s2">,</span>
+                <span class="s4">1.0</span><span class="s2">,</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">,</span>
+                <span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">,</span>
+            <span class="s2">],</span>
+        <span class="s2">),</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_rolling_forward_cov_corr</span><span class="s2">(</span><span class="s1">func</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">):</span>
+    <span class="s1">values1 </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s4">10</span><span class="s2">).</span><span class="s1">reshape</span><span class="s2">(-</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)</span>
+    <span class="s1">values2 </span><span class="s2">= </span><span class="s1">values1 </span><span class="s2">* </span><span class="s4">2</span>
+    <span class="s1">values1</span><span class="s2">[</span><span class="s4">5</span><span class="s2">, </span><span class="s4">0</span><span class="s2">] = </span><span class="s4">100</span>
+    <span class="s1">values </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">concatenate</span><span class="s2">([</span><span class="s1">values1</span><span class="s2">, </span><span class="s1">values2</span><span class="s2">], </span><span class="s1">axis</span><span class="s2">=</span><span class="s4">1</span><span class="s2">)</span>
+
+    <span class="s1">indexer </span><span class="s2">= </span><span class="s1">FixedForwardWindowIndexer</span><span class="s2">(</span><span class="s1">window_size</span><span class="s2">=</span><span class="s4">3</span><span class="s2">)</span>
+    <span class="s1">rolling </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span><span class="s1">values</span><span class="s2">).</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">window</span><span class="s2">=</span><span class="s1">indexer</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s4">3</span><span class="s2">)</span>
+    <span class="s5"># We are interested in checking only pairwise covariance / correlation</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">rolling</span><span class="s2">, </span><span class="s1">func</span><span class="s2">)().</span><span class="s1">loc</span><span class="s2">[(</span><span class="s1">slice</span><span class="s2">(</span><span class="s0">None</span><span class="s2">), </span><span class="s4">1</span><span class="s2">), </span><span class="s4">0</span><span class="s2">]</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">result</span><span class="s2">.</span><span class="s1">reset_index</span><span class="s2">(</span><span class="s1">drop</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">expected</span><span class="s2">).</span><span class="s1">reset_index</span><span class="s2">(</span><span class="s1">drop</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">expected</span><span class="s2">.</span><span class="s1">name </span><span class="s2">= </span><span class="s1">result</span><span class="s2">.</span><span class="s1">name</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s3">&quot;closed,expected_data&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s2">[</span><span class="s3">&quot;right&quot;</span><span class="s2">, [</span><span class="s4">0.0</span><span class="s2">, </span><span class="s4">1.0</span><span class="s2">, </span><span class="s4">2.0</span><span class="s2">, </span><span class="s4">3.0</span><span class="s2">, </span><span class="s4">7.0</span><span class="s2">, </span><span class="s4">12.0</span><span class="s2">, </span><span class="s4">6.0</span><span class="s2">, </span><span class="s4">7.0</span><span class="s2">, </span><span class="s4">8.0</span><span class="s2">, </span><span class="s4">9.0</span><span class="s2">]],</span>
+        <span class="s2">[</span><span class="s3">&quot;left&quot;</span><span class="s2">, [</span><span class="s4">0.0</span><span class="s2">, </span><span class="s4">0.0</span><span class="s2">, </span><span class="s4">1.0</span><span class="s2">, </span><span class="s4">2.0</span><span class="s2">, </span><span class="s4">5.0</span><span class="s2">, </span><span class="s4">9.0</span><span class="s2">, </span><span class="s4">5.0</span><span class="s2">, </span><span class="s4">6.0</span><span class="s2">, </span><span class="s4">7.0</span><span class="s2">, </span><span class="s4">8.0</span><span class="s2">]],</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_non_fixed_variable_window_indexer</span><span class="s2">(</span><span class="s1">closed</span><span class="s2">, </span><span class="s1">expected_data</span><span class="s2">):</span>
+    <span class="s1">index </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span><span class="s3">&quot;2020&quot;</span><span class="s2">, </span><span class="s1">periods</span><span class="s2">=</span><span class="s4">10</span><span class="s2">)</span>
+    <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span><span class="s1">range</span><span class="s2">(</span><span class="s4">10</span><span class="s2">), </span><span class="s1">index</span><span class="s2">=</span><span class="s1">index</span><span class="s2">)</span>
+    <span class="s1">offset </span><span class="s2">= </span><span class="s1">BusinessDay</span><span class="s2">(</span><span class="s4">1</span><span class="s2">)</span>
+    <span class="s1">indexer </span><span class="s2">= </span><span class="s1">VariableOffsetWindowIndexer</span><span class="s2">(</span><span class="s1">index</span><span class="s2">=</span><span class="s1">index</span><span class="s2">, </span><span class="s1">offset</span><span class="s2">=</span><span class="s1">offset</span><span class="s2">)</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">df</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">indexer</span><span class="s2">, </span><span class="s1">closed</span><span class="s2">=</span><span class="s1">closed</span><span class="s2">).</span><span class="s1">sum</span><span class="s2">()</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span><span class="s1">expected_data</span><span class="s2">, </span><span class="s1">index</span><span class="s2">=</span><span class="s1">index</span><span class="s2">)</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_frame_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_variableoffsetwindowindexer_not_dti</span><span class="s2">():</span>
+    <span class="s5"># GH 54379</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s3">&quot;index must be a DatetimeIndex.&quot;</span><span class="s2">):</span>
+        <span class="s1">VariableOffsetWindowIndexer</span><span class="s2">(</span><span class="s1">index</span><span class="s2">=</span><span class="s3">&quot;foo&quot;</span><span class="s2">, </span><span class="s1">offset</span><span class="s2">=</span><span class="s1">BusinessDay</span><span class="s2">(</span><span class="s4">1</span><span class="s2">))</span>
+
+
+<span class="s0">def </span><span class="s1">test_variableoffsetwindowindexer_not_offset</span><span class="s2">():</span>
+    <span class="s5"># GH 54379</span>
+    <span class="s1">idx </span><span class="s2">= </span><span class="s1">date_range</span><span class="s2">(</span><span class="s3">&quot;2020&quot;</span><span class="s2">, </span><span class="s1">periods</span><span class="s2">=</span><span class="s4">10</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s3">&quot;offset must be a DateOffset-like object.&quot;</span><span class="s2">):</span>
+        <span class="s1">VariableOffsetWindowIndexer</span><span class="s2">(</span><span class="s1">index</span><span class="s2">=</span><span class="s1">idx</span><span class="s2">, </span><span class="s1">offset</span><span class="s2">=</span><span class="s3">&quot;foo&quot;</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_fixed_forward_indexer_count</span><span class="s2">(</span><span class="s1">step</span><span class="s2">):</span>
+    <span class="s5"># GH: 35579</span>
+    <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">({</span><span class="s3">&quot;b&quot;</span><span class="s2">: [</span><span class="s0">None</span><span class="s2">, </span><span class="s0">None</span><span class="s2">, </span><span class="s0">None</span><span class="s2">, </span><span class="s4">7</span><span class="s2">]})</span>
+    <span class="s1">indexer </span><span class="s2">= </span><span class="s1">FixedForwardWindowIndexer</span><span class="s2">(</span><span class="s1">window_size</span><span class="s2">=</span><span class="s4">2</span><span class="s2">)</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">df</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">window</span><span class="s2">=</span><span class="s1">indexer</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s4">0</span><span class="s2">, </span><span class="s1">step</span><span class="s2">=</span><span class="s1">step</span><span class="s2">).</span><span class="s1">count</span><span class="s2">()</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">({</span><span class="s3">&quot;b&quot;</span><span class="s2">: [</span><span class="s4">0.0</span><span class="s2">, </span><span class="s4">0.0</span><span class="s2">, </span><span class="s4">1.0</span><span class="s2">, </span><span class="s4">1.0</span><span class="s2">]})[::</span><span class="s1">step</span><span class="s2">]</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_frame_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s2">(</span><span class="s3">&quot;end_value&quot;</span><span class="s2">, </span><span class="s3">&quot;values&quot;</span><span class="s2">), [(</span><span class="s4">1</span><span class="s2">, [</span><span class="s4">0.0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">2</span><span class="s2">]), (-</span><span class="s4">1</span><span class="s2">, [</span><span class="s4">0.0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">1</span><span class="s2">])]</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">((</span><span class="s3">&quot;func&quot;</span><span class="s2">, </span><span class="s3">&quot;args&quot;</span><span class="s2">), [(</span><span class="s3">&quot;median&quot;</span><span class="s2">, []), (</span><span class="s3">&quot;quantile&quot;</span><span class="s2">, [</span><span class="s4">0.5</span><span class="s2">])])</span>
+<span class="s0">def </span><span class="s1">test_indexer_quantile_sum</span><span class="s2">(</span><span class="s1">end_value</span><span class="s2">, </span><span class="s1">values</span><span class="s2">, </span><span class="s1">func</span><span class="s2">, </span><span class="s1">args</span><span class="s2">):</span>
+    <span class="s5"># GH 37153</span>
+    <span class="s0">class </span><span class="s1">CustomIndexer</span><span class="s2">(</span><span class="s1">BaseIndexer</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">get_window_bounds</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">num_values</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">center</span><span class="s2">, </span><span class="s1">closed</span><span class="s2">, </span><span class="s1">step</span><span class="s2">):</span>
+            <span class="s1">start </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">empty</span><span class="s2">(</span><span class="s1">num_values</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+            <span class="s1">end </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">empty</span><span class="s2">(</span><span class="s1">num_values</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+            <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">num_values</span><span class="s2">):</span>
+                <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">use_expanding</span><span class="s2">[</span><span class="s1">i</span><span class="s2">]:</span>
+                    <span class="s1">start</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s4">0</span>
+                    <span class="s1">end</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s1">max</span><span class="s2">(</span><span class="s1">i </span><span class="s2">+ </span><span class="s1">end_value</span><span class="s2">, </span><span class="s4">1</span><span class="s2">)</span>
+                <span class="s0">else</span><span class="s2">:</span>
+                    <span class="s1">start</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s1">i</span>
+                    <span class="s1">end</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s1">i </span><span class="s2">+ </span><span class="s1">self</span><span class="s2">.</span><span class="s1">window_size</span>
+            <span class="s0">return </span><span class="s1">start</span><span class="s2">, </span><span class="s1">end</span>
+
+    <span class="s1">use_expanding </span><span class="s2">= [</span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">, </span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">, </span><span class="s0">True</span><span class="s2">]</span>
+    <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">({</span><span class="s3">&quot;values&quot;</span><span class="s2">: </span><span class="s1">range</span><span class="s2">(</span><span class="s4">5</span><span class="s2">)})</span>
+
+    <span class="s1">indexer </span><span class="s2">= </span><span class="s1">CustomIndexer</span><span class="s2">(</span><span class="s1">window_size</span><span class="s2">=</span><span class="s4">1</span><span class="s2">, </span><span class="s1">use_expanding</span><span class="s2">=</span><span class="s1">use_expanding</span><span class="s2">)</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">df</span><span class="s2">.</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">indexer</span><span class="s2">), </span><span class="s1">func</span><span class="s2">)(*</span><span class="s1">args</span><span class="s2">)</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">({</span><span class="s3">&quot;values&quot;</span><span class="s2">: </span><span class="s1">values</span><span class="s2">})</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_frame_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s3">&quot;indexer_class&quot;</span><span class="s2">, [</span><span class="s1">FixedWindowIndexer</span><span class="s2">, </span><span class="s1">FixedForwardWindowIndexer</span><span class="s2">, </span><span class="s1">ExpandingIndexer</span><span class="s2">]</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s3">&quot;window_size&quot;</span><span class="s2">, [</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">12</span><span class="s2">])</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s3">&quot;df_data&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s2">{</span><span class="s3">&quot;a&quot;</span><span class="s2">: [</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">], </span><span class="s3">&quot;b&quot;</span><span class="s2">: [</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">]},</span>
+        <span class="s2">{</span><span class="s3">&quot;a&quot;</span><span class="s2">: [</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">], </span><span class="s3">&quot;b&quot;</span><span class="s2">: [</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">]},</span>
+        <span class="s2">{</span><span class="s3">&quot;a&quot;</span><span class="s2">: [</span><span class="s4">1</span><span class="s2">] * </span><span class="s4">16</span><span class="s2">, </span><span class="s3">&quot;b&quot;</span><span class="s2">: [</span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, *</span><span class="s1">list</span><span class="s2">(</span><span class="s1">range</span><span class="s2">(</span><span class="s4">4</span><span class="s2">, </span><span class="s4">16</span><span class="s2">))]},</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_indexers_are_reusable_after_groupby_rolling</span><span class="s2">(</span>
+    <span class="s1">indexer_class</span><span class="s2">, </span><span class="s1">window_size</span><span class="s2">, </span><span class="s1">df_data</span>
+<span class="s2">):</span>
+    <span class="s5"># GH 43267</span>
+    <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span><span class="s1">df_data</span><span class="s2">)</span>
+    <span class="s1">num_trials </span><span class="s2">= </span><span class="s4">3</span>
+    <span class="s1">indexer </span><span class="s2">= </span><span class="s1">indexer_class</span><span class="s2">(</span><span class="s1">window_size</span><span class="s2">=</span><span class="s1">window_size</span><span class="s2">)</span>
+    <span class="s1">original_window_size </span><span class="s2">= </span><span class="s1">indexer</span><span class="s2">.</span><span class="s1">window_size</span>
+    <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">num_trials</span><span class="s2">):</span>
+        <span class="s1">df</span><span class="s2">.</span><span class="s1">groupby</span><span class="s2">(</span><span class="s3">&quot;a&quot;</span><span class="s2">)[</span><span class="s3">&quot;b&quot;</span><span class="s2">].</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">window</span><span class="s2">=</span><span class="s1">indexer</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s4">1</span><span class="s2">).</span><span class="s1">mean</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">indexer</span><span class="s2">.</span><span class="s1">window_size </span><span class="s2">== </span><span class="s1">original_window_size</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s3">&quot;window_size, num_values, expected_start, expected_end&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, [</span><span class="s4">0</span><span class="s2">], [</span><span class="s4">1</span><span class="s2">]),</span>
+        <span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, [</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">], [</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">]),</span>
+        <span class="s2">(</span><span class="s4">2</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, [</span><span class="s4">0</span><span class="s2">], [</span><span class="s4">1</span><span class="s2">]),</span>
+        <span class="s2">(</span><span class="s4">2</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, [</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">], [</span><span class="s4">2</span><span class="s2">, </span><span class="s4">2</span><span class="s2">]),</span>
+        <span class="s2">(</span><span class="s4">5</span><span class="s2">, </span><span class="s4">12</span><span class="s2">, </span><span class="s1">range</span><span class="s2">(</span><span class="s4">12</span><span class="s2">), </span><span class="s1">list</span><span class="s2">(</span><span class="s1">range</span><span class="s2">(</span><span class="s4">5</span><span class="s2">, </span><span class="s4">12</span><span class="s2">)) + [</span><span class="s4">12</span><span class="s2">] * </span><span class="s4">5</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">12</span><span class="s2">, </span><span class="s4">5</span><span class="s2">, </span><span class="s1">range</span><span class="s2">(</span><span class="s4">5</span><span class="s2">), [</span><span class="s4">5</span><span class="s2">] * </span><span class="s4">5</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([]), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([])),</span>
+        <span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">0</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([]), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([])),</span>
+        <span class="s2">(</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, [</span><span class="s4">0</span><span class="s2">], [</span><span class="s4">0</span><span class="s2">]),</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_fixed_forward_indexer_bounds</span><span class="s2">(</span>
+    <span class="s1">window_size</span><span class="s2">, </span><span class="s1">num_values</span><span class="s2">, </span><span class="s1">expected_start</span><span class="s2">, </span><span class="s1">expected_end</span><span class="s2">, </span><span class="s1">step</span>
+<span class="s2">):</span>
+    <span class="s5"># GH 43267</span>
+    <span class="s1">indexer </span><span class="s2">= </span><span class="s1">FixedForwardWindowIndexer</span><span class="s2">(</span><span class="s1">window_size</span><span class="s2">=</span><span class="s1">window_size</span><span class="s2">)</span>
+    <span class="s1">start</span><span class="s2">, </span><span class="s1">end </span><span class="s2">= </span><span class="s1">indexer</span><span class="s2">.</span><span class="s1">get_window_bounds</span><span class="s2">(</span><span class="s1">num_values</span><span class="s2">=</span><span class="s1">num_values</span><span class="s2">, </span><span class="s1">step</span><span class="s2">=</span><span class="s1">step</span><span class="s2">)</span>
+
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span>
+        <span class="s1">start</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">expected_start</span><span class="s2">[::</span><span class="s1">step</span><span class="s2">]), </span><span class="s1">check_dtype</span><span class="s2">=</span><span class="s0">False</span>
+    <span class="s2">)</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_numpy_array_equal</span><span class="s2">(</span><span class="s1">end</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">expected_end</span><span class="s2">[::</span><span class="s1">step</span><span class="s2">]), </span><span class="s1">check_dtype</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">start</span><span class="s2">) == </span><span class="s1">len</span><span class="s2">(</span><span class="s1">end</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s3">&quot;df, window_size, expected&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s2">(</span>
+            <span class="s1">DataFrame</span><span class="s2">({</span><span class="s3">&quot;b&quot;</span><span class="s2">: [</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">], </span><span class="s3">&quot;a&quot;</span><span class="s2">: [</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">2</span><span class="s2">]}),</span>
+            <span class="s4">2</span><span class="s2">,</span>
+            <span class="s1">Series</span><span class="s2">(</span>
+                <span class="s2">[</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1.5</span><span class="s2">, </span><span class="s4">2.0</span><span class="s2">],</span>
+                <span class="s1">index</span><span class="s2">=</span><span class="s1">MultiIndex</span><span class="s2">.</span><span class="s1">from_arrays</span><span class="s2">([[</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">2</span><span class="s2">], </span><span class="s1">range</span><span class="s2">(</span><span class="s4">3</span><span class="s2">)], </span><span class="s1">names</span><span class="s2">=[</span><span class="s3">&quot;a&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">]),</span>
+                <span class="s1">name</span><span class="s2">=</span><span class="s3">&quot;b&quot;</span><span class="s2">,</span>
+                <span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+            <span class="s2">),</span>
+        <span class="s2">),</span>
+        <span class="s2">(</span>
+            <span class="s1">DataFrame</span><span class="s2">(</span>
+                <span class="s2">{</span>
+                    <span class="s3">&quot;b&quot;</span><span class="s2">: [</span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">, *</span><span class="s1">list</span><span class="s2">(</span><span class="s1">range</span><span class="s2">(</span><span class="s4">4</span><span class="s2">, </span><span class="s4">18</span><span class="s2">))],</span>
+                    <span class="s3">&quot;a&quot;</span><span class="s2">: [</span><span class="s4">1</span><span class="s2">] * </span><span class="s4">7 </span><span class="s2">+ [</span><span class="s4">2</span><span class="s2">] * </span><span class="s4">11</span><span class="s2">,</span>
+                    <span class="s3">&quot;c&quot;</span><span class="s2">: </span><span class="s1">range</span><span class="s2">(</span><span class="s4">18</span><span class="s2">),</span>
+                <span class="s2">}</span>
+            <span class="s2">),</span>
+            <span class="s4">12</span><span class="s2">,</span>
+            <span class="s1">Series</span><span class="s2">(</span>
+                <span class="s2">[</span>
+                    <span class="s4">3.6</span><span class="s2">,</span>
+                    <span class="s4">3.6</span><span class="s2">,</span>
+                    <span class="s4">4.25</span><span class="s2">,</span>
+                    <span class="s4">5.0</span><span class="s2">,</span>
+                    <span class="s4">5.0</span><span class="s2">,</span>
+                    <span class="s4">5.5</span><span class="s2">,</span>
+                    <span class="s4">6.0</span><span class="s2">,</span>
+                    <span class="s4">12.0</span><span class="s2">,</span>
+                    <span class="s4">12.5</span><span class="s2">,</span>
+                    <span class="s4">13.0</span><span class="s2">,</span>
+                    <span class="s4">13.5</span><span class="s2">,</span>
+                    <span class="s4">14.0</span><span class="s2">,</span>
+                    <span class="s4">14.5</span><span class="s2">,</span>
+                    <span class="s4">15.0</span><span class="s2">,</span>
+                    <span class="s4">15.5</span><span class="s2">,</span>
+                    <span class="s4">16.0</span><span class="s2">,</span>
+                    <span class="s4">16.5</span><span class="s2">,</span>
+                    <span class="s4">17.0</span><span class="s2">,</span>
+                <span class="s2">],</span>
+                <span class="s1">index</span><span class="s2">=</span><span class="s1">MultiIndex</span><span class="s2">.</span><span class="s1">from_arrays</span><span class="s2">(</span>
+                    <span class="s2">[[</span><span class="s4">1</span><span class="s2">] * </span><span class="s4">7 </span><span class="s2">+ [</span><span class="s4">2</span><span class="s2">] * </span><span class="s4">11</span><span class="s2">, </span><span class="s1">range</span><span class="s2">(</span><span class="s4">18</span><span class="s2">)], </span><span class="s1">names</span><span class="s2">=[</span><span class="s3">&quot;a&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">]</span>
+                <span class="s2">),</span>
+                <span class="s1">name</span><span class="s2">=</span><span class="s3">&quot;b&quot;</span><span class="s2">,</span>
+                <span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">,</span>
+            <span class="s2">),</span>
+        <span class="s2">),</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_rolling_groupby_with_fixed_forward_specific</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s1">window_size</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">):</span>
+    <span class="s5"># GH 43267</span>
+    <span class="s1">indexer </span><span class="s2">= </span><span class="s1">FixedForwardWindowIndexer</span><span class="s2">(</span><span class="s1">window_size</span><span class="s2">=</span><span class="s1">window_size</span><span class="s2">)</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">df</span><span class="s2">.</span><span class="s1">groupby</span><span class="s2">(</span><span class="s3">&quot;a&quot;</span><span class="s2">)[</span><span class="s3">&quot;b&quot;</span><span class="s2">].</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">window</span><span class="s2">=</span><span class="s1">indexer</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s4">1</span><span class="s2">).</span><span class="s1">mean</span><span class="s2">()</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_series_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s3">&quot;group_keys&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s2">(</span><span class="s4">1</span><span class="s2">,),</span>
+        <span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">2</span><span class="s2">, </span><span class="s4">1</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">1</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">2</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">) * </span><span class="s4">4</span><span class="s2">,</span>
+        <span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">) * </span><span class="s4">5</span><span class="s2">,</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s3">&quot;window_size&quot;</span><span class="s2">, [</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">, </span><span class="s4">5</span><span class="s2">, </span><span class="s4">8</span><span class="s2">, </span><span class="s4">20</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_rolling_groupby_with_fixed_forward_many</span><span class="s2">(</span><span class="s1">group_keys</span><span class="s2">, </span><span class="s1">window_size</span><span class="s2">):</span>
+    <span class="s5"># GH 43267</span>
+    <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span>
+        <span class="s2">{</span>
+            <span class="s3">&quot;a&quot;</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">list</span><span class="s2">(</span><span class="s1">group_keys</span><span class="s2">)),</span>
+            <span class="s3">&quot;b&quot;</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">group_keys</span><span class="s2">), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">) + </span><span class="s4">17</span><span class="s2">,</span>
+            <span class="s3">&quot;c&quot;</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">group_keys</span><span class="s2">), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">),</span>
+        <span class="s2">}</span>
+    <span class="s2">)</span>
+
+    <span class="s1">indexer </span><span class="s2">= </span><span class="s1">FixedForwardWindowIndexer</span><span class="s2">(</span><span class="s1">window_size</span><span class="s2">=</span><span class="s1">window_size</span><span class="s2">)</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">df</span><span class="s2">.</span><span class="s1">groupby</span><span class="s2">(</span><span class="s3">&quot;a&quot;</span><span class="s2">)[</span><span class="s3">&quot;b&quot;</span><span class="s2">].</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">window</span><span class="s2">=</span><span class="s1">indexer</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">=</span><span class="s4">1</span><span class="s2">).</span><span class="s1">sum</span><span class="s2">()</span>
+    <span class="s1">result</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">names </span><span class="s2">= [</span><span class="s3">&quot;a&quot;</span><span class="s2">, </span><span class="s3">&quot;c&quot;</span><span class="s2">]</span>
+
+    <span class="s1">groups </span><span class="s2">= </span><span class="s1">df</span><span class="s2">.</span><span class="s1">groupby</span><span class="s2">(</span><span class="s3">&quot;a&quot;</span><span class="s2">)[[</span><span class="s3">&quot;a&quot;</span><span class="s2">, </span><span class="s3">&quot;b&quot;</span><span class="s2">, </span><span class="s3">&quot;c&quot;</span><span class="s2">]]</span>
+    <span class="s1">manual </span><span class="s2">= </span><span class="s1">concat</span><span class="s2">(</span>
+        <span class="s2">[</span>
+            <span class="s1">g</span><span class="s2">.</span><span class="s1">assign</span><span class="s2">(</span>
+                <span class="s1">b</span><span class="s2">=[</span>
+                    <span class="s1">g</span><span class="s2">[</span><span class="s3">&quot;b&quot;</span><span class="s2">].</span><span class="s1">iloc</span><span class="s2">[</span><span class="s1">i </span><span class="s2">: </span><span class="s1">i </span><span class="s2">+ </span><span class="s1">window_size</span><span class="s2">].</span><span class="s1">sum</span><span class="s2">(</span><span class="s1">min_count</span><span class="s2">=</span><span class="s4">1</span><span class="s2">)</span>
+                    <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">g</span><span class="s2">))</span>
+                <span class="s2">]</span>
+            <span class="s2">)</span>
+            <span class="s0">for </span><span class="s1">_</span><span class="s2">, </span><span class="s1">g </span><span class="s0">in </span><span class="s1">groups</span>
+        <span class="s2">]</span>
+    <span class="s2">)</span>
+    <span class="s1">manual </span><span class="s2">= </span><span class="s1">manual</span><span class="s2">.</span><span class="s1">set_index</span><span class="s2">([</span><span class="s3">&quot;a&quot;</span><span class="s2">, </span><span class="s3">&quot;c&quot;</span><span class="s2">])[</span><span class="s3">&quot;b&quot;</span><span class="s2">]</span>
+
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_series_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">manual</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_unequal_start_end_bounds</span><span class="s2">():</span>
+    <span class="s0">class </span><span class="s1">CustomIndexer</span><span class="s2">(</span><span class="s1">BaseIndexer</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">get_window_bounds</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">num_values</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">center</span><span class="s2">, </span><span class="s1">closed</span><span class="s2">, </span><span class="s1">step</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">1</span><span class="s2">]), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">])</span>
+
+    <span class="s1">indexer </span><span class="s2">= </span><span class="s1">CustomIndexer</span><span class="s2">()</span>
+    <span class="s1">roll </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s4">1</span><span class="s2">).</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">indexer</span><span class="s2">)</span>
+    <span class="s1">match </span><span class="s2">= </span><span class="s3">&quot;start&quot;</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">match</span><span class="s2">):</span>
+        <span class="s1">roll</span><span class="s2">.</span><span class="s1">mean</span><span class="s2">()</span>
+
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">match</span><span class="s2">):</span>
+        <span class="s1">next</span><span class="s2">(</span><span class="s1">iter</span><span class="s2">(</span><span class="s1">roll</span><span class="s2">))</span>
+
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">match</span><span class="s2">):</span>
+        <span class="s1">roll</span><span class="s2">.</span><span class="s1">corr</span><span class="s2">(</span><span class="s1">pairwise</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">match</span><span class="s2">):</span>
+        <span class="s1">roll</span><span class="s2">.</span><span class="s1">cov</span><span class="s2">(</span><span class="s1">pairwise</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_unequal_bounds_to_object</span><span class="s2">():</span>
+    <span class="s5"># GH 44470</span>
+    <span class="s0">class </span><span class="s1">CustomIndexer</span><span class="s2">(</span><span class="s1">BaseIndexer</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">get_window_bounds</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">num_values</span><span class="s2">, </span><span class="s1">min_periods</span><span class="s2">, </span><span class="s1">center</span><span class="s2">, </span><span class="s1">closed</span><span class="s2">, </span><span class="s1">step</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">1</span><span class="s2">]), </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s4">2</span><span class="s2">])</span>
+
+    <span class="s1">indexer </span><span class="s2">= </span><span class="s1">CustomIndexer</span><span class="s2">()</span>
+    <span class="s1">roll </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">([</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">]).</span><span class="s1">rolling</span><span class="s2">(</span><span class="s1">indexer</span><span class="s2">)</span>
+    <span class="s1">match </span><span class="s2">= </span><span class="s3">&quot;start and end&quot;</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">match</span><span class="s2">):</span>
+        <span class="s1">roll</span><span class="s2">.</span><span class="s1">mean</span><span class="s2">()</span>
+
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">match</span><span class="s2">):</span>
+        <span class="s1">next</span><span class="s2">(</span><span class="s1">iter</span><span class="s2">(</span><span class="s1">roll</span><span class="s2">))</span>
+
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">match</span><span class="s2">):</span>
+        <span class="s1">roll</span><span class="s2">.</span><span class="s1">corr</span><span class="s2">(</span><span class="s1">pairwise</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">match</span><span class="s2">):</span>
+        <span class="s1">roll</span><span class="s2">.</span><span class="s1">cov</span><span class="s2">(</span><span class="s1">pairwise</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

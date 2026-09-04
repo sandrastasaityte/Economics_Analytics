@@ -1,0 +1,172 @@
+<html>
+<head>
+<title>limited_api_cython.pyx</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #bcbec4;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+limited_api_cython.pyx</font>
+</center></td></tr></table>
+<pre><span class="s0">#cython: language_level=3</span>
+
+<span class="s0">&quot;&quot;&quot;</span>
+<span class="s0">Make sure cython can compile using the NumPy C-API in limited API mode</span>
+<span class="s0">(see meson.build).</span>
+
+<span class="s0">&quot;&quot;&quot;</span>
+
+<span class="s0">cimport numpy as cnp</span>
+
+<span class="s0">cnp.import_array()</span>
+
+
+<span class="s0">def nonzero(cnp.ndarray arr):</span>
+    <span class="s0">&quot;&quot;&quot;Count non-zero elements of a float64 array using the NpyIter API.&quot;&quot;&quot;</span>
+    <span class="s0">cdef cnp.NpyIter *it</span>
+    <span class="s0">cdef cnp.NpyIter_IterNextFunc iternext</span>
+    <span class="s0">cdef char **dataptr</span>
+    <span class="s0">cdef cnp.npy_intp *strideptr</span>
+    <span class="s0">cdef cnp.npy_intp *innersizeptr</span>
+    <span class="s0">cdef cnp.npy_intp nonzero_count = 0</span>
+    <span class="s0">cdef cnp.npy_intp stride, count</span>
+    <span class="s0">cdef char *data</span>
+
+    <span class="s0">if cnp.PyArray_SIZE(arr) == 0:</span>
+        <span class="s0">return 0</span>
+
+    <span class="s0">it = cnp.NpyIter_New(</span>
+        <span class="s0">arr,</span>
+        <span class="s0">cnp.NPY_ITER_READONLY | cnp.NPY_ITER_EXTERNAL_LOOP | cnp.NPY_ITER_REFS_OK,</span>
+        <span class="s0">cnp.NPY_KEEPORDER, cnp.NPY_NO_CASTING, &lt;cnp.dtype&gt;NULL)</span>
+    <span class="s0">if it == NULL:</span>
+        <span class="s0">raise RuntimeError(&quot;NpyIter_New failed&quot;)</span>
+    <span class="s0">iternext = cnp.NpyIter_GetIterNext(it, NULL)</span>
+    <span class="s0">if iternext == NULL:</span>
+        <span class="s0">cnp.NpyIter_Deallocate(it)</span>
+        <span class="s0">raise RuntimeError(&quot;NpyIter_GetIterNext failed&quot;)</span>
+    <span class="s0">dataptr = cnp.NpyIter_GetDataPtrArray(it)</span>
+    <span class="s0">strideptr = cnp.NpyIter_GetInnerStrideArray(it)</span>
+    <span class="s0">innersizeptr = cnp.NpyIter_GetInnerLoopSizePtr(it)</span>
+
+    <span class="s0">while True:</span>
+        <span class="s0">data = dataptr[0]</span>
+        <span class="s0">stride = strideptr[0]</span>
+        <span class="s0">count = innersizeptr[0]</span>
+        <span class="s0">while count &gt; 0:</span>
+            <span class="s0">if (&lt;double *&gt;data)[0] != 0.0:</span>
+                <span class="s0">nonzero_count += 1</span>
+            <span class="s0">data += stride</span>
+            <span class="s0">count -= 1</span>
+        <span class="s0">if not iternext(it):</span>
+            <span class="s0">break</span>
+
+    <span class="s0">cnp.NpyIter_Deallocate(it)</span>
+    <span class="s0">return nonzero_count</span>
+
+
+<span class="s0">def iter_next(cnp.ndarray arr):</span>
+    <span class="s0">&quot;&quot;&quot;Sum float64 array elements using PyArray_ITER_NEXT / _DATA / _NOTDONE.&quot;&quot;&quot;</span>
+    <span class="s0">cdef cnp.flatiter it = cnp.PyArray_IterNew(arr)</span>
+    <span class="s0">cdef double total = 0.0</span>
+    <span class="s0">while cnp.PyArray_ITER_NOTDONE(it):</span>
+        <span class="s0">total += (&lt;double *&gt;cnp.PyArray_ITER_DATA(it))[0]</span>
+        <span class="s0">cnp.PyArray_ITER_NEXT(it)</span>
+    <span class="s0">return total</span>
+
+
+<span class="s0">def iter_goto1d(cnp.ndarray arr, cnp.npy_intp index):</span>
+    <span class="s0">&quot;&quot;&quot;Get element at a flat index using PyArray_ITER_GOTO1D.&quot;&quot;&quot;</span>
+    <span class="s0">cdef cnp.flatiter it = cnp.PyArray_IterNew(arr)</span>
+    <span class="s0">cnp.PyArray_ITER_GOTO1D(it, index)</span>
+    <span class="s0">return (&lt;double *&gt;cnp.PyArray_ITER_DATA(it))[0]</span>
+
+
+<span class="s0">def iter_reset(cnp.ndarray arr):</span>
+    <span class="s0">&quot;&quot;&quot;Sum float64 array elements after PyArray_ITER_RESET.&quot;&quot;&quot;</span>
+    <span class="s0">cdef cnp.flatiter it = cnp.PyArray_IterNew(arr)</span>
+    <span class="s0">cdef double total = 0.0</span>
+    <span class="s0">while cnp.PyArray_ITER_NOTDONE(it):</span>
+        <span class="s0">cnp.PyArray_ITER_NEXT(it)</span>
+    <span class="s0">cnp.PyArray_ITER_RESET(it)</span>
+    <span class="s0">while cnp.PyArray_ITER_NOTDONE(it):</span>
+        <span class="s0">total += (&lt;double *&gt;cnp.PyArray_ITER_DATA(it))[0]</span>
+        <span class="s0">cnp.PyArray_ITER_NEXT(it)</span>
+    <span class="s0">return total</span>
+
+
+<span class="s0">def iter_goto(cnp.ndarray arr, tuple coord):</span>
+    <span class="s0">&quot;&quot;&quot;Get element at a coordinate using PyArray_ITER_GOTO.&quot;&quot;&quot;</span>
+    <span class="s0">cdef int nd = cnp.PyArray_NDIM(arr)</span>
+    <span class="s0">cdef cnp.npy_intp destination[32]</span>
+    <span class="s0">cdef cnp.flatiter it</span>
+    <span class="s0">cdef int i</span>
+    <span class="s0">if len(coord) != nd:</span>
+        <span class="s0">raise ValueError(&quot;coordinate length mismatch&quot;)</span>
+    <span class="s0">for i in range(nd):</span>
+        <span class="s0">destination[i] = coord[i]</span>
+    <span class="s0">it = cnp.PyArray_IterNew(arr)</span>
+    <span class="s0">cnp.PyArray_ITER_GOTO(it, destination)</span>
+    <span class="s0">return (&lt;double *&gt;cnp.PyArray_ITER_DATA(it))[0]</span>
+
+
+<span class="s0">def multi_iter_next(cnp.ndarray a, cnp.ndarray b):</span>
+    <span class="s0">&quot;&quot;&quot;Sum broadcast (a + b) using PyArray_MultiIter_NEXT / _DATA.&quot;&quot;&quot;</span>
+    <span class="s0">cdef cnp.broadcast multi = cnp.PyArray_MultiIterNew2(a, b)</span>
+    <span class="s0">cdef double total = 0.0</span>
+    <span class="s0">while cnp.PyArray_MultiIter_NOTDONE(multi):</span>
+        <span class="s0">total += (&lt;double *&gt;cnp.PyArray_MultiIter_DATA(multi, 0))[0]</span>
+        <span class="s0">total += (&lt;double *&gt;cnp.PyArray_MultiIter_DATA(multi, 1))[0]</span>
+        <span class="s0">cnp.PyArray_MultiIter_NEXT(multi)</span>
+    <span class="s0">return total</span>
+
+
+<span class="s0">def multi_iter_goto1d(cnp.ndarray a, cnp.ndarray b, cnp.npy_intp index):</span>
+    <span class="s0">&quot;&quot;&quot;Get (a, b) at a flat index using PyArray_MultiIter_GOTO1D.&quot;&quot;&quot;</span>
+    <span class="s0">cdef cnp.broadcast multi = cnp.PyArray_MultiIterNew2(a, b)</span>
+    <span class="s0">cdef double va, vb</span>
+    <span class="s0">cnp.PyArray_MultiIter_GOTO1D(multi, index)</span>
+    <span class="s0">va = (&lt;double *&gt;cnp.PyArray_MultiIter_DATA(multi, 0))[0]</span>
+    <span class="s0">vb = (&lt;double *&gt;cnp.PyArray_MultiIter_DATA(multi, 1))[0]</span>
+    <span class="s0">return va, vb</span>
+
+
+<span class="s0">def multi_iter_nexti(cnp.ndarray a, cnp.ndarray b, int steps):</span>
+    <span class="s0">&quot;&quot;&quot;Advance only iterator 0 by N steps using PyArray_MultiIter_NEXTi.&quot;&quot;&quot;</span>
+    <span class="s0">cdef cnp.broadcast multi = cnp.PyArray_MultiIterNew2(a, b)</span>
+    <span class="s0">cdef int _i</span>
+    <span class="s0">for _i in range(steps):</span>
+        <span class="s0">cnp.PyArray_MultiIter_NEXTi(multi, 0)</span>
+    <span class="s0">return (&lt;double *&gt;cnp.PyArray_MultiIter_DATA(multi, 0))[0]</span>
+
+
+<span class="s0">def get_datetime_value(obj):</span>
+    <span class="s0">&quot;&quot;&quot;Underlying int64 of a datetime64 scalar via get_datetime64_value.&quot;&quot;&quot;</span>
+    <span class="s0">return cnp.get_datetime64_value(obj)</span>
+
+
+<span class="s0">def get_timedelta_value(obj):</span>
+    <span class="s0">&quot;&quot;&quot;Underlying int64 of a timedelta64 scalar via get_timedelta64_value.&quot;&quot;&quot;</span>
+    <span class="s0">return cnp.get_timedelta64_value(obj)</span>
+
+
+<span class="s0">def get_datetime_unit(obj):</span>
+    <span class="s0">&quot;&quot;&quot;Unit (NPY_DATETIMEUNIT base) of a datetime64 scalar.&quot;&quot;&quot;</span>
+    <span class="s0">return &lt;int&gt;cnp.get_datetime64_unit(obj)</span>
+
+
+<span class="s0">def is_datetime64(obj):</span>
+    <span class="s0">&quot;&quot;&quot;Cython is_datetime64_object (isinstance-like check).&quot;&quot;&quot;</span>
+    <span class="s0">return cnp.is_datetime64_object(obj)</span>
+
+
+<span class="s0">def is_timedelta64(obj):</span>
+    <span class="s0">&quot;&quot;&quot;Cython is_timedelta64_object (isinstance-like check).&quot;&quot;&quot;</span>
+    <span class="s0">return cnp.is_timedelta64_object(obj)</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,310 @@
+<html>
+<head>
+<title>ops.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+.s6 { color: #5f826b; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+ops.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">final</span>
+
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">dtypes</span><span class="s2">.</span><span class="s1">common </span><span class="s0">import </span><span class="s1">is_string_dtype</span>
+
+<span class="s0">import </span><span class="s1">pandas </span><span class="s0">as </span><span class="s1">pd</span>
+<span class="s0">import </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_testing </span><span class="s0">as </span><span class="s1">tm</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core </span><span class="s0">import </span><span class="s1">ops</span>
+
+
+<span class="s0">class </span><span class="s1">BaseOpsUtil</span><span class="s2">:</span>
+    <span class="s1">series_scalar_exc</span><span class="s2">: </span><span class="s1">type</span><span class="s2">[</span><span class="s1">Exception</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= </span><span class="s1">TypeError</span>
+    <span class="s1">frame_scalar_exc</span><span class="s2">: </span><span class="s1">type</span><span class="s2">[</span><span class="s1">Exception</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= </span><span class="s1">TypeError</span>
+    <span class="s1">series_array_exc</span><span class="s2">: </span><span class="s1">type</span><span class="s2">[</span><span class="s1">Exception</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= </span><span class="s1">TypeError</span>
+    <span class="s1">divmod_exc</span><span class="s2">: </span><span class="s1">type</span><span class="s2">[</span><span class="s1">Exception</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= </span><span class="s1">TypeError</span>
+
+    <span class="s0">def </span><span class="s1">_get_expected_exception</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">op_name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">obj</span><span class="s2">, </span><span class="s1">other</span>
+    <span class="s2">) </span><span class="s1">-&gt; type</span><span class="s2">[</span><span class="s1">Exception</span><span class="s2">] | </span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">type</span><span class="s2">[</span><span class="s1">Exception</span><span class="s2">], ...] | </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s3"># Find the Exception, if any we expect to raise calling</span>
+        <span class="s3">#  obj.__op_name__(other)</span>
+
+        <span class="s3"># The self.obj_bar_exc pattern isn't great in part because it can depend</span>
+        <span class="s3">#  on op_name or dtypes, but we use it here for backward-compatibility.</span>
+        <span class="s0">if </span><span class="s1">op_name </span><span class="s0">in </span><span class="s2">[</span><span class="s4">&quot;__divmod__&quot;</span><span class="s2">, </span><span class="s4">&quot;__rdivmod__&quot;</span><span class="s2">]:</span>
+            <span class="s1">result </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">divmod_exc</span>
+        <span class="s0">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">) </span><span class="s0">and </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">):</span>
+            <span class="s1">result </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">series_array_exc</span>
+        <span class="s0">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">):</span>
+            <span class="s1">result </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">series_scalar_exc</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">result </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">frame_scalar_exc</span>
+
+        <span class="s0">return </span><span class="s1">result</span>
+
+    <span class="s0">def </span><span class="s1">_cast_pointwise_result</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">op_name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">obj</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s1">pointwise_result</span><span class="s2">):</span>
+        <span class="s3"># In _check_op we check that the result of a pointwise operation</span>
+        <span class="s3">#  (found via _combine) matches the result of the vectorized</span>
+        <span class="s3">#  operation obj.__op_name__(other).</span>
+        <span class="s3">#  In some cases pandas dtype inference on the scalar result may not</span>
+        <span class="s3">#  give a matching dtype even if both operations are behaving &quot;correctly&quot;.</span>
+        <span class="s3">#  In these cases, do extra required casting here.</span>
+        <span class="s0">return </span><span class="s1">pointwise_result</span>
+
+    <span class="s0">def </span><span class="s1">get_op_from_name</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">op_name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">tm</span><span class="s2">.</span><span class="s1">get_op_from_name</span><span class="s2">(</span><span class="s1">op_name</span><span class="s2">)</span>
+
+    <span class="s3"># Subclasses are not expected to need to override check_opname, _check_op,</span>
+    <span class="s3">#  _check_divmod_op, or _combine.</span>
+    <span class="s3">#  Ideally any relevant overriding can be done in _cast_pointwise_result,</span>
+    <span class="s3">#  get_op_from_name, and the specification of `exc`. If you find a use</span>
+    <span class="s3">#  case that still requires overriding _check_op or _combine, please let</span>
+    <span class="s3">#  us know at github.com/pandas-dev/pandas/issues</span>
+    <span class="s2">@</span><span class="s1">final</span>
+    <span class="s0">def </span><span class="s1">check_opname</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">ser</span><span class="s2">: </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">, </span><span class="s1">op_name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">other</span><span class="s2">):</span>
+        <span class="s1">exc </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_expected_exception</span><span class="s2">(</span><span class="s1">op_name</span><span class="s2">, </span><span class="s1">ser</span><span class="s2">, </span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s1">op </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">get_op_from_name</span><span class="s2">(</span><span class="s1">op_name</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_check_op</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">op</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s1">op_name</span><span class="s2">, </span><span class="s1">exc</span><span class="s2">)</span>
+
+    <span class="s3"># see comment on check_opname</span>
+    <span class="s2">@</span><span class="s1">final</span>
+    <span class="s0">def </span><span class="s1">_combine</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">obj</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s1">op</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">DataFrame</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">columns</span><span class="s2">) != </span><span class="s5">1</span><span class="s2">:</span>
+                <span class="s0">raise </span><span class="s1">NotImplementedError</span>
+            <span class="s1">expected </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[:, </span><span class="s5">0</span><span class="s2">].</span><span class="s1">combine</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s1">op</span><span class="s2">).</span><span class="s1">to_frame</span><span class="s2">()</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">expected </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">combine</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s1">op</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">expected</span>
+
+    <span class="s3"># see comment on check_opname</span>
+    <span class="s2">@</span><span class="s1">final</span>
+    <span class="s0">def </span><span class="s1">_check_op</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">ser</span><span class="s2">: </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">, </span><span class="s1">op</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s1">op_name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">exc</span><span class="s2">=</span><span class="s1">NotImplementedError</span>
+    <span class="s2">):</span>
+        <span class="s3"># Check that the Series/DataFrame arithmetic/comparison method matches</span>
+        <span class="s3">#  the pointwise result from _combine.</span>
+
+        <span class="s0">if </span><span class="s1">exc </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">result </span><span class="s2">= </span><span class="s1">op</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">other</span><span class="s2">)</span>
+            <span class="s1">expected </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_combine</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s1">op</span><span class="s2">)</span>
+            <span class="s1">expected </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_cast_pointwise_result</span><span class="s2">(</span><span class="s1">op_name</span><span class="s2">, </span><span class="s1">ser</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+            <span class="s0">assert </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">type</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">))</span>
+            <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">):</span>
+                <span class="s1">op</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">other</span><span class="s2">)</span>
+
+    <span class="s3"># see comment on check_opname</span>
+    <span class="s2">@</span><span class="s1">final</span>
+    <span class="s0">def </span><span class="s1">_check_divmod_op</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">ser</span><span class="s2">: </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">, </span><span class="s1">op</span><span class="s2">, </span><span class="s1">other</span><span class="s2">):</span>
+        <span class="s3"># check that divmod behavior matches behavior of floordiv+mod</span>
+        <span class="s0">if </span><span class="s1">op </span><span class="s0">is </span><span class="s1">divmod</span><span class="s2">:</span>
+            <span class="s1">exc </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_expected_exception</span><span class="s2">(</span><span class="s4">&quot;__divmod__&quot;</span><span class="s2">, </span><span class="s1">ser</span><span class="s2">, </span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">exc </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_expected_exception</span><span class="s2">(</span><span class="s4">&quot;__rdivmod__&quot;</span><span class="s2">, </span><span class="s1">ser</span><span class="s2">, </span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">exc </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">result_div</span><span class="s2">, </span><span class="s1">result_mod </span><span class="s2">= </span><span class="s1">op</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">other</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">op </span><span class="s0">is </span><span class="s1">divmod</span><span class="s2">:</span>
+                <span class="s1">expected_div</span><span class="s2">, </span><span class="s1">expected_mod </span><span class="s2">= </span><span class="s1">ser </span><span class="s2">// </span><span class="s1">other</span><span class="s2">, </span><span class="s1">ser </span><span class="s2">% </span><span class="s1">other</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">expected_div</span><span class="s2">, </span><span class="s1">expected_mod </span><span class="s2">= </span><span class="s1">other </span><span class="s2">// </span><span class="s1">ser</span><span class="s2">, </span><span class="s1">other </span><span class="s2">% </span><span class="s1">ser</span>
+            <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_series_equal</span><span class="s2">(</span><span class="s1">result_div</span><span class="s2">, </span><span class="s1">expected_div</span><span class="s2">)</span>
+            <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_series_equal</span><span class="s2">(</span><span class="s1">result_mod</span><span class="s2">, </span><span class="s1">expected_mod</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">):</span>
+                <span class="s1">divmod</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">other</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">BaseArithmeticOpsTests</span><span class="s2">(</span><span class="s1">BaseOpsUtil</span><span class="s2">):</span>
+    <span class="s6">&quot;&quot;&quot; 
+    Various Series and DataFrame arithmetic ops methods. 
+ 
+    Subclasses supporting various ops should set the class variables 
+    to indicate that they support ops of that kind 
+ 
+    * series_scalar_exc = TypeError 
+    * frame_scalar_exc = TypeError 
+    * series_array_exc = TypeError 
+    * divmod_exc = TypeError 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">series_scalar_exc</span><span class="s2">: </span><span class="s1">type</span><span class="s2">[</span><span class="s1">Exception</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= </span><span class="s1">TypeError</span>
+    <span class="s1">frame_scalar_exc</span><span class="s2">: </span><span class="s1">type</span><span class="s2">[</span><span class="s1">Exception</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= </span><span class="s1">TypeError</span>
+    <span class="s1">series_array_exc</span><span class="s2">: </span><span class="s1">type</span><span class="s2">[</span><span class="s1">Exception</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= </span><span class="s1">TypeError</span>
+    <span class="s1">divmod_exc</span><span class="s2">: </span><span class="s1">type</span><span class="s2">[</span><span class="s1">Exception</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= </span><span class="s1">TypeError</span>
+
+    <span class="s0">def </span><span class="s1">test_arith_series_with_scalar</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">data</span><span class="s2">, </span><span class="s1">all_arithmetic_operators</span><span class="s2">):</span>
+        <span class="s3"># series &amp; scalar</span>
+        <span class="s0">if </span><span class="s1">all_arithmetic_operators </span><span class="s2">== </span><span class="s4">&quot;__rmod__&quot; </span><span class="s0">and </span><span class="s1">is_string_dtype</span><span class="s2">(</span><span class="s1">data</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">):</span>
+            <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span><span class="s4">&quot;Skip testing Python string formatting&quot;</span><span class="s2">)</span>
+
+        <span class="s1">op_name </span><span class="s2">= </span><span class="s1">all_arithmetic_operators</span>
+        <span class="s1">ser </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">check_opname</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">op_name</span><span class="s2">, </span><span class="s1">ser</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">])</span>
+
+    <span class="s0">def </span><span class="s1">test_arith_frame_with_scalar</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">data</span><span class="s2">, </span><span class="s1">all_arithmetic_operators</span><span class="s2">):</span>
+        <span class="s3"># frame &amp; scalar</span>
+        <span class="s0">if </span><span class="s1">all_arithmetic_operators </span><span class="s2">== </span><span class="s4">&quot;__rmod__&quot; </span><span class="s0">and </span><span class="s1">is_string_dtype</span><span class="s2">(</span><span class="s1">data</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">):</span>
+            <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">(</span><span class="s4">&quot;Skip testing Python string formatting&quot;</span><span class="s2">)</span>
+
+        <span class="s1">op_name </span><span class="s2">= </span><span class="s1">all_arithmetic_operators</span>
+        <span class="s1">df </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">DataFrame</span><span class="s2">({</span><span class="s4">&quot;A&quot;</span><span class="s2">: </span><span class="s1">data</span><span class="s2">})</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">check_opname</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s1">op_name</span><span class="s2">, </span><span class="s1">data</span><span class="s2">[</span><span class="s5">0</span><span class="s2">])</span>
+
+    <span class="s0">def </span><span class="s1">test_arith_series_with_array</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">data</span><span class="s2">, </span><span class="s1">all_arithmetic_operators</span><span class="s2">):</span>
+        <span class="s3"># ndarray &amp; other series</span>
+        <span class="s1">op_name </span><span class="s2">= </span><span class="s1">all_arithmetic_operators</span>
+        <span class="s1">ser </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">check_opname</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">op_name</span><span class="s2">, </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">([</span><span class="s1">ser</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]] * </span><span class="s1">len</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">)))</span>
+
+    <span class="s0">def </span><span class="s1">test_divmod</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">data</span><span class="s2">):</span>
+        <span class="s1">ser </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_check_divmod_op</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">divmod</span><span class="s2">, </span><span class="s5">1</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_check_divmod_op</span><span class="s2">(</span><span class="s5">1</span><span class="s2">, </span><span class="s1">ops</span><span class="s2">.</span><span class="s1">rdivmod</span><span class="s2">, </span><span class="s1">ser</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_divmod_series_array</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">data</span><span class="s2">, </span><span class="s1">data_for_twos</span><span class="s2">):</span>
+        <span class="s1">ser </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_check_divmod_op</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">divmod</span><span class="s2">, </span><span class="s1">data</span><span class="s2">)</span>
+
+        <span class="s1">other </span><span class="s2">= </span><span class="s1">data_for_twos</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_check_divmod_op</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s1">ops</span><span class="s2">.</span><span class="s1">rdivmod</span><span class="s2">, </span><span class="s1">ser</span><span class="s2">)</span>
+
+        <span class="s1">other </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_check_divmod_op</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s1">ops</span><span class="s2">.</span><span class="s1">rdivmod</span><span class="s2">, </span><span class="s1">ser</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_add_series_with_extension_array</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">data</span><span class="s2">):</span>
+        <span class="s3"># Check adding an ExtensionArray to a Series of the same dtype matches</span>
+        <span class="s3"># the behavior of adding the arrays directly and then wrapping in a</span>
+        <span class="s3"># Series.</span>
+
+        <span class="s1">ser </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+
+        <span class="s1">exc </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_expected_exception</span><span class="s2">(</span><span class="s4">&quot;__add__&quot;</span><span class="s2">, </span><span class="s1">ser</span><span class="s2">, </span><span class="s1">data</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">exc </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">):</span>
+                <span class="s1">ser </span><span class="s2">+ </span><span class="s1">data</span>
+            <span class="s0">return</span>
+
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">ser </span><span class="s2">+ </span><span class="s1">data</span>
+        <span class="s1">expected </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">(</span><span class="s1">data </span><span class="s2">+ </span><span class="s1">data</span><span class="s2">)</span>
+        <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_series_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;box&quot;</span><span class="s2">, [</span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">, </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">DataFrame</span><span class="s2">, </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Index</span><span class="s2">])</span>
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+        <span class="s4">&quot;op_name&quot;</span><span class="s2">,</span>
+        <span class="s2">[</span>
+            <span class="s1">x</span>
+            <span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">tm</span><span class="s2">.</span><span class="s1">arithmetic_dunder_methods </span><span class="s2">+ </span><span class="s1">tm</span><span class="s2">.</span><span class="s1">comparison_dunder_methods</span>
+            <span class="s0">if not </span><span class="s1">x</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s4">&quot;__r&quot;</span><span class="s2">)</span>
+        <span class="s2">],</span>
+    <span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_direct_arith_with_ndframe_returns_not_implemented</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">data</span><span class="s2">, </span><span class="s1">box</span><span class="s2">, </span><span class="s1">op_name</span>
+    <span class="s2">):</span>
+        <span class="s3"># EAs should return NotImplemented for ops with Series/DataFrame/Index</span>
+        <span class="s3"># Pandas takes care of unboxing the series and calling the EA's op.</span>
+        <span class="s1">other </span><span class="s2">= </span><span class="s1">box</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">data</span><span class="s2">, </span><span class="s1">op_name</span><span class="s2">):</span>
+            <span class="s1">result </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">data</span><span class="s2">, </span><span class="s1">op_name</span><span class="s2">)(</span><span class="s1">other</span><span class="s2">)</span>
+            <span class="s0">assert </span><span class="s1">result </span><span class="s0">is </span><span class="s1">NotImplemented</span>
+
+
+<span class="s0">class </span><span class="s1">BaseComparisonOpsTests</span><span class="s2">(</span><span class="s1">BaseOpsUtil</span><span class="s2">):</span>
+    <span class="s6">&quot;&quot;&quot;Various Series and DataFrame comparison ops methods.&quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">_compare_other</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">ser</span><span class="s2">: </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">, </span><span class="s1">data</span><span class="s2">, </span><span class="s1">op</span><span class="s2">, </span><span class="s1">other</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">op</span><span class="s2">.</span><span class="s1">__name__ </span><span class="s0">in </span><span class="s2">[</span><span class="s4">&quot;eq&quot;</span><span class="s2">, </span><span class="s4">&quot;ne&quot;</span><span class="s2">]:</span>
+            <span class="s3"># comparison should match point-wise comparisons</span>
+            <span class="s1">result </span><span class="s2">= </span><span class="s1">op</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">other</span><span class="s2">)</span>
+            <span class="s1">expected </span><span class="s2">= </span><span class="s1">ser</span><span class="s2">.</span><span class="s1">combine</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s1">op</span><span class="s2">)</span>
+            <span class="s1">expected </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_cast_pointwise_result</span><span class="s2">(</span><span class="s1">op</span><span class="s2">.</span><span class="s1">__name__</span><span class="s2">, </span><span class="s1">ser</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+            <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_series_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">exc </span><span class="s2">= </span><span class="s0">None</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">result </span><span class="s2">= </span><span class="s1">op</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">other</span><span class="s2">)</span>
+            <span class="s0">except </span><span class="s1">Exception </span><span class="s0">as </span><span class="s1">err</span><span class="s2">:</span>
+                <span class="s1">exc </span><span class="s2">= </span><span class="s1">err</span>
+
+            <span class="s0">if </span><span class="s1">exc </span><span class="s0">is None</span><span class="s2">:</span>
+                <span class="s3"># Didn't error, then should match pointwise behavior</span>
+                <span class="s1">expected </span><span class="s2">= </span><span class="s1">ser</span><span class="s2">.</span><span class="s1">combine</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s1">op</span><span class="s2">)</span>
+                <span class="s1">expected </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_cast_pointwise_result</span><span class="s2">(</span>
+                    <span class="s1">op</span><span class="s2">.</span><span class="s1">__name__</span><span class="s2">, </span><span class="s1">ser</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s1">expected</span>
+                <span class="s2">)</span>
+                <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_series_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">type</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">)):</span>
+                    <span class="s1">ser</span><span class="s2">.</span><span class="s1">combine</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s1">op</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_compare_scalar</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">data</span><span class="s2">, </span><span class="s1">comparison_op</span><span class="s2">):</span>
+        <span class="s1">ser </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_compare_other</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">data</span><span class="s2">, </span><span class="s1">comparison_op</span><span class="s2">, </span><span class="s5">0</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_compare_array</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">data</span><span class="s2">, </span><span class="s1">comparison_op</span><span class="s2">):</span>
+        <span class="s1">ser </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+        <span class="s1">other </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">([</span><span class="s1">data</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]] * </span><span class="s1">len</span><span class="s2">(</span><span class="s1">data</span><span class="s2">), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">data</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_compare_other</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">data</span><span class="s2">, </span><span class="s1">comparison_op</span><span class="s2">, </span><span class="s1">other</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">BaseUnaryOpsTests</span><span class="s2">(</span><span class="s1">BaseOpsUtil</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">test_invert</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">data</span><span class="s2">):</span>
+        <span class="s1">ser </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">(</span><span class="s1">data</span><span class="s2">, </span><span class="s1">name</span><span class="s2">=</span><span class="s4">&quot;name&quot;</span><span class="s2">)</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s2">[~</span><span class="s1">x </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">data</span><span class="s2">]</span>
+        <span class="s0">except </span><span class="s1">TypeError</span><span class="s2">:</span>
+            <span class="s3"># scalars don't support invert -&gt; we don't expect the vectorized</span>
+            <span class="s3">#  operation to succeed</span>
+            <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">):</span>
+                <span class="s2">~</span><span class="s1">ser</span>
+            <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">):</span>
+                <span class="s2">~</span><span class="s1">data</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s3"># Note we do not reuse the pointwise result to construct expected</span>
+            <span class="s3">#  because python semantics for negating bools are weird see GH#54569</span>
+            <span class="s1">result </span><span class="s2">= ~</span><span class="s1">ser</span>
+            <span class="s1">expected </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">(~</span><span class="s1">data</span><span class="s2">, </span><span class="s1">name</span><span class="s2">=</span><span class="s4">&quot;name&quot;</span><span class="s2">)</span>
+            <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_series_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;ufunc&quot;</span><span class="s2">, [</span><span class="s1">np</span><span class="s2">.</span><span class="s1">positive</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">negative</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">abs</span><span class="s2">])</span>
+    <span class="s0">def </span><span class="s1">test_unary_ufunc_dunder_equivalence</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">data</span><span class="s2">, </span><span class="s1">ufunc</span><span class="s2">):</span>
+        <span class="s3"># the dunder __pos__ works if and only if np.positive works,</span>
+        <span class="s3">#  same for __neg__/np.negative and __abs__/np.abs</span>
+        <span class="s1">attr </span><span class="s2">= {</span><span class="s1">np</span><span class="s2">.</span><span class="s1">positive</span><span class="s2">: </span><span class="s4">&quot;__pos__&quot;</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">negative</span><span class="s2">: </span><span class="s4">&quot;__neg__&quot;</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">abs</span><span class="s2">: </span><span class="s4">&quot;__abs__&quot;</span><span class="s2">}[</span>
+            <span class="s1">ufunc</span>
+        <span class="s2">]</span>
+
+        <span class="s1">exc </span><span class="s2">= </span><span class="s0">None</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">result </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">data</span><span class="s2">, </span><span class="s1">attr</span><span class="s2">)()</span>
+        <span class="s0">except </span><span class="s1">Exception </span><span class="s0">as </span><span class="s1">err</span><span class="s2">:</span>
+            <span class="s1">exc </span><span class="s2">= </span><span class="s1">err</span>
+
+            <span class="s3"># if __pos__ raised, then so should the ufunc</span>
+            <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">((</span><span class="s1">type</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">), </span><span class="s1">TypeError</span><span class="s2">)):</span>
+                <span class="s1">ufunc</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">alt </span><span class="s2">= </span><span class="s1">ufunc</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+            <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_extension_array_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">alt</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

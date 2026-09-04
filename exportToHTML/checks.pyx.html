@@ -1,0 +1,398 @@
+<html>
+<head>
+<title>checks.pyx</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #bcbec4;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+checks.pyx</font>
+</center></td></tr></table>
+<pre><span class="s0">#cython: language_level=3</span>
+
+<span class="s0">&quot;&quot;&quot;</span>
+<span class="s0">Functions in this module give python-space wrappers for cython functions</span>
+<span class="s0">exposed in numpy/__init__.pxd, so they can be tested in test_cython.py</span>
+<span class="s0">&quot;&quot;&quot;</span>
+<span class="s0">import numpy as np</span>
+<span class="s0">cimport numpy as cnp</span>
+<span class="s0">cnp.import_array()</span>
+
+
+<span class="s0">def is_td64(obj):</span>
+    <span class="s0">return cnp.is_timedelta64_object(obj)</span>
+
+
+<span class="s0">def is_dt64(obj):</span>
+    <span class="s0">return cnp.is_datetime64_object(obj)</span>
+
+
+<span class="s0">def get_dt64_value(obj):</span>
+    <span class="s0">return cnp.get_datetime64_value(obj)</span>
+
+
+<span class="s0">def get_td64_value(obj):</span>
+    <span class="s0">return cnp.get_timedelta64_value(obj)</span>
+
+
+<span class="s0">def get_dt64_unit(obj):</span>
+    <span class="s0">return cnp.get_datetime64_unit(obj)</span>
+
+
+<span class="s0">def is_integer(obj):</span>
+    <span class="s0">return isinstance(obj, (cnp.integer, int))</span>
+
+
+<span class="s0">def get_datetime_iso_8601_strlen():</span>
+    <span class="s0">return cnp.get_datetime_iso_8601_strlen(0, cnp.NPY_FR_ns)</span>
+
+
+<span class="s0">def convert_datetime64_to_datetimestruct():</span>
+    <span class="s0">cdef:</span>
+        <span class="s0">cnp.npy_datetimestruct dts</span>
+        <span class="s0">cnp.PyArray_DatetimeMetaData meta</span>
+        <span class="s0">cnp.int64_t value = 1647374515260292</span>
+        <span class="s0"># i.e. (time.time() * 10**6) at 2022-03-15 20:01:55.260292 UTC</span>
+
+    <span class="s0">meta.base = cnp.NPY_FR_us</span>
+    <span class="s0">meta.num = 1</span>
+    <span class="s0">cnp.convert_datetime64_to_datetimestruct(&amp;meta, value, &amp;dts)</span>
+    <span class="s0">return dts</span>
+
+
+<span class="s0">def make_iso_8601_datetime(dt: &quot;datetime&quot;):</span>
+    <span class="s0">cdef:</span>
+        <span class="s0">cnp.npy_datetimestruct dts</span>
+        <span class="s0">char result[36]  # 36 corresponds to NPY_FR_s passed below</span>
+        <span class="s0">int local = 0</span>
+        <span class="s0">int utc = 0</span>
+        <span class="s0">int tzoffset = 0</span>
+
+    <span class="s0">dts.year = dt.year</span>
+    <span class="s0">dts.month = dt.month</span>
+    <span class="s0">dts.day = dt.day</span>
+    <span class="s0">dts.hour = dt.hour</span>
+    <span class="s0">dts.min = dt.minute</span>
+    <span class="s0">dts.sec = dt.second</span>
+    <span class="s0">dts.us = dt.microsecond</span>
+    <span class="s0">dts.ps = dts.as = 0</span>
+
+    <span class="s0">cnp.make_iso_8601_datetime(</span>
+        <span class="s0">&amp;dts,</span>
+        <span class="s0">result,</span>
+        <span class="s0">sizeof(result),</span>
+        <span class="s0">local,</span>
+        <span class="s0">utc,</span>
+        <span class="s0">cnp.NPY_FR_s,</span>
+        <span class="s0">tzoffset,</span>
+        <span class="s0">cnp.NPY_NO_CASTING,</span>
+    <span class="s0">)</span>
+    <span class="s0">return result</span>
+
+
+<span class="s0">cdef cnp.broadcast multiiter_from_broadcast_obj(object bcast):</span>
+    <span class="s0">cdef dict iter_map = {</span>
+        <span class="s0">1: cnp.PyArray_MultiIterNew1,</span>
+        <span class="s0">2: cnp.PyArray_MultiIterNew2,</span>
+        <span class="s0">3: cnp.PyArray_MultiIterNew3,</span>
+        <span class="s0">4: cnp.PyArray_MultiIterNew4,</span>
+        <span class="s0">5: cnp.PyArray_MultiIterNew5,</span>
+    <span class="s0">}</span>
+    <span class="s0">arrays = [x.base for x in bcast.iters]</span>
+    <span class="s0">cdef cnp.broadcast result = iter_map[len(arrays)](*arrays)</span>
+    <span class="s0">return result</span>
+
+
+<span class="s0">def get_multiiter_size(bcast: &quot;broadcast&quot;):</span>
+    <span class="s0">cdef cnp.broadcast multi = multiiter_from_broadcast_obj(bcast)</span>
+    <span class="s0">return multi.size</span>
+
+
+<span class="s0">def get_multiiter_number_of_dims(bcast: &quot;broadcast&quot;):</span>
+    <span class="s0">cdef cnp.broadcast multi = multiiter_from_broadcast_obj(bcast)</span>
+    <span class="s0">return multi.nd</span>
+
+
+<span class="s0">def get_multiiter_current_index(bcast: &quot;broadcast&quot;):</span>
+    <span class="s0">cdef cnp.broadcast multi = multiiter_from_broadcast_obj(bcast)</span>
+    <span class="s0">return multi.index</span>
+
+
+<span class="s0">def get_multiiter_num_of_iterators(bcast: &quot;broadcast&quot;):</span>
+    <span class="s0">cdef cnp.broadcast multi = multiiter_from_broadcast_obj(bcast)</span>
+    <span class="s0">return multi.numiter</span>
+
+
+<span class="s0">def get_multiiter_shape(bcast: &quot;broadcast&quot;):</span>
+    <span class="s0">cdef cnp.broadcast multi = multiiter_from_broadcast_obj(bcast)</span>
+    <span class="s0">return tuple([multi.dimensions[i] for i in range(bcast.nd)])</span>
+
+
+<span class="s0">def get_multiiter_iters(bcast: &quot;broadcast&quot;):</span>
+    <span class="s0">cdef cnp.broadcast multi = multiiter_from_broadcast_obj(bcast)</span>
+    <span class="s0">return tuple([&lt;cnp.flatiter&gt;multi.iters[i] for i in range(bcast.numiter)])</span>
+
+
+<span class="s0">def get_default_integer():</span>
+    <span class="s0">if cnp.NPY_DEFAULT_INT == cnp.NPY_LONG:</span>
+        <span class="s0">return cnp.dtype(&quot;long&quot;)</span>
+    <span class="s0">if cnp.NPY_DEFAULT_INT == cnp.NPY_INTP:</span>
+        <span class="s0">return cnp.dtype(&quot;intp&quot;)</span>
+    <span class="s0">return None</span>
+
+<span class="s0">def get_ravel_axis():</span>
+    <span class="s0">return cnp.NPY_RAVEL_AXIS</span>
+
+
+<span class="s0">def conv_intp(cnp.intp_t val):</span>
+    <span class="s0">return val</span>
+
+
+<span class="s0">def get_dtype_flags(cnp.dtype dtype):</span>
+    <span class="s0">return dtype.flags</span>
+
+
+<span class="s0">cdef cnp.NpyIter* npyiter_from_nditer_obj(object it):</span>
+    <span class="s0">&quot;&quot;&quot;A function to create a NpyIter struct from an nditer object.</span>
+
+    <span class="s0">This function is only meant for testing purposes and only extracts the</span>
+    <span class="s0">necessary info from nditer to test the functionality of NpyIter methods</span>
+    <span class="s0">&quot;&quot;&quot;</span>
+    <span class="s0">cdef:</span>
+        <span class="s0">cnp.NpyIter* cit</span>
+        <span class="s0">cnp.PyArray_Descr* op_dtypes[3]</span>
+        <span class="s0">cnp.npy_uint32 op_flags[3]</span>
+        <span class="s0">cnp.PyArrayObject* ops[3]</span>
+        <span class="s0">cnp.npy_uint32 flags = 0</span>
+
+    <span class="s0">if it.has_index:</span>
+        <span class="s0">flags |= cnp.NPY_ITER_C_INDEX</span>
+    <span class="s0">if it.has_delayed_bufalloc:</span>
+        <span class="s0">flags |= cnp.NPY_ITER_BUFFERED | cnp.NPY_ITER_DELAY_BUFALLOC</span>
+    <span class="s0">if it.has_multi_index:</span>
+        <span class="s0">flags |= cnp.NPY_ITER_MULTI_INDEX</span>
+
+    <span class="s0"># one of READWRITE, READONLY and WRTIEONLY at the minimum must be specified for op_flags</span>
+    <span class="s0">for i in range(it.nop):</span>
+        <span class="s0">op_flags[i] = cnp.NPY_ITER_READONLY</span>
+
+    <span class="s0">for i in range(it.nop):</span>
+        <span class="s0">op_dtypes[i] = cnp.PyArray_DESCR(it.operands[i])</span>
+        <span class="s0">ops[i] = &lt;cnp.PyArrayObject*&gt;it.operands[i]</span>
+
+    <span class="s0">cit = cnp.NpyIter_MultiNew(it.nop, &amp;ops[0], flags, cnp.NPY_KEEPORDER,</span>
+                               <span class="s0">cnp.NPY_NO_CASTING, &amp;op_flags[0],</span>
+                               <span class="s0">&lt;cnp.PyArray_Descr**&gt;NULL)</span>
+    <span class="s0">return cit</span>
+
+
+<span class="s0">def get_npyiter_size(it: &quot;nditer&quot;):</span>
+    <span class="s0">cdef cnp.NpyIter* cit = npyiter_from_nditer_obj(it)</span>
+    <span class="s0">result = cnp.NpyIter_GetIterSize(cit)</span>
+    <span class="s0">cnp.NpyIter_Deallocate(cit)</span>
+    <span class="s0">return result</span>
+
+
+<span class="s0">def get_npyiter_ndim(it: &quot;nditer&quot;):</span>
+    <span class="s0">cdef cnp.NpyIter* cit = npyiter_from_nditer_obj(it)</span>
+    <span class="s0">result = cnp.NpyIter_GetNDim(cit)</span>
+    <span class="s0">cnp.NpyIter_Deallocate(cit)</span>
+    <span class="s0">return result</span>
+
+
+<span class="s0">def get_npyiter_nop(it: &quot;nditer&quot;):</span>
+    <span class="s0">cdef cnp.NpyIter* cit = npyiter_from_nditer_obj(it)</span>
+    <span class="s0">result = cnp.NpyIter_GetNOp(cit)</span>
+    <span class="s0">cnp.NpyIter_Deallocate(cit)</span>
+    <span class="s0">return result</span>
+
+
+<span class="s0">def get_npyiter_operands(it: &quot;nditer&quot;):</span>
+    <span class="s0">cdef cnp.NpyIter* cit = npyiter_from_nditer_obj(it)</span>
+    <span class="s0">try:</span>
+        <span class="s0">arr = cnp.NpyIter_GetOperandArray(cit)</span>
+        <span class="s0">return tuple([&lt;cnp.ndarray&gt;arr[i] for i in range(it.nop)])</span>
+    <span class="s0">finally:</span>
+        <span class="s0">cnp.NpyIter_Deallocate(cit)</span>
+
+
+<span class="s0">def get_npyiter_itviews(it: &quot;nditer&quot;):</span>
+    <span class="s0">cdef cnp.NpyIter* cit = npyiter_from_nditer_obj(it)</span>
+    <span class="s0">result = tuple([cnp.NpyIter_GetIterView(cit, i) for i in range(it.nop)])</span>
+    <span class="s0">cnp.NpyIter_Deallocate(cit)</span>
+    <span class="s0">return result</span>
+
+
+<span class="s0">def get_npyiter_dtypes(it: &quot;nditer&quot;):</span>
+    <span class="s0">cdef cnp.NpyIter* cit = npyiter_from_nditer_obj(it)</span>
+    <span class="s0">try:</span>
+        <span class="s0">arr = cnp.NpyIter_GetDescrArray(cit)</span>
+        <span class="s0">return tuple([&lt;cnp.dtype&gt;arr[i] for i in range(it.nop)])</span>
+    <span class="s0">finally:</span>
+        <span class="s0">cnp.NpyIter_Deallocate(cit)</span>
+
+
+<span class="s0">def npyiter_has_delayed_bufalloc(it: &quot;nditer&quot;):</span>
+    <span class="s0">cdef cnp.NpyIter* cit = npyiter_from_nditer_obj(it)</span>
+    <span class="s0">result = cnp.NpyIter_HasDelayedBufAlloc(cit)</span>
+    <span class="s0">cnp.NpyIter_Deallocate(cit)</span>
+    <span class="s0">return result</span>
+
+
+<span class="s0">def npyiter_has_index(it: &quot;nditer&quot;):</span>
+    <span class="s0">cdef cnp.NpyIter* cit = npyiter_from_nditer_obj(it)</span>
+    <span class="s0">result = cnp.NpyIter_HasIndex(cit)</span>
+    <span class="s0">cnp.NpyIter_Deallocate(cit)</span>
+    <span class="s0">return result</span>
+
+
+<span class="s0">def npyiter_has_multi_index(it: &quot;nditer&quot;):</span>
+    <span class="s0">cdef cnp.NpyIter* cit = npyiter_from_nditer_obj(it)</span>
+    <span class="s0">result = cnp.NpyIter_HasMultiIndex(cit)</span>
+    <span class="s0">cnp.NpyIter_Deallocate(cit)</span>
+    <span class="s0">return result</span>
+
+
+<span class="s0">def test_get_multi_index_iter_next(it: &quot;nditer&quot;, cnp.ndarray[cnp.float64_t, ndim=2] arr):</span>
+    <span class="s0">cdef cnp.NpyIter* cit = npyiter_from_nditer_obj(it)</span>
+    <span class="s0">cdef cnp.NpyIter_GetMultiIndexFunc _get_multi_index = \</span>
+        <span class="s0">cnp.NpyIter_GetGetMultiIndex(cit, NULL)</span>
+    <span class="s0">cdef cnp.NpyIter_IterNextFunc _iternext = \</span>
+        <span class="s0">cnp.NpyIter_GetIterNext(cit, NULL)</span>
+    <span class="s0">cnp.NpyIter_Deallocate(cit)</span>
+    <span class="s0">return 1</span>
+
+
+<span class="s0">def npyiter_has_finished(it: &quot;nditer&quot;):</span>
+    <span class="s0">cdef cnp.NpyIter* cit</span>
+    <span class="s0">try:</span>
+        <span class="s0">cit = npyiter_from_nditer_obj(it)</span>
+        <span class="s0">cnp.NpyIter_GotoIterIndex(cit, it.index)</span>
+        <span class="s0">return not (cnp.NpyIter_GetIterIndex(cit) &lt; cnp.NpyIter_GetIterSize(cit))</span>
+    <span class="s0">finally:</span>
+        <span class="s0">cnp.NpyIter_Deallocate(cit)</span>
+
+<span class="s0">def compile_fillwithbyte():</span>
+    <span class="s0"># Regression test for gh-25878, mostly checks it compiles.</span>
+    <span class="s0">cdef cnp.npy_intp dims[2]</span>
+    <span class="s0">dims = (1, 2)</span>
+    <span class="s0">pos = cnp.PyArray_ZEROS(2, dims, cnp.NPY_UINT8, 0)</span>
+    <span class="s0">cnp.PyArray_FILLWBYTE(pos, 1)</span>
+    <span class="s0">return pos</span>
+
+<span class="s0">def inc2_cfloat_struct(cnp.ndarray[cnp.cfloat_t] arr):</span>
+    <span class="s0"># This works since we compile in C mode, it will fail in cpp mode</span>
+    <span class="s0">arr[1].real += 1</span>
+    <span class="s0">arr[1].imag += 1</span>
+    <span class="s0"># This works in both modes</span>
+    <span class="s0">arr[1].real = arr[1].real + 1</span>
+    <span class="s0">arr[1].imag = arr[1].imag + 1</span>
+
+
+<span class="s0">def npystring_pack(arr):</span>
+    <span class="s0">cdef char *string = &quot;Hello world&quot;</span>
+    <span class="s0">cdef size_t size = 11</span>
+
+    <span class="s0">allocator = cnp.NpyString_acquire_allocator(</span>
+        <span class="s0">&lt;cnp.PyArray_StringDTypeObject *&gt;cnp.PyArray_DESCR(arr)</span>
+    <span class="s0">)</span>
+
+    <span class="s0"># copy string-&gt;packed_string, the pointer to the underlying array buffer</span>
+    <span class="s0">ret = cnp.NpyString_pack(</span>
+        <span class="s0">allocator, &lt;cnp.npy_packed_static_string *&gt;cnp.PyArray_DATA(arr), string, size,</span>
+    <span class="s0">)</span>
+
+    <span class="s0">cnp.NpyString_release_allocator(allocator)</span>
+    <span class="s0">return ret</span>
+
+
+<span class="s0">def npystring_load(arr):</span>
+    <span class="s0">allocator = cnp.NpyString_acquire_allocator(</span>
+        <span class="s0">&lt;cnp.PyArray_StringDTypeObject *&gt;cnp.PyArray_DESCR(arr)</span>
+    <span class="s0">)</span>
+
+    <span class="s0">cdef cnp.npy_static_string sdata</span>
+    <span class="s0">sdata.size = 0</span>
+    <span class="s0">sdata.buf = NULL</span>
+
+    <span class="s0">cdef cnp.npy_packed_static_string *packed_string = &lt;cnp.npy_packed_static_string *&gt;cnp.PyArray_DATA(arr)</span>
+    <span class="s0">cdef int is_null = cnp.NpyString_load(allocator, packed_string, &amp;sdata)</span>
+    <span class="s0">cnp.NpyString_release_allocator(allocator)</span>
+    <span class="s0">if is_null == -1:</span>
+        <span class="s0">raise ValueError(&quot;String unpacking failed.&quot;)</span>
+    <span class="s0">elif is_null == 1:</span>
+        <span class="s0"># String in the array buffer is the null string</span>
+        <span class="s0">return &quot;&quot;</span>
+    <span class="s0">else:</span>
+        <span class="s0"># Cython syntax for copying a c string to python bytestring:</span>
+        <span class="s0"># slice the char * by the length of the string</span>
+        <span class="s0">return sdata.buf[:sdata.size].decode('utf-8')</span>
+
+
+<span class="s0">def npystring_pack_multiple(arr1, arr2):</span>
+    <span class="s0">cdef cnp.npy_string_allocator *allocators[2]</span>
+    <span class="s0">cdef cnp.PyArray_Descr *descrs[2]</span>
+    <span class="s0">descrs[0] = cnp.PyArray_DESCR(arr1)</span>
+    <span class="s0">descrs[1] = cnp.PyArray_DESCR(arr2)</span>
+
+    <span class="s0">cnp.NpyString_acquire_allocators(2, descrs, allocators)</span>
+
+    <span class="s0"># Write into the first element of each array</span>
+    <span class="s0">cdef int ret1 = cnp.NpyString_pack(</span>
+        <span class="s0">allocators[0], &lt;cnp.npy_packed_static_string *&gt;cnp.PyArray_DATA(arr1), &quot;Hello world&quot;, 11,</span>
+    <span class="s0">)</span>
+    <span class="s0">cdef int ret2 = cnp.NpyString_pack(</span>
+        <span class="s0">allocators[1], &lt;cnp.npy_packed_static_string *&gt;cnp.PyArray_DATA(arr2), &quot;test this&quot;, 9,</span>
+    <span class="s0">)</span>
+
+    <span class="s0"># Write a null string into the last element</span>
+    <span class="s0">cdef cnp.npy_intp elsize = cnp.PyArray_ITEMSIZE(arr1)</span>
+    <span class="s0">cdef int ret3 = cnp.NpyString_pack_null(</span>
+        <span class="s0">allocators[0],</span>
+        <span class="s0">&lt;cnp.npy_packed_static_string *&gt;(&lt;char *&gt;cnp.PyArray_DATA(arr1) + 2*elsize),</span>
+    <span class="s0">)</span>
+
+    <span class="s0">cnp.NpyString_release_allocators(2, allocators)</span>
+    <span class="s0">if ret1 == -1 or ret2 == -1 or ret3 == -1:</span>
+        <span class="s0">return -1</span>
+
+    <span class="s0">return 0</span>
+
+
+<span class="s0">def npystring_allocators_other_types(arr1, arr2):</span>
+    <span class="s0">cdef cnp.npy_string_allocator *allocators[2]</span>
+    <span class="s0">cdef cnp.PyArray_Descr *descrs[2]</span>
+    <span class="s0">descrs[0] = cnp.PyArray_DESCR(arr1)</span>
+    <span class="s0">descrs[1] = cnp.PyArray_DESCR(arr2)</span>
+
+    <span class="s0">cnp.NpyString_acquire_allocators(2, descrs, allocators)</span>
+
+    <span class="s0"># None of the dtypes here are StringDType, so every allocator</span>
+    <span class="s0"># should be NULL upon acquisition.</span>
+    <span class="s0">cdef int ret = 0</span>
+    <span class="s0">for allocator in allocators:</span>
+        <span class="s0">if allocator != NULL:</span>
+            <span class="s0">ret = -1</span>
+            <span class="s0">break</span>
+
+    <span class="s0">cnp.NpyString_release_allocators(2, allocators)</span>
+    <span class="s0">return ret</span>
+
+
+<span class="s0">def check_npy_uintp_type_enum():</span>
+    <span class="s0"># Regression test for gh-27890: cnp.NPY_UINTP was not defined.</span>
+    <span class="s0"># Cython would fail to compile this before gh-27890 was fixed.</span>
+    <span class="s0">return cnp.NPY_UINTP &gt; 0</span>
+
+
+<span class="s0">def resize_refcheck_test():</span>
+    <span class="s0"># see gh-30991</span>
+    <span class="s0">a = np.array([[0, 1], [2, 3]], order='C')</span>
+    <span class="s0">a.resize((2, 1))</span>
+</pre>
+</body>
+</html>

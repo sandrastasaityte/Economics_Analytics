@@ -1,0 +1,304 @@
+<html>
+<head>
+<title>f90mod_rules.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #2aacb8;}
+.s5 { color: #cf8e6d;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+f90mod_rules.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Build F90 module support for f2py2e. 
+ 
+Copyright 1999 -- 2011 Pearu Peterson all rights reserved. 
+Copyright 2011 -- present NumPy Developers. 
+Permission to use, modify, and distribute this software is given under the 
+terms of the NumPy License. 
+ 
+NO WARRANTY IS EXPRESSED OR IMPLIED.  USE AT YOUR OWN RISK. 
+&quot;&quot;&quot;</span>
+<span class="s1">__version__ </span><span class="s2">= </span><span class="s3">&quot;$Revision: 1.27 $&quot;</span><span class="s2">[</span><span class="s4">10</span><span class="s2">:-</span><span class="s4">1</span><span class="s2">]</span>
+
+<span class="s1">f2py_version </span><span class="s2">= </span><span class="s3">'See `f2py -v`'</span>
+
+<span class="s5">import </span><span class="s1">numpy </span><span class="s5">as </span><span class="s1">np</span>
+
+<span class="s5">from </span><span class="s2">. </span><span class="s5">import </span><span class="s1">capi_maps</span><span class="s2">, </span><span class="s1">func2subr</span>
+
+<span class="s6"># The environment provided by auxfuncs.py is needed for some calls to eval.</span>
+<span class="s6"># As the needed functions cannot be determined by static inspection of the</span>
+<span class="s6"># code, it is safest to use import * pending a major refactoring of f2py.</span>
+<span class="s5">from </span><span class="s2">.</span><span class="s1">auxfuncs </span><span class="s5">import </span><span class="s2">*</span>
+<span class="s5">from </span><span class="s2">.</span><span class="s1">crackfortran </span><span class="s5">import </span><span class="s1">undo_rmbadname</span><span class="s2">, </span><span class="s1">undo_rmbadname1</span>
+
+<span class="s1">options </span><span class="s2">= {}</span>
+
+
+<span class="s5">def </span><span class="s1">findf90modules</span><span class="s2">(</span><span class="s1">m</span><span class="s2">):</span>
+    <span class="s5">if </span><span class="s1">ismodule</span><span class="s2">(</span><span class="s1">m</span><span class="s2">):</span>
+        <span class="s5">return </span><span class="s2">[</span><span class="s1">m</span><span class="s2">]</span>
+    <span class="s5">if not </span><span class="s1">hasbody</span><span class="s2">(</span><span class="s1">m</span><span class="s2">):</span>
+        <span class="s5">return </span><span class="s2">[]</span>
+    <span class="s1">ret </span><span class="s2">= []</span>
+    <span class="s5">for </span><span class="s1">b </span><span class="s5">in </span><span class="s1">m</span><span class="s2">[</span><span class="s3">'body'</span><span class="s2">]:</span>
+        <span class="s5">if </span><span class="s1">ismodule</span><span class="s2">(</span><span class="s1">b</span><span class="s2">):</span>
+            <span class="s1">ret</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">b</span><span class="s2">)</span>
+        <span class="s5">else</span><span class="s2">:</span>
+            <span class="s1">ret </span><span class="s2">= </span><span class="s1">ret </span><span class="s2">+ </span><span class="s1">findf90modules</span><span class="s2">(</span><span class="s1">b</span><span class="s2">)</span>
+    <span class="s5">return </span><span class="s1">ret</span>
+
+
+<span class="s1">fgetdims1 </span><span class="s2">= </span><span class="s3">f&quot;&quot;&quot;</span><span class="s5">\ 
+      </span><span class="s3">external f2pysetdata</span>
+      <span class="s3">logical ns</span>
+      <span class="s3">integer r,i</span>
+      <span class="s3">integer(</span><span class="s5">{</span><span class="s1">np</span><span class="s2">.</span><span class="s1">intp</span><span class="s2">().</span><span class="s1">itemsize</span><span class="s5">}</span><span class="s3">) s(*)</span>
+      <span class="s3">ns = .FALSE.</span>
+      <span class="s3">if (allocated(d)) then</span>
+         <span class="s3">do i=1,r</span>
+            <span class="s3">if ((size(d,i).ne.s(i)).and.(s(i).ge.0)) then</span>
+               <span class="s3">ns = .TRUE.</span>
+            <span class="s3">end if</span>
+         <span class="s3">end do</span>
+         <span class="s3">if (ns) then</span>
+            <span class="s3">deallocate(d)</span>
+         <span class="s3">end if</span>
+      <span class="s3">end if</span>
+      <span class="s3">if ((.not.allocated(d)).and.(s(1).ge.1)) then&quot;&quot;&quot;</span>
+
+<span class="s1">fgetdims2 </span><span class="s2">= </span><span class="s3">&quot;&quot;&quot;</span><span class="s5">\ 
+      </span><span class="s3">end if 
+      if (allocated(d)) then 
+         do i=1,r 
+            s(i) = size(d,i) 
+         end do 
+      end if 
+      flag = 1 
+      call f2pysetdata(d,allocated(d))&quot;&quot;&quot;</span>
+
+<span class="s1">fgetdims2_sa </span><span class="s2">= </span><span class="s3">&quot;&quot;&quot;</span><span class="s5">\ 
+      </span><span class="s3">end if 
+      if (allocated(d)) then 
+         do i=1,r 
+            s(i) = size(d,i) 
+         end do 
+         !s(r) must be equal to len(d(1)) 
+      end if 
+      flag = 2 
+      call f2pysetdata(d,allocated(d))&quot;&quot;&quot;</span>
+
+
+<span class="s5">def </span><span class="s1">buildhooks</span><span class="s2">(</span><span class="s1">pymod</span><span class="s2">):</span>
+    <span class="s5">from </span><span class="s2">. </span><span class="s5">import </span><span class="s1">rules</span>
+    <span class="s1">ret </span><span class="s2">= {</span><span class="s3">'f90modhooks'</span><span class="s2">: [], </span><span class="s3">'initf90modhooks'</span><span class="s2">: [], </span><span class="s3">'body'</span><span class="s2">: [],</span>
+           <span class="s3">'need'</span><span class="s2">: [</span><span class="s3">'F_FUNC'</span><span class="s2">, </span><span class="s3">'arrayobject.h'</span><span class="s2">],</span>
+           <span class="s3">'separatorsfor'</span><span class="s2">: {</span><span class="s3">'includes0'</span><span class="s2">: </span><span class="s3">'</span><span class="s5">\n</span><span class="s3">'</span><span class="s2">, </span><span class="s3">'includes'</span><span class="s2">: </span><span class="s3">'</span><span class="s5">\n</span><span class="s3">'</span><span class="s2">},</span>
+           <span class="s3">'docs'</span><span class="s2">: [</span><span class="s3">'&quot;Fortran 90/95 modules:</span><span class="s5">\\</span><span class="s3">n&quot;'</span><span class="s2">],</span>
+           <span class="s3">'latexdoc'</span><span class="s2">: []}</span>
+    <span class="s1">fhooks </span><span class="s2">= [</span><span class="s3">''</span><span class="s2">]</span>
+
+    <span class="s5">def </span><span class="s1">fadd</span><span class="s2">(</span><span class="s1">line</span><span class="s2">, </span><span class="s1">s</span><span class="s2">=</span><span class="s1">fhooks</span><span class="s2">):</span>
+        <span class="s1">s</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] = </span><span class="s3">f'</span><span class="s5">{</span><span class="s1">s</span><span class="s2">[</span><span class="s4">0</span><span class="s2">]</span><span class="s5">}\n      {</span><span class="s1">line</span><span class="s5">}</span><span class="s3">'</span>
+    <span class="s1">doc </span><span class="s2">= [</span><span class="s3">''</span><span class="s2">]</span>
+
+    <span class="s5">def </span><span class="s1">dadd</span><span class="s2">(</span><span class="s1">line</span><span class="s2">, </span><span class="s1">s</span><span class="s2">=</span><span class="s1">doc</span><span class="s2">):</span>
+        <span class="s1">s</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] = </span><span class="s3">f'</span><span class="s5">{</span><span class="s1">s</span><span class="s2">[</span><span class="s4">0</span><span class="s2">]</span><span class="s5">}\n{</span><span class="s1">line</span><span class="s5">}</span><span class="s3">'</span>
+
+    <span class="s1">usenames </span><span class="s2">= </span><span class="s1">getuseblocks</span><span class="s2">(</span><span class="s1">pymod</span><span class="s2">)</span>
+    <span class="s5">for </span><span class="s1">m </span><span class="s5">in </span><span class="s1">findf90modules</span><span class="s2">(</span><span class="s1">pymod</span><span class="s2">):</span>
+        <span class="s1">sargs</span><span class="s2">, </span><span class="s1">fargs</span><span class="s2">, </span><span class="s1">efargs</span><span class="s2">, </span><span class="s1">modobjs</span><span class="s2">, </span><span class="s1">notvars</span><span class="s2">, </span><span class="s1">onlyvars </span><span class="s2">= [], [], [], [], [</span>
+            <span class="s1">m</span><span class="s2">[</span><span class="s3">'name'</span><span class="s2">]], []</span>
+        <span class="s1">sargsp </span><span class="s2">= []</span>
+        <span class="s1">ifargs </span><span class="s2">= []</span>
+        <span class="s1">mfargs </span><span class="s2">= []</span>
+        <span class="s5">if </span><span class="s1">hasbody</span><span class="s2">(</span><span class="s1">m</span><span class="s2">):</span>
+            <span class="s5">for </span><span class="s1">b </span><span class="s5">in </span><span class="s1">m</span><span class="s2">[</span><span class="s3">'body'</span><span class="s2">]:</span>
+                <span class="s1">notvars</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">b</span><span class="s2">[</span><span class="s3">'name'</span><span class="s2">])</span>
+        <span class="s5">for </span><span class="s1">n </span><span class="s5">in </span><span class="s1">m</span><span class="s2">[</span><span class="s3">'vars'</span><span class="s2">].</span><span class="s1">keys</span><span class="s2">():</span>
+            <span class="s1">var </span><span class="s2">= </span><span class="s1">m</span><span class="s2">[</span><span class="s3">'vars'</span><span class="s2">][</span><span class="s1">n</span><span class="s2">]</span>
+
+            <span class="s5">if </span><span class="s2">(</span><span class="s1">n </span><span class="s5">not in </span><span class="s1">notvars </span><span class="s5">and </span><span class="s1">isvariable</span><span class="s2">(</span><span class="s1">var</span><span class="s2">)) </span><span class="s5">and </span><span class="s2">(</span><span class="s5">not </span><span class="s1">l_or</span><span class="s2">(</span><span class="s1">isintent_hide</span><span class="s2">, </span><span class="s1">isprivate</span><span class="s2">)(</span><span class="s1">var</span><span class="s2">)):</span>
+                <span class="s1">onlyvars</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">n</span><span class="s2">)</span>
+                <span class="s1">mfargs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">n</span><span class="s2">)</span>
+        <span class="s1">outmess</span><span class="s2">(</span><span class="s3">f&quot;</span><span class="s5">\t\t</span><span class="s3">Constructing F90 module support for </span><span class="s5">\&quot;{</span><span class="s1">m</span><span class="s2">[</span><span class="s3">'name'</span><span class="s2">]</span><span class="s5">}\&quot;</span><span class="s3">...</span><span class="s5">\n</span><span class="s3">&quot;</span><span class="s2">)</span>
+        <span class="s5">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">onlyvars</span><span class="s2">) == </span><span class="s4">0 </span><span class="s5">and </span><span class="s1">len</span><span class="s2">(</span><span class="s1">notvars</span><span class="s2">) == </span><span class="s4">1 </span><span class="s5">and </span><span class="s1">m</span><span class="s2">[</span><span class="s3">'name'</span><span class="s2">] </span><span class="s5">in </span><span class="s1">notvars</span><span class="s2">:</span>
+            <span class="s1">outmess</span><span class="s2">(</span><span class="s3">f&quot;</span><span class="s5">\t\t\t</span><span class="s3">Skipping </span><span class="s5">{</span><span class="s1">m</span><span class="s2">[</span><span class="s3">'name'</span><span class="s2">]</span><span class="s5">} </span><span class="s3">since there are no public vars/func in this module...</span><span class="s5">\n</span><span class="s3">&quot;</span><span class="s2">)</span>
+            <span class="s5">continue</span>
+
+        <span class="s6"># gh-25186</span>
+        <span class="s5">if </span><span class="s1">m</span><span class="s2">[</span><span class="s3">'name'</span><span class="s2">] </span><span class="s5">in </span><span class="s1">usenames </span><span class="s5">and </span><span class="s1">containscommon</span><span class="s2">(</span><span class="s1">m</span><span class="s2">):</span>
+            <span class="s1">outmess</span><span class="s2">(</span><span class="s3">f&quot;</span><span class="s5">\t\t\t</span><span class="s3">Skipping </span><span class="s5">{</span><span class="s1">m</span><span class="s2">[</span><span class="s3">'name'</span><span class="s2">]</span><span class="s5">} </span><span class="s3">since it is in 'use' and contains a common block...</span><span class="s5">\n</span><span class="s3">&quot;</span><span class="s2">)</span>
+            <span class="s5">continue</span>
+        <span class="s6"># skip modules with derived types</span>
+        <span class="s5">if </span><span class="s1">m</span><span class="s2">[</span><span class="s3">'name'</span><span class="s2">] </span><span class="s5">in </span><span class="s1">usenames </span><span class="s5">and </span><span class="s1">containsderivedtypes</span><span class="s2">(</span><span class="s1">m</span><span class="s2">):</span>
+            <span class="s1">outmess</span><span class="s2">(</span><span class="s3">f&quot;</span><span class="s5">\t\t\t</span><span class="s3">Skipping </span><span class="s5">{</span><span class="s1">m</span><span class="s2">[</span><span class="s3">'name'</span><span class="s2">]</span><span class="s5">} </span><span class="s3">since it is in 'use' and contains a derived type...</span><span class="s5">\n</span><span class="s3">&quot;</span><span class="s2">)</span>
+            <span class="s5">continue</span>
+        <span class="s5">if </span><span class="s1">onlyvars</span><span class="s2">:</span>
+            <span class="s1">outmess</span><span class="s2">(</span><span class="s3">f&quot;</span><span class="s5">\t\t  </span><span class="s3">Variables: </span><span class="s5">{</span><span class="s3">' '</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">onlyvars</span><span class="s2">)</span><span class="s5">}\n</span><span class="s3">&quot;</span><span class="s2">)</span>
+        <span class="s1">chooks </span><span class="s2">= [</span><span class="s3">''</span><span class="s2">]</span>
+
+        <span class="s5">def </span><span class="s1">cadd</span><span class="s2">(</span><span class="s1">line</span><span class="s2">, </span><span class="s1">s</span><span class="s2">=</span><span class="s1">chooks</span><span class="s2">):</span>
+            <span class="s1">s</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] = </span><span class="s3">f'</span><span class="s5">{</span><span class="s1">s</span><span class="s2">[</span><span class="s4">0</span><span class="s2">]</span><span class="s5">}\n{</span><span class="s1">line</span><span class="s5">}</span><span class="s3">'</span>
+        <span class="s1">ihooks </span><span class="s2">= [</span><span class="s3">''</span><span class="s2">]</span>
+
+        <span class="s5">def </span><span class="s1">iadd</span><span class="s2">(</span><span class="s1">line</span><span class="s2">, </span><span class="s1">s</span><span class="s2">=</span><span class="s1">ihooks</span><span class="s2">):</span>
+            <span class="s1">s</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] = </span><span class="s3">f'</span><span class="s5">{</span><span class="s1">s</span><span class="s2">[</span><span class="s4">0</span><span class="s2">]</span><span class="s5">}\n{</span><span class="s1">line</span><span class="s5">}</span><span class="s3">'</span>
+
+        <span class="s1">vrd </span><span class="s2">= </span><span class="s1">capi_maps</span><span class="s2">.</span><span class="s1">modsign2map</span><span class="s2">(</span><span class="s1">m</span><span class="s2">)</span>
+        <span class="s1">cadd</span><span class="s2">(</span><span class="s3">f&quot;static FortranDataDef f2py_</span><span class="s5">{</span><span class="s1">m</span><span class="s2">[</span><span class="s3">'name'</span><span class="s2">]</span><span class="s5">}</span><span class="s3">_def[] = </span><span class="s5">{{</span><span class="s3">&quot;</span><span class="s2">)</span>
+        <span class="s1">dadd</span><span class="s2">(</span><span class="s3">f&quot;</span><span class="s5">\\</span><span class="s3">subsection</span><span class="s5">{{</span><span class="s3">Fortran 90/95 module </span><span class="s5">\\</span><span class="s3">texttt</span><span class="s5">{{{</span><span class="s1">m</span><span class="s2">[</span><span class="s3">'name'</span><span class="s2">]</span><span class="s5">}}}}}\n</span><span class="s3">&quot;</span><span class="s2">)</span>
+        <span class="s5">if </span><span class="s1">hasnote</span><span class="s2">(</span><span class="s1">m</span><span class="s2">):</span>
+            <span class="s1">note </span><span class="s2">= </span><span class="s1">m</span><span class="s2">[</span><span class="s3">'note'</span><span class="s2">]</span>
+            <span class="s5">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">note</span><span class="s2">, </span><span class="s1">list</span><span class="s2">):</span>
+                <span class="s1">note </span><span class="s2">= </span><span class="s3">'</span><span class="s5">\n</span><span class="s3">'</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">note</span><span class="s2">)</span>
+            <span class="s1">dadd</span><span class="s2">(</span><span class="s1">note</span><span class="s2">)</span>
+        <span class="s5">if </span><span class="s1">onlyvars</span><span class="s2">:</span>
+            <span class="s1">dadd</span><span class="s2">(</span><span class="s3">'</span><span class="s5">\\</span><span class="s3">begin{description}'</span><span class="s2">)</span>
+        <span class="s5">for </span><span class="s1">n </span><span class="s5">in </span><span class="s1">onlyvars</span><span class="s2">:</span>
+            <span class="s1">var </span><span class="s2">= </span><span class="s1">m</span><span class="s2">[</span><span class="s3">'vars'</span><span class="s2">][</span><span class="s1">n</span><span class="s2">]</span>
+            <span class="s1">modobjs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">n</span><span class="s2">)</span>
+            <span class="s1">ct </span><span class="s2">= </span><span class="s1">capi_maps</span><span class="s2">.</span><span class="s1">getctype</span><span class="s2">(</span><span class="s1">var</span><span class="s2">)</span>
+            <span class="s1">at </span><span class="s2">= </span><span class="s1">capi_maps</span><span class="s2">.</span><span class="s1">c2capi_map</span><span class="s2">[</span><span class="s1">ct</span><span class="s2">]</span>
+            <span class="s1">dm </span><span class="s2">= </span><span class="s1">capi_maps</span><span class="s2">.</span><span class="s1">getarrdims</span><span class="s2">(</span><span class="s1">n</span><span class="s2">, </span><span class="s1">var</span><span class="s2">)</span>
+            <span class="s1">dms </span><span class="s2">= </span><span class="s1">dm</span><span class="s2">[</span><span class="s3">'dims'</span><span class="s2">].</span><span class="s1">replace</span><span class="s2">(</span><span class="s3">'*'</span><span class="s2">, </span><span class="s3">'-1'</span><span class="s2">).</span><span class="s1">strip</span><span class="s2">()</span>
+            <span class="s1">dms </span><span class="s2">= </span><span class="s1">dms</span><span class="s2">.</span><span class="s1">replace</span><span class="s2">(</span><span class="s3">':'</span><span class="s2">, </span><span class="s3">'-1'</span><span class="s2">).</span><span class="s1">strip</span><span class="s2">()</span>
+            <span class="s5">if not </span><span class="s1">dms</span><span class="s2">:</span>
+                <span class="s1">dms </span><span class="s2">= </span><span class="s3">'-1'</span>
+            <span class="s1">use_fgetdims2 </span><span class="s2">= </span><span class="s1">fgetdims2</span>
+            <span class="s1">rank </span><span class="s2">= </span><span class="s1">dm</span><span class="s2">[</span><span class="s3">'rank'</span><span class="s2">]</span>
+            <span class="s1">elsize </span><span class="s2">= </span><span class="s1">capi_maps</span><span class="s2">.</span><span class="s1">get_elsize</span><span class="s2">(</span><span class="s1">var</span><span class="s2">)</span>
+            <span class="s1">cadd</span><span class="s2">(</span><span class="s3">f'</span><span class="s5">\t{{</span><span class="s3">&quot;</span><span class="s5">{</span><span class="s1">undo_rmbadname1</span><span class="s2">(</span><span class="s1">n</span><span class="s2">)</span><span class="s5">}</span><span class="s3">&quot;,</span><span class="s5">{</span><span class="s1">rank</span><span class="s5">}</span><span class="s3">,</span><span class="s5">{{{{{</span><span class="s1">dms</span><span class="s5">}}}}}</span><span class="s3">,</span><span class="s5">{</span><span class="s1">at</span><span class="s5">}</span><span class="s3">, '</span>
+                 <span class="s3">f'</span><span class="s5">{</span><span class="s1">elsize</span><span class="s5">}}}</span><span class="s3">,'</span><span class="s2">)</span>
+            <span class="s1">docsign </span><span class="s2">= </span><span class="s1">capi_maps</span><span class="s2">.</span><span class="s1">getarrdocsign</span><span class="s2">(</span><span class="s1">n</span><span class="s2">, </span><span class="s1">var</span><span class="s2">)</span>
+            <span class="s1">dadd</span><span class="s2">(</span><span class="s3">f'</span><span class="s5">\\</span><span class="s3">item[]</span><span class="s5">{{{{}}\\</span><span class="s3">verb@</span><span class="s5">{</span><span class="s1">docsign</span><span class="s5">}</span><span class="s3">@</span><span class="s5">{{}}}}</span><span class="s3">'</span><span class="s2">)</span>
+            <span class="s5">if </span><span class="s1">hasnote</span><span class="s2">(</span><span class="s1">var</span><span class="s2">):</span>
+                <span class="s1">note </span><span class="s2">= </span><span class="s1">var</span><span class="s2">[</span><span class="s3">'note'</span><span class="s2">]</span>
+                <span class="s5">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">note</span><span class="s2">, </span><span class="s1">list</span><span class="s2">):</span>
+                    <span class="s1">note </span><span class="s2">= </span><span class="s3">'</span><span class="s5">\n</span><span class="s3">'</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">note</span><span class="s2">)</span>
+                <span class="s1">dadd</span><span class="s2">(</span><span class="s3">f'--- </span><span class="s5">{</span><span class="s1">note</span><span class="s5">}</span><span class="s3">'</span><span class="s2">)</span>
+            <span class="s5">if </span><span class="s1">isallocatable</span><span class="s2">(</span><span class="s1">var</span><span class="s2">):</span>
+                <span class="s1">fargs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s3">f&quot;f2py_</span><span class="s5">{</span><span class="s1">m</span><span class="s2">[</span><span class="s3">'name'</span><span class="s2">]</span><span class="s5">}</span><span class="s3">_getdims_</span><span class="s5">{</span><span class="s1">n</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s2">)</span>
+                <span class="s1">efargs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">fargs</span><span class="s2">[-</span><span class="s4">1</span><span class="s2">])</span>
+                <span class="s1">sargs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span>
+                    <span class="s3">f'void (*</span><span class="s5">{</span><span class="s1">n</span><span class="s5">}</span><span class="s3">)(int*,npy_intp*,void(*)(char*,npy_intp*),int*)'</span><span class="s2">)</span>
+                <span class="s1">sargsp</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s3">'void (*)(int*,npy_intp*,void(*)(char*,npy_intp*),int*)'</span><span class="s2">)</span>
+                <span class="s1">iadd</span><span class="s2">(</span><span class="s3">f&quot;</span><span class="s5">\t</span><span class="s3">f2py_</span><span class="s5">{</span><span class="s1">m</span><span class="s2">[</span><span class="s3">'name'</span><span class="s2">]</span><span class="s5">}</span><span class="s3">_def[i_f2py++].func = </span><span class="s5">{</span><span class="s1">n</span><span class="s5">}</span><span class="s3">;&quot;</span><span class="s2">)</span>
+                <span class="s1">fadd</span><span class="s2">(</span><span class="s3">f'subroutine </span><span class="s5">{</span><span class="s1">fargs</span><span class="s2">[-</span><span class="s4">1</span><span class="s2">]</span><span class="s5">}</span><span class="s3">(r,s,f2pysetdata,flag)'</span><span class="s2">)</span>
+                <span class="s1">fadd</span><span class="s2">(</span><span class="s3">f&quot;use </span><span class="s5">{</span><span class="s1">m</span><span class="s2">[</span><span class="s3">'name'</span><span class="s2">]</span><span class="s5">}</span><span class="s3">, only: d =&gt; </span><span class="s5">{</span><span class="s1">undo_rmbadname1</span><span class="s2">(</span><span class="s1">n</span><span class="s2">)</span><span class="s5">}\n</span><span class="s3">&quot;</span><span class="s2">)</span>
+                <span class="s1">fadd</span><span class="s2">(</span><span class="s3">'integer flag</span><span class="s5">\n</span><span class="s3">'</span><span class="s2">)</span>
+                <span class="s1">fhooks</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] = </span><span class="s1">fhooks</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] + </span><span class="s1">fgetdims1</span>
+                <span class="s1">dms </span><span class="s2">= </span><span class="s1">range</span><span class="s2">(</span><span class="s4">1</span><span class="s2">, </span><span class="s1">int</span><span class="s2">(</span><span class="s1">dm</span><span class="s2">[</span><span class="s3">'rank'</span><span class="s2">]) + </span><span class="s4">1</span><span class="s2">)</span>
+                <span class="s1">alloc_args </span><span class="s2">= </span><span class="s3">','</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s3">f's(</span><span class="s5">{</span><span class="s1">i</span><span class="s5">}</span><span class="s3">)' </span><span class="s5">for </span><span class="s1">i </span><span class="s5">in </span><span class="s1">dms</span><span class="s2">)</span>
+                <span class="s1">fadd</span><span class="s2">(</span><span class="s3">f' allocate(d(</span><span class="s5">{</span><span class="s1">alloc_args</span><span class="s5">}</span><span class="s3">))</span><span class="s5">\n</span><span class="s3">'</span><span class="s2">)</span>
+                <span class="s1">fhooks</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] = </span><span class="s1">fhooks</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] + </span><span class="s1">use_fgetdims2</span>
+                <span class="s1">fadd</span><span class="s2">(</span><span class="s3">f'end subroutine </span><span class="s5">{</span><span class="s1">fargs</span><span class="s2">[-</span><span class="s4">1</span><span class="s2">]</span><span class="s5">}</span><span class="s3">'</span><span class="s2">)</span>
+            <span class="s5">else</span><span class="s2">:</span>
+                <span class="s1">fargs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">n</span><span class="s2">)</span>
+                <span class="s1">sargs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s3">f'char *</span><span class="s5">{</span><span class="s1">n</span><span class="s5">}</span><span class="s3">'</span><span class="s2">)</span>
+                <span class="s1">sargsp</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s3">'char*'</span><span class="s2">)</span>
+                <span class="s1">iadd</span><span class="s2">(</span><span class="s3">f&quot;</span><span class="s5">\t</span><span class="s3">f2py_</span><span class="s5">{</span><span class="s1">m</span><span class="s2">[</span><span class="s3">'name'</span><span class="s2">]</span><span class="s5">}</span><span class="s3">_def[i_f2py++].data = </span><span class="s5">{</span><span class="s1">n</span><span class="s5">}</span><span class="s3">;&quot;</span><span class="s2">)</span>
+        <span class="s5">if </span><span class="s1">onlyvars</span><span class="s2">:</span>
+            <span class="s1">dadd</span><span class="s2">(</span><span class="s3">'</span><span class="s5">\\</span><span class="s3">end{description}'</span><span class="s2">)</span>
+        <span class="s5">if </span><span class="s1">hasbody</span><span class="s2">(</span><span class="s1">m</span><span class="s2">):</span>
+            <span class="s1">m_name </span><span class="s2">= </span><span class="s1">m</span><span class="s2">[</span><span class="s3">'name'</span><span class="s2">]</span>
+            <span class="s5">for </span><span class="s1">b </span><span class="s5">in </span><span class="s1">m</span><span class="s2">[</span><span class="s3">'body'</span><span class="s2">]:</span>
+                <span class="s1">b_name </span><span class="s2">= </span><span class="s1">b</span><span class="s2">[</span><span class="s3">'name'</span><span class="s2">]</span>
+                <span class="s5">if not </span><span class="s1">isroutine</span><span class="s2">(</span><span class="s1">b</span><span class="s2">):</span>
+                    <span class="s1">outmess</span><span class="s2">(</span><span class="s3">&quot;f90mod_rules.buildhooks:&quot;</span>
+                            <span class="s3">f&quot; skipping </span><span class="s5">{</span><span class="s1">b</span><span class="s2">[</span><span class="s3">'block'</span><span class="s2">]</span><span class="s5">} {</span><span class="s1">b_name</span><span class="s5">}\n</span><span class="s3">&quot;</span><span class="s2">)</span>
+                    <span class="s5">continue</span>
+                <span class="s1">modobjs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s3">f&quot;</span><span class="s5">{</span><span class="s1">b_name</span><span class="s5">}</span><span class="s3">()&quot;</span><span class="s2">)</span>
+                <span class="s1">b</span><span class="s2">[</span><span class="s3">'modulename'</span><span class="s2">] = </span><span class="s1">m_name</span>
+                <span class="s1">api</span><span class="s2">, </span><span class="s1">wrap </span><span class="s2">= </span><span class="s1">rules</span><span class="s2">.</span><span class="s1">buildapi</span><span class="s2">(</span><span class="s1">b</span><span class="s2">)</span>
+                <span class="s5">if </span><span class="s1">isfunction</span><span class="s2">(</span><span class="s1">b</span><span class="s2">):</span>
+                    <span class="s1">fhooks</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] = </span><span class="s1">fhooks</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] + </span><span class="s1">wrap</span>
+                    <span class="s1">fargs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s3">f&quot;f2pywrap_</span><span class="s5">{</span><span class="s1">m_name</span><span class="s5">}</span><span class="s3">_</span><span class="s5">{</span><span class="s1">b_name</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s2">)</span>
+                    <span class="s1">ifargs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">func2subr</span><span class="s2">.</span><span class="s1">createfuncwrapper</span><span class="s2">(</span><span class="s1">b</span><span class="s2">, </span><span class="s1">signature</span><span class="s2">=</span><span class="s4">1</span><span class="s2">))</span>
+                <span class="s5">elif </span><span class="s1">wrap</span><span class="s2">:</span>
+                    <span class="s1">fhooks</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] = </span><span class="s1">fhooks</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] + </span><span class="s1">wrap</span>
+                    <span class="s1">fargs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s3">f&quot;f2pywrap_</span><span class="s5">{</span><span class="s1">m_name</span><span class="s5">}</span><span class="s3">_</span><span class="s5">{</span><span class="s1">b_name</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s2">)</span>
+                    <span class="s1">ifargs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span>
+                        <span class="s1">func2subr</span><span class="s2">.</span><span class="s1">createsubrwrapper</span><span class="s2">(</span><span class="s1">b</span><span class="s2">, </span><span class="s1">signature</span><span class="s2">=</span><span class="s4">1</span><span class="s2">))</span>
+                <span class="s5">else</span><span class="s2">:</span>
+                    <span class="s1">fargs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">b_name</span><span class="s2">)</span>
+                    <span class="s1">mfargs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">fargs</span><span class="s2">[-</span><span class="s4">1</span><span class="s2">])</span>
+                <span class="s1">api</span><span class="s2">[</span><span class="s3">'externroutines'</span><span class="s2">] = []</span>
+                <span class="s1">ar </span><span class="s2">= </span><span class="s1">applyrules</span><span class="s2">(</span><span class="s1">api</span><span class="s2">, </span><span class="s1">vrd</span><span class="s2">)</span>
+                <span class="s1">ar</span><span class="s2">[</span><span class="s3">'docs'</span><span class="s2">] = []</span>
+                <span class="s1">ar</span><span class="s2">[</span><span class="s3">'docshort'</span><span class="s2">] = []</span>
+                <span class="s1">ret </span><span class="s2">= </span><span class="s1">dictappend</span><span class="s2">(</span><span class="s1">ret</span><span class="s2">, </span><span class="s1">ar</span><span class="s2">)</span>
+                <span class="s1">cadd</span><span class="s2">(</span><span class="s3">f'</span><span class="s5">\t{{</span><span class="s3">&quot;</span><span class="s5">{</span><span class="s1">b_name</span><span class="s5">}</span><span class="s3">&quot;,-1,</span><span class="s5">{{{{</span><span class="s3">-1</span><span class="s5">}}}}</span><span class="s3">,0,0,NULL,(void *)'</span>
+                      <span class="s3">f'f2py_rout_#modulename#_</span><span class="s5">{</span><span class="s1">m_name</span><span class="s5">}</span><span class="s3">_</span><span class="s5">{</span><span class="s1">b_name</span><span class="s5">}</span><span class="s3">,'</span>
+                      <span class="s3">f'doc_f2py_rout_#modulename#_</span><span class="s5">{</span><span class="s1">m_name</span><span class="s5">}</span><span class="s3">_</span><span class="s5">{</span><span class="s1">b_name</span><span class="s5">}}}</span><span class="s3">,'</span><span class="s2">)</span>
+                <span class="s1">sargs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s3">f&quot;char *</span><span class="s5">{</span><span class="s1">b_name</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s2">)</span>
+                <span class="s1">sargsp</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s3">'char *'</span><span class="s2">)</span>
+                <span class="s1">iadd</span><span class="s2">(</span><span class="s3">f&quot;</span><span class="s5">\t</span><span class="s3">f2py_</span><span class="s5">{</span><span class="s1">m_name</span><span class="s5">}</span><span class="s3">_def[i_f2py++].data = </span><span class="s5">{</span><span class="s1">b_name</span><span class="s5">}</span><span class="s3">;&quot;</span><span class="s2">)</span>
+        <span class="s1">cadd</span><span class="s2">(</span><span class="s3">'</span><span class="s5">\t</span><span class="s3">{NULL}</span><span class="s5">\n</span><span class="s3">};</span><span class="s5">\n</span><span class="s3">'</span><span class="s2">)</span>
+        <span class="s1">iadd</span><span class="s2">(</span><span class="s3">'}'</span><span class="s2">)</span>
+        <span class="s1">m_name </span><span class="s2">= </span><span class="s1">m</span><span class="s2">[</span><span class="s3">'name'</span><span class="s2">]</span>
+        <span class="s1">sargs_str </span><span class="s2">= </span><span class="s3">','</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">sargs</span><span class="s2">)</span>
+        <span class="s1">ihooks</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] = (</span><span class="s3">f'static void f2py_setup_</span><span class="s5">{</span><span class="s1">m_name</span><span class="s5">}</span><span class="s3">(</span><span class="s5">{</span><span class="s1">sargs_str</span><span class="s5">}</span><span class="s3">) '</span>
+                     <span class="s3">f'</span><span class="s5">{{\n\t</span><span class="s3">int i_f2py=0;</span><span class="s5">{</span><span class="s1">ihooks</span><span class="s2">[</span><span class="s4">0</span><span class="s2">]</span><span class="s5">}</span><span class="s3">'</span><span class="s2">)</span>
+        <span class="s5">if </span><span class="s3">'_' </span><span class="s5">in </span><span class="s1">m_name</span><span class="s2">:</span>
+            <span class="s1">F_FUNC </span><span class="s2">= </span><span class="s3">'F_FUNC_US'</span>
+        <span class="s5">else</span><span class="s2">:</span>
+            <span class="s1">F_FUNC </span><span class="s2">= </span><span class="s3">'F_FUNC'</span>
+        <span class="s1">sargsp_str </span><span class="s2">= </span><span class="s3">','</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">sargsp</span><span class="s2">)</span>
+        <span class="s1">iadd</span><span class="s2">(</span><span class="s3">f'extern void </span><span class="s5">{</span><span class="s1">F_FUNC</span><span class="s5">}</span><span class="s3">(f2pyinit</span><span class="s5">{</span><span class="s1">m_name</span><span class="s5">}</span><span class="s3">,'</span>
+             <span class="s3">f'F2PYINIT</span><span class="s5">{</span><span class="s1">m_name</span><span class="s2">.</span><span class="s1">upper</span><span class="s2">()</span><span class="s5">}</span><span class="s3">)(void (*)(</span><span class="s5">{</span><span class="s1">sargsp_str</span><span class="s5">}</span><span class="s3">));'</span><span class="s2">)</span>
+        <span class="s1">iadd</span><span class="s2">(</span><span class="s3">f'static void f2py_init_</span><span class="s5">{</span><span class="s1">m_name</span><span class="s5">}</span><span class="s3">(void) </span><span class="s5">{{</span><span class="s3">'</span><span class="s2">)</span>
+        <span class="s1">iadd</span><span class="s2">(</span><span class="s3">f'</span><span class="s5">\t{</span><span class="s1">F_FUNC</span><span class="s5">}</span><span class="s3">(f2pyinit</span><span class="s5">{</span><span class="s1">m_name</span><span class="s5">}</span><span class="s3">,'</span>
+             <span class="s3">f'F2PYINIT</span><span class="s5">{</span><span class="s1">m_name</span><span class="s2">.</span><span class="s1">upper</span><span class="s2">()</span><span class="s5">}</span><span class="s3">)(f2py_setup_</span><span class="s5">{</span><span class="s1">m_name</span><span class="s5">}</span><span class="s3">);'</span><span class="s2">)</span>
+        <span class="s1">iadd</span><span class="s2">(</span><span class="s3">'}</span><span class="s5">\n</span><span class="s3">'</span><span class="s2">)</span>
+        <span class="s1">ret</span><span class="s2">[</span><span class="s3">'f90modhooks'</span><span class="s2">] = </span><span class="s1">ret</span><span class="s2">[</span><span class="s3">'f90modhooks'</span><span class="s2">] + </span><span class="s1">chooks </span><span class="s2">+ </span><span class="s1">ihooks</span>
+        <span class="s1">ret</span><span class="s2">[</span><span class="s3">'initf90modhooks'</span><span class="s2">] = [</span>
+            <span class="s3">'</span><span class="s5">\t</span><span class="s3">{'</span><span class="s2">,</span>
+            <span class="s2">(</span><span class="s3">'</span><span class="s5">\t\t</span><span class="s3">PyObject *tmp = '</span>
+            <span class="s3">f'PyFortranObject_New(f2py_</span><span class="s5">{</span><span class="s1">m_name</span><span class="s5">}</span><span class="s3">_def,f2py_init_</span><span class="s5">{</span><span class="s1">m_name</span><span class="s5">}</span><span class="s3">);'</span><span class="s2">),</span>
+            <span class="s3">f'</span><span class="s5">\t\t</span><span class="s3">PyDict_SetItemString(d, &quot;</span><span class="s5">{</span><span class="s1">m_name</span><span class="s5">}</span><span class="s3">&quot;, tmp);'</span><span class="s2">,</span>
+            <span class="s3">'</span><span class="s5">\t\t</span><span class="s3">Py_XDECREF(tmp);'</span><span class="s2">,</span>
+            <span class="s3">'</span><span class="s5">\t</span><span class="s3">}'</span><span class="s2">,</span>
+        <span class="s2">] + </span><span class="s1">ret</span><span class="s2">[</span><span class="s3">&quot;initf90modhooks&quot;</span><span class="s2">]</span>
+        <span class="s1">fadd</span><span class="s2">(</span><span class="s3">''</span><span class="s2">)</span>
+        <span class="s1">fadd</span><span class="s2">(</span><span class="s3">f&quot;subroutine f2pyinit</span><span class="s5">{</span><span class="s1">m_name</span><span class="s5">}</span><span class="s3">(f2pysetupfunc)&quot;</span><span class="s2">)</span>
+        <span class="s5">if </span><span class="s1">mfargs</span><span class="s2">:</span>
+            <span class="s5">for </span><span class="s1">a </span><span class="s5">in </span><span class="s1">undo_rmbadname</span><span class="s2">(</span><span class="s1">mfargs</span><span class="s2">):</span>
+                <span class="s1">fadd</span><span class="s2">(</span><span class="s3">f&quot;use </span><span class="s5">{</span><span class="s1">m_name</span><span class="s5">}</span><span class="s3">, only : </span><span class="s5">{</span><span class="s1">a</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s2">)</span>
+        <span class="s5">if </span><span class="s1">ifargs</span><span class="s2">:</span>
+            <span class="s1">fadd</span><span class="s2">(</span><span class="s3">' '</span><span class="s2">.</span><span class="s1">join</span><span class="s2">([</span><span class="s3">'interface'</span><span class="s2">] + </span><span class="s1">ifargs</span><span class="s2">))</span>
+            <span class="s1">fadd</span><span class="s2">(</span><span class="s3">'end interface'</span><span class="s2">)</span>
+        <span class="s1">fadd</span><span class="s2">(</span><span class="s3">'external f2pysetupfunc'</span><span class="s2">)</span>
+        <span class="s5">if </span><span class="s1">efargs</span><span class="s2">:</span>
+            <span class="s5">for </span><span class="s1">a </span><span class="s5">in </span><span class="s1">undo_rmbadname</span><span class="s2">(</span><span class="s1">efargs</span><span class="s2">):</span>
+                <span class="s1">fadd</span><span class="s2">(</span><span class="s3">f'external </span><span class="s5">{</span><span class="s1">a</span><span class="s5">}</span><span class="s3">'</span><span class="s2">)</span>
+        <span class="s1">fadd</span><span class="s2">(</span><span class="s3">f&quot;call f2pysetupfunc(</span><span class="s5">{</span><span class="s3">','</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">undo_rmbadname</span><span class="s2">(</span><span class="s1">fargs</span><span class="s2">))</span><span class="s5">}</span><span class="s3">)&quot;</span><span class="s2">)</span>
+        <span class="s1">fadd</span><span class="s2">(</span><span class="s3">f&quot;end subroutine f2pyinit</span><span class="s5">{</span><span class="s1">m_name</span><span class="s5">}\n</span><span class="s3">&quot;</span><span class="s2">)</span>
+
+        <span class="s1">dadd</span><span class="s2">(</span><span class="s3">'</span><span class="s5">\n</span><span class="s3">'</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">ret</span><span class="s2">[</span><span class="s3">'latexdoc'</span><span class="s2">]).</span><span class="s1">replace</span><span class="s2">(</span>
+            <span class="s3">r'\subsection{'</span><span class="s2">, </span><span class="s3">r'\subsubsection{'</span><span class="s2">))</span>
+
+        <span class="s1">ret</span><span class="s2">[</span><span class="s3">'latexdoc'</span><span class="s2">] = []</span>
+        <span class="s1">modobjs_str </span><span class="s2">= </span><span class="s3">','</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">undo_rmbadname</span><span class="s2">(</span><span class="s1">modobjs</span><span class="s2">))</span>
+        <span class="s1">ret</span><span class="s2">[</span><span class="s3">'docs'</span><span class="s2">].</span><span class="s1">append</span><span class="s2">(</span><span class="s3">f&quot;</span><span class="s5">\&quot;\t{</span><span class="s1">m_name</span><span class="s5">} </span><span class="s3">--- </span><span class="s5">{</span><span class="s1">modobjs_str</span><span class="s5">}\&quot;</span><span class="s3">&quot;</span><span class="s2">)</span>
+
+    <span class="s1">ret</span><span class="s2">[</span><span class="s3">'routine_defs'</span><span class="s2">] = </span><span class="s3">''</span>
+    <span class="s1">ret</span><span class="s2">[</span><span class="s3">'doc'</span><span class="s2">] = []</span>
+    <span class="s1">ret</span><span class="s2">[</span><span class="s3">'docshort'</span><span class="s2">] = []</span>
+    <span class="s1">ret</span><span class="s2">[</span><span class="s3">'latexdoc'</span><span class="s2">] = </span><span class="s1">doc</span><span class="s2">[</span><span class="s4">0</span><span class="s2">]</span>
+    <span class="s5">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">ret</span><span class="s2">[</span><span class="s3">'docs'</span><span class="s2">]) &lt;= </span><span class="s4">1</span><span class="s2">:</span>
+        <span class="s1">ret</span><span class="s2">[</span><span class="s3">'docs'</span><span class="s2">] = </span><span class="s3">''</span>
+    <span class="s5">return </span><span class="s1">ret</span><span class="s2">, </span><span class="s1">fhooks</span><span class="s2">[</span><span class="s4">0</span><span class="s2">]</span>
+</pre>
+</body>
+</html>

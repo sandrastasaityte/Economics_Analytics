@@ -1,0 +1,293 @@
+<html>
+<head>
+<title>header_footer.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+header_footer.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright (c) 2010-2024 openpyxl</span>
+
+<span class="s0"># Simplified implementation of headers and footers: let worksheets have separate items</span>
+
+<span class="s2">import </span><span class="s1">re</span>
+<span class="s2">from </span><span class="s1">warnings </span><span class="s2">import </span><span class="s1">warn</span>
+
+<span class="s2">from </span><span class="s1">openpyxl</span><span class="s3">.</span><span class="s1">descriptors </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">Alias</span><span class="s3">,</span>
+    <span class="s1">Bool</span><span class="s3">,</span>
+    <span class="s1">Strict</span><span class="s3">,</span>
+    <span class="s1">String</span><span class="s3">,</span>
+    <span class="s1">Integer</span><span class="s3">,</span>
+    <span class="s1">MatchPattern</span><span class="s3">,</span>
+    <span class="s1">Typed</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">openpyxl</span><span class="s3">.</span><span class="s1">descriptors</span><span class="s3">.</span><span class="s1">serialisable </span><span class="s2">import </span><span class="s1">Serialisable</span>
+
+
+<span class="s2">from </span><span class="s1">openpyxl</span><span class="s3">.</span><span class="s1">xml</span><span class="s3">.</span><span class="s1">functions </span><span class="s2">import </span><span class="s1">Element</span>
+<span class="s2">from </span><span class="s1">openpyxl</span><span class="s3">.</span><span class="s1">utils</span><span class="s3">.</span><span class="s1">escape </span><span class="s2">import </span><span class="s1">escape</span><span class="s3">, </span><span class="s1">unescape</span>
+
+
+<span class="s1">FONT_PATTERN </span><span class="s3">= </span><span class="s4">'&amp;&quot;(?P&lt;font&gt;.+)&quot;'</span>
+<span class="s1">COLOR_PATTERN  </span><span class="s3">= </span><span class="s4">&quot;&amp;K(?P&lt;color&gt;[A-F0-9]{6})&quot;</span>
+<span class="s1">SIZE_REGEX </span><span class="s3">= </span><span class="s4">r&quot;&amp;(?P&lt;size&gt;\d+\s?)&quot;</span>
+<span class="s1">FORMAT_REGEX </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">&quot;{0}|{1}|{2}&quot;</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">FONT_PATTERN</span><span class="s3">, </span><span class="s1">COLOR_PATTERN</span><span class="s3">,</span>
+                                               <span class="s1">SIZE_REGEX</span><span class="s3">)</span>
+                          <span class="s3">)</span>
+
+<span class="s2">def </span><span class="s1">_split_string</span><span class="s3">(</span><span class="s1">text</span><span class="s3">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Split the combined (decoded) string into left, center and right parts 
+ 
+    # See http://stackoverflow.com/questions/27711175/regex-with-multiple-optional-groups for discussion 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">ITEM_REGEX </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">&quot;&quot;&quot; 
+    (&amp;L(?P&lt;left&gt;.+?))? 
+    (&amp;C(?P&lt;center&gt;.+?))? 
+    (&amp;R(?P&lt;right&gt;.+?))? 
+    $&quot;&quot;&quot;</span><span class="s3">, </span><span class="s1">re</span><span class="s3">.</span><span class="s1">VERBOSE </span><span class="s3">| </span><span class="s1">re</span><span class="s3">.</span><span class="s1">DOTALL</span><span class="s3">)</span>
+
+    <span class="s1">m </span><span class="s3">= </span><span class="s1">ITEM_REGEX</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s1">text</span><span class="s3">)</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s1">parts </span><span class="s3">= </span><span class="s1">m</span><span class="s3">.</span><span class="s1">groupdict</span><span class="s3">()</span>
+    <span class="s2">except </span><span class="s1">AttributeError</span><span class="s3">:</span>
+        <span class="s1">warn</span><span class="s3">(</span><span class="s4">&quot;&quot;&quot;Cannot parse header or footer so it will be ignored&quot;&quot;&quot;</span><span class="s3">)</span>
+        <span class="s1">parts </span><span class="s3">= {</span><span class="s4">'left'</span><span class="s3">:</span><span class="s4">''</span><span class="s3">, </span><span class="s4">'right'</span><span class="s3">:</span><span class="s4">''</span><span class="s3">, </span><span class="s4">'center'</span><span class="s3">:</span><span class="s4">''</span><span class="s3">}</span>
+    <span class="s2">return </span><span class="s1">parts</span>
+
+
+<span class="s2">class </span><span class="s1">_HeaderFooterPart</span><span class="s3">(</span><span class="s1">Strict</span><span class="s3">):</span>
+
+    <span class="s5">&quot;&quot;&quot; 
+    Individual left/center/right header/footer part 
+ 
+    Do not use directly. 
+ 
+    Header &amp; Footer ampersand codes: 
+ 
+    * &amp;A   Inserts the worksheet name 
+    * &amp;B   Toggles bold 
+    * &amp;D or &amp;[Date]   Inserts the current date 
+    * &amp;E   Toggles double-underline 
+    * &amp;F or &amp;[File]   Inserts the workbook name 
+    * &amp;I   Toggles italic 
+    * &amp;N or &amp;[Pages]   Inserts the total page count 
+    * &amp;S   Toggles strikethrough 
+    * &amp;T   Inserts the current time 
+    * &amp;[Tab]   Inserts the worksheet name 
+    * &amp;U   Toggles underline 
+    * &amp;X   Toggles superscript 
+    * &amp;Y   Toggles subscript 
+    * &amp;P or &amp;[Page]   Inserts the current page number 
+    * &amp;P+n   Inserts the page number incremented by n 
+    * &amp;P-n   Inserts the page number decremented by n 
+    * &amp;[Path]   Inserts the workbook path 
+    * &amp;&amp;   Escapes the ampersand character 
+    * &amp;&quot;fontname&quot;   Selects the named font 
+    * &amp;nn   Selects the specified 2-digit font point size 
+ 
+    Colours are in RGB Hex 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">text </span><span class="s3">= </span><span class="s1">String</span><span class="s3">(</span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">font </span><span class="s3">= </span><span class="s1">String</span><span class="s3">(</span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">size </span><span class="s3">= </span><span class="s1">Integer</span><span class="s3">(</span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">RGB </span><span class="s3">= (</span><span class="s4">&quot;^[A-Fa-f0-9]{6}$&quot;</span><span class="s3">)</span>
+    <span class="s1">color </span><span class="s3">= </span><span class="s1">MatchPattern</span><span class="s3">(</span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">pattern</span><span class="s3">=</span><span class="s1">RGB</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">text</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">font</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">size</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">color</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">text </span><span class="s3">= </span><span class="s1">text</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">font </span><span class="s3">= </span><span class="s1">font</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">size </span><span class="s3">= </span><span class="s1">size</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">color </span><span class="s3">= </span><span class="s1">color</span>
+
+
+    <span class="s2">def </span><span class="s1">__str__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Convert to Excel HeaderFooter miniformat minus position 
+        &quot;&quot;&quot;</span>
+        <span class="s1">fmt </span><span class="s3">= []</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">font</span><span class="s3">:</span>
+            <span class="s1">fmt</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s4">u'&amp;&quot;{0}&quot;'</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">font</span><span class="s3">))</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">size</span><span class="s3">:</span>
+            <span class="s1">fmt</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s4">&quot;&amp;{0} &quot;</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">size</span><span class="s3">))</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">color</span><span class="s3">:</span>
+            <span class="s1">fmt</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s4">&quot;&amp;K{0}&quot;</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">color</span><span class="s3">))</span>
+        <span class="s2">return </span><span class="s4">u&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">fmt </span><span class="s3">+ [</span><span class="s1">self</span><span class="s3">.</span><span class="s1">text</span><span class="s3">])</span>
+
+    <span class="s2">def </span><span class="s1">__bool__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">bool</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">text</span><span class="s3">)</span>
+
+
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">from_str</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">text</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Convert from miniformat to object 
+        &quot;&quot;&quot;</span>
+        <span class="s1">keys </span><span class="s3">= (</span><span class="s4">'font'</span><span class="s3">, </span><span class="s4">'color'</span><span class="s3">, </span><span class="s4">'size'</span><span class="s3">)</span>
+        <span class="s1">kw </span><span class="s3">= </span><span class="s1">dict</span><span class="s3">((</span><span class="s1">k</span><span class="s3">, </span><span class="s1">v</span><span class="s3">) </span><span class="s2">for </span><span class="s1">match </span><span class="s2">in </span><span class="s1">FORMAT_REGEX</span><span class="s3">.</span><span class="s1">findall</span><span class="s3">(</span><span class="s1">text</span><span class="s3">)</span>
+                  <span class="s2">for </span><span class="s1">k</span><span class="s3">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">zip</span><span class="s3">(</span><span class="s1">keys</span><span class="s3">, </span><span class="s1">match</span><span class="s3">) </span><span class="s2">if </span><span class="s1">v</span><span class="s3">)</span>
+
+        <span class="s1">kw</span><span class="s3">[</span><span class="s4">'text'</span><span class="s3">] = </span><span class="s1">FORMAT_REGEX</span><span class="s3">.</span><span class="s1">sub</span><span class="s3">(</span><span class="s4">''</span><span class="s3">, </span><span class="s1">text</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">cls</span><span class="s3">(**</span><span class="s1">kw</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">HeaderFooterItem</span><span class="s3">(</span><span class="s1">Strict</span><span class="s3">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Header or footer item 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">left </span><span class="s3">= </span><span class="s1">Typed</span><span class="s3">(</span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">_HeaderFooterPart</span><span class="s3">)</span>
+    <span class="s1">center </span><span class="s3">= </span><span class="s1">Typed</span><span class="s3">(</span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">_HeaderFooterPart</span><span class="s3">)</span>
+    <span class="s1">centre </span><span class="s3">= </span><span class="s1">Alias</span><span class="s3">(</span><span class="s4">&quot;center&quot;</span><span class="s3">)</span>
+    <span class="s1">right </span><span class="s3">= </span><span class="s1">Typed</span><span class="s3">(</span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">_HeaderFooterPart</span><span class="s3">)</span>
+
+    <span class="s1">__keys </span><span class="s3">= (</span><span class="s4">'L'</span><span class="s3">, </span><span class="s4">'C'</span><span class="s3">, </span><span class="s4">'R'</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">left</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">right</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">center</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">left </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">left </span><span class="s3">= </span><span class="s1">_HeaderFooterPart</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">left </span><span class="s3">= </span><span class="s1">left</span>
+        <span class="s2">if </span><span class="s1">center </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">center </span><span class="s3">= </span><span class="s1">_HeaderFooterPart</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">center </span><span class="s3">= </span><span class="s1">center</span>
+        <span class="s2">if </span><span class="s1">right </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">right </span><span class="s3">= </span><span class="s1">_HeaderFooterPart</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">right </span><span class="s3">= </span><span class="s1">right</span>
+
+
+    <span class="s2">def </span><span class="s1">__str__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Pack parts into a single string 
+        &quot;&quot;&quot;</span>
+        <span class="s1">TRANSFORM </span><span class="s3">= {</span><span class="s4">'&amp;[Tab]'</span><span class="s3">: </span><span class="s4">'&amp;A'</span><span class="s3">, </span><span class="s4">'&amp;[Pages]'</span><span class="s3">: </span><span class="s4">'&amp;N'</span><span class="s3">, </span><span class="s4">'&amp;[Date]'</span><span class="s3">: </span><span class="s4">'&amp;D'</span><span class="s3">,</span>
+                     <span class="s4">'&amp;[Path]'</span><span class="s3">: </span><span class="s4">'&amp;Z'</span><span class="s3">, </span><span class="s4">'&amp;[Page]'</span><span class="s3">: </span><span class="s4">'&amp;P'</span><span class="s3">, </span><span class="s4">'&amp;[Time]'</span><span class="s3">: </span><span class="s4">'&amp;T'</span><span class="s3">, </span><span class="s4">'&amp;[File]'</span><span class="s3">: </span><span class="s4">'&amp;F'</span><span class="s3">,</span>
+                     <span class="s4">'&amp;[Picture]'</span><span class="s3">: </span><span class="s4">'&amp;G'</span><span class="s3">}</span>
+
+        <span class="s0"># escape keys and create regex</span>
+        <span class="s1">SUBS_REGEX </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">&quot;|&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">([</span><span class="s4">&quot;({0})&quot;</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">re</span><span class="s3">.</span><span class="s1">escape</span><span class="s3">(</span><span class="s1">k</span><span class="s3">))</span>
+                                          <span class="s2">for </span><span class="s1">k </span><span class="s2">in </span><span class="s1">TRANSFORM</span><span class="s3">]))</span>
+
+        <span class="s2">def </span><span class="s1">replace</span><span class="s3">(</span><span class="s1">match</span><span class="s3">):</span>
+            <span class="s5">&quot;&quot;&quot; 
+            Callback for re.sub 
+            Replace expanded control with mini-format equivalent 
+            &quot;&quot;&quot;</span>
+            <span class="s1">sub </span><span class="s3">= </span><span class="s1">match</span><span class="s3">.</span><span class="s1">group</span><span class="s3">(</span><span class="s6">0</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">TRANSFORM</span><span class="s3">[</span><span class="s1">sub</span><span class="s3">]</span>
+
+        <span class="s1">txt </span><span class="s3">= []</span>
+        <span class="s2">for </span><span class="s1">key</span><span class="s3">, </span><span class="s1">part </span><span class="s2">in </span><span class="s1">zip</span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">__keys</span><span class="s3">, [</span><span class="s1">self</span><span class="s3">.</span><span class="s1">left</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">center</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">right</span><span class="s3">]):</span>
+            <span class="s2">if </span><span class="s1">part</span><span class="s3">.</span><span class="s1">text </span><span class="s2">is not None</span><span class="s3">:</span>
+                <span class="s1">txt</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s4">u&quot;&amp;{0}{1}&quot;</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s1">str</span><span class="s3">(</span><span class="s1">part</span><span class="s3">)))</span>
+        <span class="s1">txt </span><span class="s3">= </span><span class="s4">&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">txt</span><span class="s3">)</span>
+        <span class="s1">txt </span><span class="s3">= </span><span class="s1">SUBS_REGEX</span><span class="s3">.</span><span class="s1">sub</span><span class="s3">(</span><span class="s1">replace</span><span class="s3">, </span><span class="s1">txt</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">escape</span><span class="s3">(</span><span class="s1">txt</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">__bool__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">any</span><span class="s3">([</span><span class="s1">self</span><span class="s3">.</span><span class="s1">left</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">center</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">right</span><span class="s3">])</span>
+
+
+
+    <span class="s2">def </span><span class="s1">to_tree</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">tagname</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Return as XML node 
+        &quot;&quot;&quot;</span>
+        <span class="s1">el </span><span class="s3">= </span><span class="s1">Element</span><span class="s3">(</span><span class="s1">tagname</span><span class="s3">)</span>
+        <span class="s1">el</span><span class="s3">.</span><span class="s1">text </span><span class="s3">= </span><span class="s1">str</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">el</span>
+
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">from_tree</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">node</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">node</span><span class="s3">.</span><span class="s1">text</span><span class="s3">:</span>
+            <span class="s1">text </span><span class="s3">= </span><span class="s1">unescape</span><span class="s3">(</span><span class="s1">node</span><span class="s3">.</span><span class="s1">text</span><span class="s3">)</span>
+            <span class="s1">parts </span><span class="s3">= </span><span class="s1">_split_string</span><span class="s3">(</span><span class="s1">text</span><span class="s3">)</span>
+            <span class="s2">for </span><span class="s1">k</span><span class="s3">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">parts</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+                <span class="s2">if </span><span class="s1">v </span><span class="s2">is not None</span><span class="s3">:</span>
+                    <span class="s1">parts</span><span class="s3">[</span><span class="s1">k</span><span class="s3">] = </span><span class="s1">_HeaderFooterPart</span><span class="s3">.</span><span class="s1">from_str</span><span class="s3">(</span><span class="s1">v</span><span class="s3">)</span>
+            <span class="s1">self </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">(**</span><span class="s1">parts</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">self</span>
+
+
+<span class="s2">class </span><span class="s1">HeaderFooter</span><span class="s3">(</span><span class="s1">Serialisable</span><span class="s3">):</span>
+
+    <span class="s1">tagname </span><span class="s3">= </span><span class="s4">&quot;headerFooter&quot;</span>
+
+    <span class="s1">differentOddEven </span><span class="s3">= </span><span class="s1">Bool</span><span class="s3">(</span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">differentFirst </span><span class="s3">= </span><span class="s1">Bool</span><span class="s3">(</span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">scaleWithDoc </span><span class="s3">= </span><span class="s1">Bool</span><span class="s3">(</span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">alignWithMargins </span><span class="s3">= </span><span class="s1">Bool</span><span class="s3">(</span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">oddHeader </span><span class="s3">= </span><span class="s1">Typed</span><span class="s3">(</span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">HeaderFooterItem</span><span class="s3">, </span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">oddFooter </span><span class="s3">= </span><span class="s1">Typed</span><span class="s3">(</span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">HeaderFooterItem</span><span class="s3">, </span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">evenHeader </span><span class="s3">= </span><span class="s1">Typed</span><span class="s3">(</span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">HeaderFooterItem</span><span class="s3">, </span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">evenFooter </span><span class="s3">= </span><span class="s1">Typed</span><span class="s3">(</span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">HeaderFooterItem</span><span class="s3">, </span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">firstHeader </span><span class="s3">= </span><span class="s1">Typed</span><span class="s3">(</span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">HeaderFooterItem</span><span class="s3">, </span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">firstFooter </span><span class="s3">= </span><span class="s1">Typed</span><span class="s3">(</span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">HeaderFooterItem</span><span class="s3">, </span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+
+    <span class="s1">__elements__ </span><span class="s3">= (</span><span class="s4">&quot;oddHeader&quot;</span><span class="s3">, </span><span class="s4">&quot;oddFooter&quot;</span><span class="s3">, </span><span class="s4">&quot;evenHeader&quot;</span><span class="s3">, </span><span class="s4">&quot;evenFooter&quot;</span><span class="s3">, </span><span class="s4">&quot;firstHeader&quot;</span><span class="s3">, </span><span class="s4">&quot;firstFooter&quot;</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">,</span>
+                 <span class="s1">differentOddEven</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">differentFirst</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">scaleWithDoc</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">alignWithMargins</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">oddHeader</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">oddFooter</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">evenHeader</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">evenFooter</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">firstHeader</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">firstFooter</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                <span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">differentOddEven </span><span class="s3">= </span><span class="s1">differentOddEven</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">differentFirst </span><span class="s3">= </span><span class="s1">differentFirst</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">scaleWithDoc </span><span class="s3">= </span><span class="s1">scaleWithDoc</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">alignWithMargins </span><span class="s3">= </span><span class="s1">alignWithMargins</span>
+        <span class="s2">if </span><span class="s1">oddHeader </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">oddHeader </span><span class="s3">= </span><span class="s1">HeaderFooterItem</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">oddHeader </span><span class="s3">= </span><span class="s1">oddHeader</span>
+        <span class="s2">if </span><span class="s1">oddFooter </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">oddFooter </span><span class="s3">= </span><span class="s1">HeaderFooterItem</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">oddFooter </span><span class="s3">= </span><span class="s1">oddFooter</span>
+        <span class="s2">if </span><span class="s1">evenHeader </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">evenHeader </span><span class="s3">= </span><span class="s1">HeaderFooterItem</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">evenHeader </span><span class="s3">= </span><span class="s1">evenHeader</span>
+        <span class="s2">if </span><span class="s1">evenFooter </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">evenFooter </span><span class="s3">= </span><span class="s1">HeaderFooterItem</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">evenFooter </span><span class="s3">= </span><span class="s1">evenFooter</span>
+        <span class="s2">if </span><span class="s1">firstHeader </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">firstHeader </span><span class="s3">= </span><span class="s1">HeaderFooterItem</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">firstHeader </span><span class="s3">= </span><span class="s1">firstHeader</span>
+        <span class="s2">if </span><span class="s1">firstFooter </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">firstFooter </span><span class="s3">= </span><span class="s1">HeaderFooterItem</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">firstFooter </span><span class="s3">= </span><span class="s1">firstFooter</span>
+
+
+    <span class="s2">def </span><span class="s1">__bool__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">parts </span><span class="s3">= [</span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">attr</span><span class="s3">) </span><span class="s2">for </span><span class="s1">attr </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">__attrs__ </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">__elements__</span><span class="s3">]</span>
+        <span class="s2">return </span><span class="s1">any</span><span class="s3">(</span><span class="s1">parts</span><span class="s3">)</span>
+
+</pre>
+</body>
+</html>

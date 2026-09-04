@@ -1,0 +1,399 @@
+<html>
+<head>
+<title>function.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+function.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+For compatibility with numpy libraries, pandas functions or methods have to 
+accept '*args' and '**kwargs' parameters to accommodate numpy arguments that 
+are not actually used or respected in the pandas implementation. 
+ 
+To ensure that users do not abuse these parameters, validation is performed in 
+'validators.py' to make sure that any extra parameters passed correspond ONLY 
+to those in the numpy signature. Part of that validation includes whether or 
+not the user attempted to pass in non-default values for these extraneous 
+parameters. As we want to discourage users from relying on these parameters 
+when calling the pandas implementation, we want them only to pass in the 
+default values for these parameters. 
+ 
+This module provides a set of commonly used default arguments for functions and 
+methods that are spread throughout the codebase. This module will make it 
+easier to adjust to future upstream changes in the analogous numpy signatures. 
+&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s3">,</span>
+    <span class="s1">Any</span><span class="s3">,</span>
+    <span class="s1">TypeVar</span><span class="s3">,</span>
+    <span class="s1">cast</span><span class="s3">,</span>
+    <span class="s1">overload</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+<span class="s2">from </span><span class="s1">numpy </span><span class="s2">import </span><span class="s1">ndarray</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs</span><span class="s3">.</span><span class="s1">lib </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">is_bool</span><span class="s3">,</span>
+    <span class="s1">is_integer</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">errors </span><span class="s2">import </span><span class="s1">UnsupportedFunctionCall</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">_validators </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">validate_args</span><span class="s3">,</span>
+    <span class="s1">validate_args_and_kwargs</span><span class="s3">,</span>
+    <span class="s1">validate_kwargs</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_typing </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">Axis</span><span class="s3">,</span>
+        <span class="s1">AxisInt</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+    <span class="s1">AxisNoneT </span><span class="s3">= </span><span class="s1">TypeVar</span><span class="s3">(</span><span class="s4">&quot;AxisNoneT&quot;</span><span class="s3">, </span><span class="s1">Axis</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">CompatValidator</span><span class="s3">:</span>
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">defaults</span><span class="s3">,</span>
+        <span class="s1">fname</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">method</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">fname </span><span class="s3">= </span><span class="s1">fname</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">method </span><span class="s3">= </span><span class="s1">method</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">defaults </span><span class="s3">= </span><span class="s1">defaults</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">max_fname_arg_count </span><span class="s3">= </span><span class="s1">max_fname_arg_count</span>
+
+    <span class="s2">def </span><span class="s1">__call__</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">args</span><span class="s3">,</span>
+        <span class="s1">kwargs</span><span class="s3">,</span>
+        <span class="s1">fname</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">method</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s2">if not </span><span class="s1">args </span><span class="s2">and not </span><span class="s1">kwargs</span><span class="s3">:</span>
+            <span class="s2">return None</span>
+
+        <span class="s1">fname </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">fname </span><span class="s2">if </span><span class="s1">fname </span><span class="s2">is None else </span><span class="s1">fname</span>
+        <span class="s1">max_fname_arg_count </span><span class="s3">= (</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">max_fname_arg_count</span>
+            <span class="s2">if </span><span class="s1">max_fname_arg_count </span><span class="s2">is None</span>
+            <span class="s2">else </span><span class="s1">max_fname_arg_count</span>
+        <span class="s3">)</span>
+        <span class="s1">method </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">method </span><span class="s2">if </span><span class="s1">method </span><span class="s2">is None else </span><span class="s1">method</span>
+
+        <span class="s2">if </span><span class="s1">method </span><span class="s3">== </span><span class="s4">&quot;args&quot;</span><span class="s3">:</span>
+            <span class="s1">validate_args</span><span class="s3">(</span><span class="s1">fname</span><span class="s3">, </span><span class="s1">args</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">defaults</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">method </span><span class="s3">== </span><span class="s4">&quot;kwargs&quot;</span><span class="s3">:</span>
+            <span class="s1">validate_kwargs</span><span class="s3">(</span><span class="s1">fname</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">defaults</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">method </span><span class="s3">== </span><span class="s4">&quot;both&quot;</span><span class="s3">:</span>
+            <span class="s1">validate_args_and_kwargs</span><span class="s3">(</span>
+                <span class="s1">fname</span><span class="s3">, </span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">defaults</span>
+            <span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">f&quot;invalid validation method '</span><span class="s2">{</span><span class="s1">method</span><span class="s2">}</span><span class="s4">'&quot;</span><span class="s3">)</span>
+
+
+<span class="s1">ARGMINMAX_DEFAULTS </span><span class="s3">= {</span><span class="s4">&quot;out&quot;</span><span class="s3">: </span><span class="s2">None</span><span class="s3">}</span>
+<span class="s1">validate_argmin </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span>
+    <span class="s1">ARGMINMAX_DEFAULTS</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s4">&quot;argmin&quot;</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;both&quot;</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s5">1</span>
+<span class="s3">)</span>
+<span class="s1">validate_argmax </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span>
+    <span class="s1">ARGMINMAX_DEFAULTS</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s4">&quot;argmax&quot;</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;both&quot;</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s5">1</span>
+<span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">process_skipna</span><span class="s3">(</span><span class="s1">skipna</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">| </span><span class="s1">ndarray </span><span class="s3">| </span><span class="s2">None</span><span class="s3">, </span><span class="s1">args</span><span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">bool</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">]:</span>
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">skipna</span><span class="s3">, </span><span class="s1">ndarray</span><span class="s3">) </span><span class="s2">or </span><span class="s1">skipna </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">args </span><span class="s3">= (</span><span class="s1">skipna</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">)</span>
+        <span class="s1">skipna </span><span class="s3">= </span><span class="s2">True</span>
+
+    <span class="s2">return </span><span class="s1">skipna</span><span class="s3">, </span><span class="s1">args</span>
+
+
+<span class="s2">def </span><span class="s1">validate_argmin_with_skipna</span><span class="s3">(</span><span class="s1">skipna</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">| </span><span class="s1">ndarray </span><span class="s3">| </span><span class="s2">None</span><span class="s3">, </span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    If 'Series.argmin' is called via the 'numpy' library, the third parameter 
+    in its signature is 'out', which takes either an ndarray or 'None', so 
+    check if the 'skipna' parameter is either an instance of ndarray or is 
+    None, since 'skipna' itself should be a boolean 
+    &quot;&quot;&quot;</span>
+    <span class="s1">skipna</span><span class="s3">, </span><span class="s1">args </span><span class="s3">= </span><span class="s1">process_skipna</span><span class="s3">(</span><span class="s1">skipna</span><span class="s3">, </span><span class="s1">args</span><span class="s3">)</span>
+    <span class="s1">validate_argmin</span><span class="s3">(</span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">skipna</span>
+
+
+<span class="s2">def </span><span class="s1">validate_argmax_with_skipna</span><span class="s3">(</span><span class="s1">skipna</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">| </span><span class="s1">ndarray </span><span class="s3">| </span><span class="s2">None</span><span class="s3">, </span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    If 'Series.argmax' is called via the 'numpy' library, the third parameter 
+    in its signature is 'out', which takes either an ndarray or 'None', so 
+    check if the 'skipna' parameter is either an instance of ndarray or is 
+    None, since 'skipna' itself should be a boolean 
+    &quot;&quot;&quot;</span>
+    <span class="s1">skipna</span><span class="s3">, </span><span class="s1">args </span><span class="s3">= </span><span class="s1">process_skipna</span><span class="s3">(</span><span class="s1">skipna</span><span class="s3">, </span><span class="s1">args</span><span class="s3">)</span>
+    <span class="s1">validate_argmax</span><span class="s3">(</span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">skipna</span>
+
+
+<span class="s1">ARGSORT_DEFAULTS</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">int </span><span class="s3">| </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None</span><span class="s3">] = {}</span>
+<span class="s1">ARGSORT_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;axis&quot;</span><span class="s3">] = -</span><span class="s5">1</span>
+<span class="s1">ARGSORT_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;kind&quot;</span><span class="s3">] = </span><span class="s4">&quot;quicksort&quot;</span>
+<span class="s1">ARGSORT_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;order&quot;</span><span class="s3">] = </span><span class="s2">None</span>
+<span class="s1">ARGSORT_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;kind&quot;</span><span class="s3">] = </span><span class="s2">None</span>
+<span class="s1">ARGSORT_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;stable&quot;</span><span class="s3">] = </span><span class="s2">None</span>
+
+
+<span class="s1">validate_argsort </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span>
+    <span class="s1">ARGSORT_DEFAULTS</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s4">&quot;argsort&quot;</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s5">0</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;both&quot;</span>
+<span class="s3">)</span>
+
+<span class="s6"># two different signatures of argsort, this second validation for when the</span>
+<span class="s6"># `kind` param is supported</span>
+<span class="s1">ARGSORT_DEFAULTS_KIND</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None</span><span class="s3">] = {}</span>
+<span class="s1">ARGSORT_DEFAULTS_KIND</span><span class="s3">[</span><span class="s4">&quot;axis&quot;</span><span class="s3">] = -</span><span class="s5">1</span>
+<span class="s1">ARGSORT_DEFAULTS_KIND</span><span class="s3">[</span><span class="s4">&quot;order&quot;</span><span class="s3">] = </span><span class="s2">None</span>
+<span class="s1">ARGSORT_DEFAULTS_KIND</span><span class="s3">[</span><span class="s4">&quot;stable&quot;</span><span class="s3">] = </span><span class="s2">None</span>
+<span class="s1">validate_argsort_kind </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span>
+    <span class="s1">ARGSORT_DEFAULTS_KIND</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s4">&quot;argsort&quot;</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s5">0</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;both&quot;</span>
+<span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">validate_argsort_with_ascending</span><span class="s3">(</span><span class="s1">ascending</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">| </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None</span><span class="s3">, </span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    If 'Categorical.argsort' is called via the 'numpy' library, the first 
+    parameter in its signature is 'axis', which takes either an integer or 
+    'None', so check if the 'ascending' parameter has either integer type or is 
+    None, since 'ascending' itself should be a boolean 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">is_integer</span><span class="s3">(</span><span class="s1">ascending</span><span class="s3">) </span><span class="s2">or </span><span class="s1">ascending </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">args </span><span class="s3">= (</span><span class="s1">ascending</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">)</span>
+        <span class="s1">ascending </span><span class="s3">= </span><span class="s2">True</span>
+
+    <span class="s1">validate_argsort_kind</span><span class="s3">(</span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s5">3</span><span class="s3">)</span>
+    <span class="s1">ascending </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s1">bool</span><span class="s3">, </span><span class="s1">ascending</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">ascending</span>
+
+
+<span class="s1">CLIP_DEFAULTS</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">] = {</span><span class="s4">&quot;out&quot;</span><span class="s3">: </span><span class="s2">None</span><span class="s3">}</span>
+<span class="s1">validate_clip </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span>
+    <span class="s1">CLIP_DEFAULTS</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s4">&quot;clip&quot;</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;both&quot;</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s5">3</span>
+<span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">overload</span>
+<span class="s2">def </span><span class="s1">validate_clip_with_axis</span><span class="s3">(</span><span class="s1">axis</span><span class="s3">: </span><span class="s1">ndarray</span><span class="s3">, </span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">: ...</span>
+
+
+<span class="s3">@</span><span class="s1">overload</span>
+<span class="s2">def </span><span class="s1">validate_clip_with_axis</span><span class="s3">(</span><span class="s1">axis</span><span class="s3">: </span><span class="s1">AxisNoneT</span><span class="s3">, </span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">) </span><span class="s1">-&gt; AxisNoneT</span><span class="s3">: ...</span>
+
+
+<span class="s2">def </span><span class="s1">validate_clip_with_axis</span><span class="s3">(</span>
+    <span class="s1">axis</span><span class="s3">: </span><span class="s1">ndarray </span><span class="s3">| </span><span class="s1">AxisNoneT</span><span class="s3">, </span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span>
+<span class="s3">) </span><span class="s1">-&gt; AxisNoneT </span><span class="s3">| </span><span class="s2">None</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    If 'NDFrame.clip' is called via the numpy library, the third parameter in 
+    its signature is 'out', which can takes an ndarray, so check if the 'axis' 
+    parameter is an instance of ndarray, since 'axis' itself should either be 
+    an integer or None 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">axis</span><span class="s3">, </span><span class="s1">ndarray</span><span class="s3">):</span>
+        <span class="s1">args </span><span class="s3">= (</span><span class="s1">axis</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">)</span>
+        <span class="s6"># error: Incompatible types in assignment (expression has type &quot;None&quot;,</span>
+        <span class="s6"># variable has type &quot;Union[ndarray[Any, Any], str, int]&quot;)</span>
+        <span class="s1">axis </span><span class="s3">= </span><span class="s2">None  </span><span class="s6"># type: ignore[assignment]</span>
+
+    <span class="s1">validate_clip</span><span class="s3">(</span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">)</span>
+    <span class="s6"># error: Incompatible return value type (got &quot;Union[ndarray[Any, Any],</span>
+    <span class="s6"># str, int]&quot;, expected &quot;Union[str, int, None]&quot;)</span>
+    <span class="s2">return </span><span class="s1">axis  </span><span class="s6"># type: ignore[return-value]</span>
+
+
+<span class="s1">CUM_FUNC_DEFAULTS</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">] = {}</span>
+<span class="s1">CUM_FUNC_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;dtype&quot;</span><span class="s3">] = </span><span class="s2">None</span>
+<span class="s1">CUM_FUNC_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;out&quot;</span><span class="s3">] = </span><span class="s2">None</span>
+<span class="s1">validate_cum_func </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span>
+    <span class="s1">CUM_FUNC_DEFAULTS</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;both&quot;</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s5">1</span>
+<span class="s3">)</span>
+<span class="s1">validate_cumsum </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span>
+    <span class="s1">CUM_FUNC_DEFAULTS</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s4">&quot;cumsum&quot;</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;both&quot;</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s5">1</span>
+<span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">validate_cum_func_with_skipna</span><span class="s3">(</span><span class="s1">skipna</span><span class="s3">: </span><span class="s1">bool</span><span class="s3">, </span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">, </span><span class="s1">name</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    If this function is called via the 'numpy' library, the third parameter in 
+    its signature is 'dtype', which takes either a 'numpy' dtype or 'None', so 
+    check if the 'skipna' parameter is a boolean or not 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if not </span><span class="s1">is_bool</span><span class="s3">(</span><span class="s1">skipna</span><span class="s3">):</span>
+        <span class="s1">args </span><span class="s3">= (</span><span class="s1">skipna</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">)</span>
+        <span class="s1">skipna </span><span class="s3">= </span><span class="s2">True</span>
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">skipna</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">bool_</span><span class="s3">):</span>
+        <span class="s1">skipna </span><span class="s3">= </span><span class="s1">bool</span><span class="s3">(</span><span class="s1">skipna</span><span class="s3">)</span>
+
+    <span class="s1">validate_cum_func</span><span class="s3">(</span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s1">name</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">skipna</span>
+
+
+<span class="s1">ALLANY_DEFAULTS</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">bool </span><span class="s3">| </span><span class="s2">None</span><span class="s3">] = {}</span>
+<span class="s1">ALLANY_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;dtype&quot;</span><span class="s3">] = </span><span class="s2">None</span>
+<span class="s1">ALLANY_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;out&quot;</span><span class="s3">] = </span><span class="s2">None</span>
+<span class="s1">ALLANY_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;keepdims&quot;</span><span class="s3">] = </span><span class="s2">False</span>
+<span class="s1">ALLANY_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;axis&quot;</span><span class="s3">] = </span><span class="s2">None</span>
+<span class="s1">validate_all </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span>
+    <span class="s1">ALLANY_DEFAULTS</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s4">&quot;all&quot;</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;both&quot;</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s5">1</span>
+<span class="s3">)</span>
+<span class="s1">validate_any </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span>
+    <span class="s1">ALLANY_DEFAULTS</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s4">&quot;any&quot;</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;both&quot;</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s5">1</span>
+<span class="s3">)</span>
+
+<span class="s1">LOGICAL_FUNC_DEFAULTS </span><span class="s3">= {</span><span class="s4">&quot;out&quot;</span><span class="s3">: </span><span class="s2">None</span><span class="s3">, </span><span class="s4">&quot;keepdims&quot;</span><span class="s3">: </span><span class="s2">False</span><span class="s3">}</span>
+<span class="s1">validate_logical_func </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span><span class="s1">LOGICAL_FUNC_DEFAULTS</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;kwargs&quot;</span><span class="s3">)</span>
+
+<span class="s1">MINMAX_DEFAULTS </span><span class="s3">= {</span><span class="s4">&quot;axis&quot;</span><span class="s3">: </span><span class="s2">None</span><span class="s3">, </span><span class="s4">&quot;dtype&quot;</span><span class="s3">: </span><span class="s2">None</span><span class="s3">, </span><span class="s4">&quot;out&quot;</span><span class="s3">: </span><span class="s2">None</span><span class="s3">, </span><span class="s4">&quot;keepdims&quot;</span><span class="s3">: </span><span class="s2">False</span><span class="s3">}</span>
+<span class="s1">validate_min </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span>
+    <span class="s1">MINMAX_DEFAULTS</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s4">&quot;min&quot;</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;both&quot;</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s5">1</span>
+<span class="s3">)</span>
+<span class="s1">validate_max </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span>
+    <span class="s1">MINMAX_DEFAULTS</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s4">&quot;max&quot;</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;both&quot;</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s5">1</span>
+<span class="s3">)</span>
+
+
+<span class="s1">REPEAT_DEFAULTS</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">] = {</span><span class="s4">&quot;axis&quot;</span><span class="s3">: </span><span class="s2">None</span><span class="s3">}</span>
+<span class="s1">validate_repeat </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span>
+    <span class="s1">REPEAT_DEFAULTS</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s4">&quot;repeat&quot;</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;both&quot;</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s5">1</span>
+<span class="s3">)</span>
+
+<span class="s1">ROUND_DEFAULTS</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">] = {</span><span class="s4">&quot;out&quot;</span><span class="s3">: </span><span class="s2">None</span><span class="s3">}</span>
+<span class="s1">validate_round </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span>
+    <span class="s1">ROUND_DEFAULTS</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s4">&quot;round&quot;</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;both&quot;</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s5">1</span>
+<span class="s3">)</span>
+
+<span class="s1">STAT_FUNC_DEFAULTS</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any </span><span class="s3">| </span><span class="s2">None</span><span class="s3">] = {}</span>
+<span class="s1">STAT_FUNC_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;dtype&quot;</span><span class="s3">] = </span><span class="s2">None</span>
+<span class="s1">STAT_FUNC_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;out&quot;</span><span class="s3">] = </span><span class="s2">None</span>
+
+<span class="s1">SUM_DEFAULTS </span><span class="s3">= </span><span class="s1">STAT_FUNC_DEFAULTS</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+<span class="s1">SUM_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;axis&quot;</span><span class="s3">] = </span><span class="s2">None</span>
+<span class="s1">SUM_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;keepdims&quot;</span><span class="s3">] = </span><span class="s2">False</span>
+<span class="s1">SUM_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;initial&quot;</span><span class="s3">] = </span><span class="s2">None</span>
+
+<span class="s1">PROD_DEFAULTS </span><span class="s3">= </span><span class="s1">SUM_DEFAULTS</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+
+<span class="s1">MEAN_DEFAULTS </span><span class="s3">= </span><span class="s1">SUM_DEFAULTS</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+
+<span class="s1">MEDIAN_DEFAULTS </span><span class="s3">= </span><span class="s1">STAT_FUNC_DEFAULTS</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+<span class="s1">MEDIAN_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;overwrite_input&quot;</span><span class="s3">] = </span><span class="s2">False</span>
+<span class="s1">MEDIAN_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;keepdims&quot;</span><span class="s3">] = </span><span class="s2">False</span>
+
+<span class="s1">STAT_FUNC_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;keepdims&quot;</span><span class="s3">] = </span><span class="s2">False</span>
+
+<span class="s1">validate_stat_func </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span><span class="s1">STAT_FUNC_DEFAULTS</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;kwargs&quot;</span><span class="s3">)</span>
+<span class="s1">validate_sum </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span>
+    <span class="s1">SUM_DEFAULTS</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s4">&quot;sum&quot;</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;both&quot;</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s5">1</span>
+<span class="s3">)</span>
+<span class="s1">validate_prod </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span>
+    <span class="s1">PROD_DEFAULTS</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s4">&quot;prod&quot;</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;both&quot;</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s5">1</span>
+<span class="s3">)</span>
+<span class="s1">validate_mean </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span>
+    <span class="s1">MEAN_DEFAULTS</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s4">&quot;mean&quot;</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;both&quot;</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s5">1</span>
+<span class="s3">)</span>
+<span class="s1">validate_median </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span>
+    <span class="s1">MEDIAN_DEFAULTS</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s4">&quot;median&quot;</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;both&quot;</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s5">1</span>
+<span class="s3">)</span>
+
+<span class="s1">STAT_DDOF_FUNC_DEFAULTS</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">bool </span><span class="s3">| </span><span class="s2">None</span><span class="s3">] = {}</span>
+<span class="s1">STAT_DDOF_FUNC_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;dtype&quot;</span><span class="s3">] = </span><span class="s2">None</span>
+<span class="s1">STAT_DDOF_FUNC_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;out&quot;</span><span class="s3">] = </span><span class="s2">None</span>
+<span class="s1">STAT_DDOF_FUNC_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;keepdims&quot;</span><span class="s3">] = </span><span class="s2">False</span>
+<span class="s1">validate_stat_ddof_func </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span><span class="s1">STAT_DDOF_FUNC_DEFAULTS</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;kwargs&quot;</span><span class="s3">)</span>
+
+<span class="s1">TAKE_DEFAULTS</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None</span><span class="s3">] = {}</span>
+<span class="s1">TAKE_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;out&quot;</span><span class="s3">] = </span><span class="s2">None</span>
+<span class="s1">TAKE_DEFAULTS</span><span class="s3">[</span><span class="s4">&quot;mode&quot;</span><span class="s3">] = </span><span class="s4">&quot;raise&quot;</span>
+<span class="s1">validate_take </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span><span class="s1">TAKE_DEFAULTS</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s4">&quot;take&quot;</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;kwargs&quot;</span><span class="s3">)</span>
+
+
+<span class="s1">TRANSPOSE_DEFAULTS </span><span class="s3">= {</span><span class="s4">&quot;axes&quot;</span><span class="s3">: </span><span class="s2">None</span><span class="s3">}</span>
+<span class="s1">validate_transpose </span><span class="s3">= </span><span class="s1">CompatValidator</span><span class="s3">(</span>
+    <span class="s1">TRANSPOSE_DEFAULTS</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s4">&quot;transpose&quot;</span><span class="s3">, </span><span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;both&quot;</span><span class="s3">, </span><span class="s1">max_fname_arg_count</span><span class="s3">=</span><span class="s5">0</span>
+<span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">validate_groupby_func</span><span class="s3">(</span><span class="s1">name</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">, </span><span class="s1">allowed</span><span class="s3">=</span><span class="s2">None</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    'args' and 'kwargs' should be empty, except for allowed kwargs because all 
+    of their necessary parameters are explicitly listed in the function 
+    signature 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">allowed </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">allowed </span><span class="s3">= []</span>
+
+    <span class="s1">kwargs </span><span class="s3">= </span><span class="s1">set</span><span class="s3">(</span><span class="s1">kwargs</span><span class="s3">) - </span><span class="s1">set</span><span class="s3">(</span><span class="s1">allowed</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">args</span><span class="s3">) + </span><span class="s1">len</span><span class="s3">(</span><span class="s1">kwargs</span><span class="s3">) &gt; </span><span class="s5">0</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">UnsupportedFunctionCall</span><span class="s3">(</span>
+            <span class="s4">&quot;numpy operations are not valid with groupby. &quot;</span>
+            <span class="s4">f&quot;Use .groupby(...).</span><span class="s2">{</span><span class="s1">name</span><span class="s2">}</span><span class="s4">() instead&quot;</span>
+        <span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">validate_minmax_axis</span><span class="s3">(</span><span class="s1">axis</span><span class="s3">: </span><span class="s1">AxisInt </span><span class="s3">| </span><span class="s2">None</span><span class="s3">, </span><span class="s1">ndim</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s5">1</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Ensure that the axis argument passed to min, max, argmin, or argmax is zero 
+    or None, as otherwise it will be incorrectly ignored. 
+ 
+    Parameters 
+    ---------- 
+    axis : int or None 
+    ndim : int, default 1 
+ 
+    Raises 
+    ------ 
+    ValueError 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">axis </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s2">return</span>
+    <span class="s2">if </span><span class="s1">axis </span><span class="s3">&gt;= </span><span class="s1">ndim </span><span class="s2">or </span><span class="s3">(</span><span class="s1">axis </span><span class="s3">&lt; </span><span class="s5">0 </span><span class="s2">and </span><span class="s1">ndim </span><span class="s3">+ </span><span class="s1">axis </span><span class="s3">&lt; </span><span class="s5">0</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">f&quot;`axis` must be fewer than the number of dimensions (</span><span class="s2">{</span><span class="s1">ndim</span><span class="s2">}</span><span class="s4">)&quot;</span><span class="s3">)</span>
+
+
+<span class="s1">_validation_funcs </span><span class="s3">= {</span>
+    <span class="s4">&quot;median&quot;</span><span class="s3">: </span><span class="s1">validate_median</span><span class="s3">,</span>
+    <span class="s4">&quot;mean&quot;</span><span class="s3">: </span><span class="s1">validate_mean</span><span class="s3">,</span>
+    <span class="s4">&quot;min&quot;</span><span class="s3">: </span><span class="s1">validate_min</span><span class="s3">,</span>
+    <span class="s4">&quot;max&quot;</span><span class="s3">: </span><span class="s1">validate_max</span><span class="s3">,</span>
+    <span class="s4">&quot;sum&quot;</span><span class="s3">: </span><span class="s1">validate_sum</span><span class="s3">,</span>
+    <span class="s4">&quot;prod&quot;</span><span class="s3">: </span><span class="s1">validate_prod</span><span class="s3">,</span>
+<span class="s3">}</span>
+
+
+<span class="s2">def </span><span class="s1">validate_func</span><span class="s3">(</span><span class="s1">fname</span><span class="s3">, </span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+    <span class="s2">if </span><span class="s1">fname </span><span class="s2">not in </span><span class="s1">_validation_funcs</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">validate_stat_func</span><span class="s3">(</span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">, </span><span class="s1">fname</span><span class="s3">=</span><span class="s1">fname</span><span class="s3">)</span>
+
+    <span class="s1">validation_func </span><span class="s3">= </span><span class="s1">_validation_funcs</span><span class="s3">[</span><span class="s1">fname</span><span class="s3">]</span>
+    <span class="s2">return </span><span class="s1">validation_func</span><span class="s3">(</span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

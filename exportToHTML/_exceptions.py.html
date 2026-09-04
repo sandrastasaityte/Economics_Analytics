@@ -1,0 +1,129 @@
+<html>
+<head>
+<title>_exceptions.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #5f826b; font-style: italic;}
+.s4 { color: #2aacb8;}
+.s5 { color: #6aab73;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_exceptions.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">contextlib</span>
+<span class="s0">import </span><span class="s1">inspect</span>
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">re</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s2">,</span>
+    <span class="s1">Any</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">import </span><span class="s1">warnings</span>
+
+<span class="s0">if </span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">collections</span><span class="s2">.</span><span class="s1">abc </span><span class="s0">import </span><span class="s1">Generator</span>
+    <span class="s0">from </span><span class="s1">types </span><span class="s0">import </span><span class="s1">FrameType</span>
+
+
+<span class="s2">@</span><span class="s1">contextlib</span><span class="s2">.</span><span class="s1">contextmanager</span>
+<span class="s0">def </span><span class="s1">rewrite_exception</span><span class="s2">(</span><span class="s1">old_name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">new_name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; Generator</span><span class="s2">[</span><span class="s0">None</span><span class="s2">]:</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Rewrite the message of an exception. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s0">yield</span>
+    <span class="s0">except </span><span class="s1">Exception </span><span class="s0">as </span><span class="s1">err</span><span class="s2">:</span>
+        <span class="s0">if not </span><span class="s1">err</span><span class="s2">.</span><span class="s1">args</span><span class="s2">:</span>
+            <span class="s0">raise</span>
+        <span class="s1">msg </span><span class="s2">= </span><span class="s1">str</span><span class="s2">(</span><span class="s1">err</span><span class="s2">.</span><span class="s1">args</span><span class="s2">[</span><span class="s4">0</span><span class="s2">])</span>
+        <span class="s1">msg </span><span class="s2">= </span><span class="s1">msg</span><span class="s2">.</span><span class="s1">replace</span><span class="s2">(</span><span class="s1">old_name</span><span class="s2">, </span><span class="s1">new_name</span><span class="s2">)</span>
+        <span class="s1">args</span><span class="s2">: </span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">Any</span><span class="s2">, ...] = (</span><span class="s1">msg</span><span class="s2">,)</span>
+        <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">err</span><span class="s2">.</span><span class="s1">args</span><span class="s2">) &gt; </span><span class="s4">1</span><span class="s2">:</span>
+            <span class="s1">args </span><span class="s2">= </span><span class="s1">args </span><span class="s2">+ </span><span class="s1">err</span><span class="s2">.</span><span class="s1">args</span><span class="s2">[</span><span class="s4">1</span><span class="s2">:]</span>
+        <span class="s1">err</span><span class="s2">.</span><span class="s1">args </span><span class="s2">= </span><span class="s1">args</span>
+        <span class="s0">raise</span>
+
+
+<span class="s0">def </span><span class="s1">find_stack_level</span><span class="s2">() </span><span class="s1">-&gt; int</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Find the first place in the stack that is not inside pandas 
+    (tests notwithstanding). 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">import </span><span class="s1">pandas </span><span class="s0">as </span><span class="s1">pd</span>
+
+    <span class="s1">pkg_dir </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">dirname</span><span class="s2">(</span><span class="s1">pd</span><span class="s2">.</span><span class="s1">__file__</span><span class="s2">)</span>
+    <span class="s1">test_dir </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">pkg_dir</span><span class="s2">, </span><span class="s5">&quot;tests&quot;</span><span class="s2">)</span>
+
+    <span class="s6"># https://stackoverflow.com/questions/17407119/python-inspect-stack-is-slow</span>
+    <span class="s1">frame</span><span class="s2">: </span><span class="s1">FrameType </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s1">inspect</span><span class="s2">.</span><span class="s1">currentframe</span><span class="s2">()</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s1">n </span><span class="s2">= </span><span class="s4">0</span>
+        <span class="s0">while </span><span class="s1">frame</span><span class="s2">:</span>
+            <span class="s1">filename </span><span class="s2">= </span><span class="s1">inspect</span><span class="s2">.</span><span class="s1">getfile</span><span class="s2">(</span><span class="s1">frame</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">filename</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s1">pkg_dir</span><span class="s2">) </span><span class="s0">and not </span><span class="s1">filename</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s1">test_dir</span><span class="s2">):</span>
+                <span class="s1">frame </span><span class="s2">= </span><span class="s1">frame</span><span class="s2">.</span><span class="s1">f_back</span>
+                <span class="s1">n </span><span class="s2">+= </span><span class="s4">1</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s0">break</span>
+    <span class="s0">finally</span><span class="s2">:</span>
+        <span class="s6"># See note in</span>
+        <span class="s6"># https://docs.python.org/3/library/inspect.html#inspect.Traceback</span>
+        <span class="s0">del </span><span class="s1">frame</span>
+    <span class="s0">return </span><span class="s1">n</span>
+
+
+<span class="s2">@</span><span class="s1">contextlib</span><span class="s2">.</span><span class="s1">contextmanager</span>
+<span class="s0">def </span><span class="s1">rewrite_warning</span><span class="s2">(</span>
+    <span class="s1">target_message</span><span class="s2">: </span><span class="s1">str</span><span class="s2">,</span>
+    <span class="s1">target_category</span><span class="s2">: </span><span class="s1">type</span><span class="s2">[</span><span class="s1">Warning</span><span class="s2">],</span>
+    <span class="s1">new_message</span><span class="s2">: </span><span class="s1">str</span><span class="s2">,</span>
+    <span class="s1">new_category</span><span class="s2">: </span><span class="s1">type</span><span class="s2">[</span><span class="s1">Warning</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+<span class="s2">) </span><span class="s1">-&gt; Generator</span><span class="s2">[</span><span class="s0">None</span><span class="s2">]:</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Rewrite the message of a warning. 
+ 
+    Parameters 
+    ---------- 
+    target_message : str 
+        Warning message to match. 
+    target_category : Warning 
+        Warning type to match. 
+    new_message : str 
+        New warning message to emit. 
+    new_category : Warning or None, default None 
+        New warning type to emit. When None, will be the same as target_category. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">new_category </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s1">new_category </span><span class="s2">= </span><span class="s1">target_category</span>
+    <span class="s0">with </span><span class="s1">warnings</span><span class="s2">.</span><span class="s1">catch_warnings</span><span class="s2">(</span><span class="s1">record</span><span class="s2">=</span><span class="s0">True</span><span class="s2">) </span><span class="s0">as </span><span class="s1">record</span><span class="s2">:</span>
+        <span class="s0">yield</span>
+    <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">record</span><span class="s2">) &gt; </span><span class="s4">0</span><span class="s2">:</span>
+        <span class="s1">match </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">compile</span><span class="s2">(</span><span class="s1">target_message</span><span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">warning </span><span class="s0">in </span><span class="s1">record</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">warning</span><span class="s2">.</span><span class="s1">category </span><span class="s0">is </span><span class="s1">target_category </span><span class="s0">and </span><span class="s1">re</span><span class="s2">.</span><span class="s1">search</span><span class="s2">(</span>
+                <span class="s1">match</span><span class="s2">, </span><span class="s1">str</span><span class="s2">(</span><span class="s1">warning</span><span class="s2">.</span><span class="s1">message</span><span class="s2">)</span>
+            <span class="s2">):</span>
+                <span class="s1">category </span><span class="s2">= </span><span class="s1">new_category</span>
+                <span class="s1">message</span><span class="s2">: </span><span class="s1">Warning </span><span class="s2">| </span><span class="s1">str </span><span class="s2">= </span><span class="s1">new_message</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">category</span><span class="s2">, </span><span class="s1">message </span><span class="s2">= </span><span class="s1">warning</span><span class="s2">.</span><span class="s1">category</span><span class="s2">, </span><span class="s1">warning</span><span class="s2">.</span><span class="s1">message</span>
+            <span class="s1">warnings</span><span class="s2">.</span><span class="s1">warn_explicit</span><span class="s2">(</span>
+                <span class="s1">message</span><span class="s2">=</span><span class="s1">message</span><span class="s2">,</span>
+                <span class="s1">category</span><span class="s2">=</span><span class="s1">category</span><span class="s2">,</span>
+                <span class="s1">filename</span><span class="s2">=</span><span class="s1">warning</span><span class="s2">.</span><span class="s1">filename</span><span class="s2">,</span>
+                <span class="s1">lineno</span><span class="s2">=</span><span class="s1">warning</span><span class="s2">.</span><span class="s1">lineno</span><span class="s2">,</span>
+            <span class="s2">)</span>
+</pre>
+</body>
+</html>

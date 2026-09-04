@@ -1,0 +1,196 @@
+<html>
+<head>
+<title>extension_types.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+extension_types.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">json</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">TYPE_CHECKING</span>
+
+<span class="s0">import </span><span class="s1">pyarrow</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">compat </span><span class="s0">import </span><span class="s1">pa_version_under14p1</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">dtypes</span><span class="s2">.</span><span class="s1">dtypes </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">IntervalDtype</span><span class="s2">,</span>
+    <span class="s1">PeriodDtype</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">arrays</span><span class="s2">.</span><span class="s1">interval </span><span class="s0">import </span><span class="s1">VALID_CLOSED</span>
+
+<span class="s0">if </span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_typing </span><span class="s0">import </span><span class="s1">IntervalClosedType</span>
+
+
+<span class="s0">class </span><span class="s1">ArrowPeriodType</span><span class="s2">(</span><span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">ExtensionType</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">freq</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s3"># attributes need to be set first before calling</span>
+        <span class="s3"># super init (as that calls serialize)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_freq </span><span class="s2">= </span><span class="s1">freq</span>
+        <span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">ExtensionType</span><span class="s2">.</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">(), </span><span class="s4">&quot;pandas.period&quot;</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">freq</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_freq</span>
+
+    <span class="s0">def </span><span class="s1">__arrow_ext_serialize__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bytes</span><span class="s2">:</span>
+        <span class="s1">metadata </span><span class="s2">= {</span><span class="s4">&quot;freq&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">freq</span><span class="s2">}</span>
+        <span class="s0">return </span><span class="s1">json</span><span class="s2">.</span><span class="s1">dumps</span><span class="s2">(</span><span class="s1">metadata</span><span class="s2">).</span><span class="s1">encode</span><span class="s2">()</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">__arrow_ext_deserialize__</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">storage_type</span><span class="s2">, </span><span class="s1">serialized</span><span class="s2">) </span><span class="s1">-&gt; ArrowPeriodType</span><span class="s2">:</span>
+        <span class="s1">metadata </span><span class="s2">= </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">serialized</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">())</span>
+        <span class="s0">return </span><span class="s1">ArrowPeriodType</span><span class="s2">(</span><span class="s1">metadata</span><span class="s2">[</span><span class="s4">&quot;freq&quot;</span><span class="s2">])</span>
+
+    <span class="s0">def </span><span class="s1">__eq__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">BaseExtensionType</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">type</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) == </span><span class="s1">type</span><span class="s2">(</span><span class="s1">other</span><span class="s2">) </span><span class="s0">and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">freq </span><span class="s2">== </span><span class="s1">other</span><span class="s2">.</span><span class="s1">freq</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">NotImplemented</span>
+
+    <span class="s0">def </span><span class="s1">__ne__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s0">return not </span><span class="s1">self </span><span class="s2">== </span><span class="s1">other</span>
+
+    <span class="s0">def </span><span class="s1">__hash__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; int</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">hash</span><span class="s2">((</span><span class="s1">str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">), </span><span class="s1">self</span><span class="s2">.</span><span class="s1">freq</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">to_pandas_dtype</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; PeriodDtype</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">PeriodDtype</span><span class="s2">(</span><span class="s1">freq</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">freq</span><span class="s2">)</span>
+
+
+<span class="s3"># register the type with a dummy instance</span>
+<span class="s1">_period_type </span><span class="s2">= </span><span class="s1">ArrowPeriodType</span><span class="s2">(</span><span class="s4">&quot;D&quot;</span><span class="s2">)</span>
+<span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">register_extension_type</span><span class="s2">(</span><span class="s1">_period_type</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">ArrowIntervalType</span><span class="s2">(</span><span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">ExtensionType</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">subtype</span><span class="s2">, </span><span class="s1">closed</span><span class="s2">: </span><span class="s1">IntervalClosedType</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s3"># attributes need to be set first before calling</span>
+        <span class="s3"># super init (as that calls serialize)</span>
+        <span class="s0">assert </span><span class="s1">closed </span><span class="s0">in </span><span class="s1">VALID_CLOSED</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_closed</span><span class="s2">: </span><span class="s1">IntervalClosedType </span><span class="s2">= </span><span class="s1">closed</span>
+        <span class="s0">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">subtype</span><span class="s2">, </span><span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">DataType</span><span class="s2">):</span>
+            <span class="s1">subtype </span><span class="s2">= </span><span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">type_for_alias</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">subtype</span><span class="s2">))</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_subtype </span><span class="s2">= </span><span class="s1">subtype</span>
+
+        <span class="s1">storage_type </span><span class="s2">= </span><span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">struct</span><span class="s2">([(</span><span class="s4">&quot;left&quot;</span><span class="s2">, </span><span class="s1">subtype</span><span class="s2">), (</span><span class="s4">&quot;right&quot;</span><span class="s2">, </span><span class="s1">subtype</span><span class="s2">)])</span>
+        <span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">ExtensionType</span><span class="s2">.</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">storage_type</span><span class="s2">, </span><span class="s4">&quot;pandas.interval&quot;</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">subtype</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_subtype</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">closed</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; IntervalClosedType</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_closed</span>
+
+    <span class="s0">def </span><span class="s1">__arrow_ext_serialize__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bytes</span><span class="s2">:</span>
+        <span class="s1">metadata </span><span class="s2">= {</span><span class="s4">&quot;subtype&quot;</span><span class="s2">: </span><span class="s1">str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">subtype</span><span class="s2">), </span><span class="s4">&quot;closed&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">closed</span><span class="s2">}</span>
+        <span class="s0">return </span><span class="s1">json</span><span class="s2">.</span><span class="s1">dumps</span><span class="s2">(</span><span class="s1">metadata</span><span class="s2">).</span><span class="s1">encode</span><span class="s2">()</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">__arrow_ext_deserialize__</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">storage_type</span><span class="s2">, </span><span class="s1">serialized</span><span class="s2">) </span><span class="s1">-&gt; ArrowIntervalType</span><span class="s2">:</span>
+        <span class="s1">metadata </span><span class="s2">= </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">serialized</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">())</span>
+        <span class="s1">subtype </span><span class="s2">= </span><span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">type_for_alias</span><span class="s2">(</span><span class="s1">metadata</span><span class="s2">[</span><span class="s4">&quot;subtype&quot;</span><span class="s2">])</span>
+        <span class="s1">closed </span><span class="s2">= </span><span class="s1">metadata</span><span class="s2">[</span><span class="s4">&quot;closed&quot;</span><span class="s2">]</span>
+        <span class="s0">return </span><span class="s1">ArrowIntervalType</span><span class="s2">(</span><span class="s1">subtype</span><span class="s2">, </span><span class="s1">closed</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__eq__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">BaseExtensionType</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s2">(</span>
+                <span class="s1">type</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) == </span><span class="s1">type</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+                <span class="s0">and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">subtype </span><span class="s2">== </span><span class="s1">other</span><span class="s2">.</span><span class="s1">subtype</span>
+                <span class="s0">and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">closed </span><span class="s2">== </span><span class="s1">other</span><span class="s2">.</span><span class="s1">closed</span>
+            <span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">NotImplemented</span>
+
+    <span class="s0">def </span><span class="s1">__ne__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s0">return not </span><span class="s1">self </span><span class="s2">== </span><span class="s1">other</span>
+
+    <span class="s0">def </span><span class="s1">__hash__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; int</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">hash</span><span class="s2">((</span><span class="s1">str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">), </span><span class="s1">str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">subtype</span><span class="s2">), </span><span class="s1">self</span><span class="s2">.</span><span class="s1">closed</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">to_pandas_dtype</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; IntervalDtype</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">IntervalDtype</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">subtype</span><span class="s2">.</span><span class="s1">to_pandas_dtype</span><span class="s2">(), </span><span class="s1">self</span><span class="s2">.</span><span class="s1">closed</span><span class="s2">)</span>
+
+
+<span class="s3"># register the type with a dummy instance</span>
+<span class="s1">_interval_type </span><span class="s2">= </span><span class="s1">ArrowIntervalType</span><span class="s2">(</span><span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">(), </span><span class="s4">&quot;left&quot;</span><span class="s2">)</span>
+<span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">register_extension_type</span><span class="s2">(</span><span class="s1">_interval_type</span><span class="s2">)</span>
+
+
+<span class="s1">_ERROR_MSG </span><span class="s2">= </span><span class="s4">&quot;&quot;&quot;</span><span class="s0">\ 
+</span><span class="s4">Disallowed deserialization of 'arrow.py_extension_type': 
+storage_type = {storage_type} 
+serialized = {serialized} 
+pickle disassembly:</span><span class="s0">\n</span><span class="s4">{pickle_disassembly} 
+ 
+Reading of untrusted Parquet or Feather files with a PyExtensionType column 
+allows arbitrary code execution. 
+If you trust this file, you can enable reading the extension type by one of: 
+ 
+- upgrading to pyarrow &gt;= 14.0.1, and call `pa.PyExtensionType.set_auto_load(True)` 
+- install pyarrow-hotfix (`pip install pyarrow-hotfix`) and disable it by running 
+  `import pyarrow_hotfix; pyarrow_hotfix.uninstall()` 
+ 
+We strongly recommend updating your Parquet/Feather files to use extension types 
+derived from `pyarrow.ExtensionType` instead, and register this type explicitly. 
+&quot;&quot;&quot;</span>
+
+
+<span class="s0">def </span><span class="s1">patch_pyarrow</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s3"># starting from pyarrow 14.0.1, it has its own mechanism</span>
+    <span class="s0">if not </span><span class="s1">pa_version_under14p1</span><span class="s2">:</span>
+        <span class="s0">return</span>
+
+    <span class="s3"># if https://github.com/pitrou/pyarrow-hotfix was installed and enabled</span>
+    <span class="s0">if </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">pyarrow</span><span class="s2">, </span><span class="s4">&quot;_hotfix_installed&quot;</span><span class="s2">, </span><span class="s0">False</span><span class="s2">):</span>
+        <span class="s0">return</span>
+
+    <span class="s0">class </span><span class="s1">ForbiddenExtensionType</span><span class="s2">(</span><span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">ExtensionType</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">__arrow_ext_serialize__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bytes</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s5">b&quot;&quot;</span>
+
+        <span class="s2">@</span><span class="s1">classmethod</span>
+        <span class="s0">def </span><span class="s1">__arrow_ext_deserialize__</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">storage_type</span><span class="s2">, </span><span class="s1">serialized</span><span class="s2">):</span>
+            <span class="s0">import </span><span class="s1">io</span>
+            <span class="s0">import </span><span class="s1">pickletools</span>
+
+            <span class="s1">out </span><span class="s2">= </span><span class="s1">io</span><span class="s2">.</span><span class="s1">StringIO</span><span class="s2">()</span>
+            <span class="s1">pickletools</span><span class="s2">.</span><span class="s1">dis</span><span class="s2">(</span><span class="s1">serialized</span><span class="s2">, </span><span class="s1">out</span><span class="s2">)</span>
+            <span class="s0">raise </span><span class="s1">RuntimeError</span><span class="s2">(</span>
+                <span class="s1">_ERROR_MSG</span><span class="s2">.</span><span class="s1">format</span><span class="s2">(</span>
+                    <span class="s1">storage_type</span><span class="s2">=</span><span class="s1">storage_type</span><span class="s2">,</span>
+                    <span class="s1">serialized</span><span class="s2">=</span><span class="s1">serialized</span><span class="s2">,</span>
+                    <span class="s1">pickle_disassembly</span><span class="s2">=</span><span class="s1">out</span><span class="s2">.</span><span class="s1">getvalue</span><span class="s2">(),</span>
+                <span class="s2">)</span>
+            <span class="s2">)</span>
+
+    <span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">unregister_extension_type</span><span class="s2">(</span><span class="s4">&quot;arrow.py_extension_type&quot;</span><span class="s2">)</span>
+    <span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">register_extension_type</span><span class="s2">(</span>
+        <span class="s1">ForbiddenExtensionType</span><span class="s2">(</span><span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">null</span><span class="s2">(), </span><span class="s4">&quot;arrow.py_extension_type&quot;</span><span class="s2">)</span>
+    <span class="s2">)</span>
+
+    <span class="s1">pyarrow</span><span class="s2">.</span><span class="s1">_hotfix_installed </span><span class="s2">= </span><span class="s0">True</span>
+
+
+<span class="s1">patch_pyarrow</span><span class="s2">()</span>
+</pre>
+</body>
+</html>

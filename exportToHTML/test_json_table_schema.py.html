@@ -1,0 +1,921 @@
+<html>
+<head>
+<title>test_json_table_schema.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_json_table_schema.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;Tests for Table Schema integration.&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">collections </span><span class="s2">import </span><span class="s1">OrderedDict</span>
+<span class="s2">from </span><span class="s1">io </span><span class="s2">import </span><span class="s1">StringIO</span>
+<span class="s2">import </span><span class="s1">json</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+<span class="s2">import </span><span class="s1">pytest</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">errors </span><span class="s2">import </span><span class="s1">Pandas4Warning</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">dtypes </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">CategoricalDtype</span><span class="s3">,</span>
+    <span class="s1">DatetimeTZDtype</span><span class="s3">,</span>
+    <span class="s1">PeriodDtype</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">import </span><span class="s1">pandas </span><span class="s2">as </span><span class="s1">pd</span>
+<span class="s2">from </span><span class="s1">pandas </span><span class="s2">import </span><span class="s1">DataFrame</span>
+<span class="s2">import </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_testing </span><span class="s2">as </span><span class="s1">tm</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">json</span><span class="s3">.</span><span class="s1">_table_schema </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">as_json_table_type</span><span class="s3">,</span>
+    <span class="s1">build_table_schema</span><span class="s3">,</span>
+    <span class="s1">convert_json_field_to_pandas_type</span><span class="s3">,</span>
+    <span class="s1">convert_pandas_type_to_json_field</span><span class="s3">,</span>
+    <span class="s1">set_default_names</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">fixture</span>
+<span class="s2">def </span><span class="s1">df_schema</span><span class="s3">():</span>
+    <span class="s2">return </span><span class="s1">DataFrame</span><span class="s3">(</span>
+        <span class="s3">{</span>
+            <span class="s4">&quot;A&quot;</span><span class="s3">: [</span><span class="s5">1</span><span class="s3">, </span><span class="s5">2</span><span class="s3">, </span><span class="s5">3</span><span class="s3">, </span><span class="s5">4</span><span class="s3">],</span>
+            <span class="s4">&quot;B&quot;</span><span class="s3">: [</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">],</span>
+            <span class="s4">&quot;C&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">date_range</span><span class="s3">(</span><span class="s4">&quot;2016-01-01&quot;</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s5">4</span><span class="s3">),</span>
+            <span class="s4">&quot;D&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">timedelta_range</span><span class="s3">(</span><span class="s4">&quot;1h&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s5">4</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;min&quot;</span><span class="s3">),</span>
+        <span class="s3">},</span>
+        <span class="s1">index</span><span class="s3">=</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Index</span><span class="s3">(</span><span class="s1">range</span><span class="s3">(</span><span class="s5">4</span><span class="s3">), </span><span class="s1">name</span><span class="s3">=</span><span class="s4">&quot;idx&quot;</span><span class="s3">),</span>
+    <span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">fixture</span>
+<span class="s2">def </span><span class="s1">df_table</span><span class="s3">():</span>
+    <span class="s2">return </span><span class="s1">DataFrame</span><span class="s3">(</span>
+        <span class="s3">{</span>
+            <span class="s4">&quot;A&quot;</span><span class="s3">: [</span><span class="s5">1</span><span class="s3">, </span><span class="s5">2</span><span class="s3">, </span><span class="s5">3</span><span class="s3">, </span><span class="s5">4</span><span class="s3">],</span>
+            <span class="s4">&quot;B&quot;</span><span class="s3">: [</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">],</span>
+            <span class="s4">&quot;C&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">date_range</span><span class="s3">(</span><span class="s4">&quot;2016-01-01&quot;</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s5">4</span><span class="s3">),</span>
+            <span class="s4">&quot;D&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">timedelta_range</span><span class="s3">(</span><span class="s4">&quot;1h&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s5">4</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;min&quot;</span><span class="s3">),</span>
+            <span class="s4">&quot;E&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">(</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Categorical</span><span class="s3">([</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">])),</span>
+            <span class="s4">&quot;F&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">(</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Categorical</span><span class="s3">([</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">], </span><span class="s1">ordered</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)),</span>
+            <span class="s4">&quot;G&quot;</span><span class="s3">: [</span><span class="s5">1.0</span><span class="s3">, </span><span class="s5">2.0</span><span class="s3">, </span><span class="s5">3</span><span class="s3">, </span><span class="s5">4.0</span><span class="s3">],</span>
+            <span class="s4">&quot;H&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">date_range</span><span class="s3">(</span><span class="s4">&quot;2016-01-01&quot;</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s5">4</span><span class="s3">, </span><span class="s1">tz</span><span class="s3">=</span><span class="s4">&quot;US/Central&quot;</span><span class="s3">),</span>
+        <span class="s3">},</span>
+        <span class="s1">index</span><span class="s3">=</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Index</span><span class="s3">(</span><span class="s1">range</span><span class="s3">(</span><span class="s5">4</span><span class="s3">), </span><span class="s1">name</span><span class="s3">=</span><span class="s4">&quot;idx&quot;</span><span class="s3">),</span>
+    <span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">TestBuildSchema</span><span class="s3">:</span>
+    <span class="s2">def </span><span class="s1">test_build_table_schema</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">df_schema</span><span class="s3">, </span><span class="s1">using_infer_string</span><span class="s3">):</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">build_table_schema</span><span class="s3">(</span><span class="s1">df_schema</span><span class="s3">, </span><span class="s1">version</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+        <span class="s1">expected </span><span class="s3">= {</span>
+            <span class="s4">&quot;fields&quot;</span><span class="s3">: [</span>
+                <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;idx&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;integer&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;A&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;integer&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;B&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;string&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;C&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;datetime&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;duration&quot;</span><span class="s3">},</span>
+            <span class="s3">],</span>
+            <span class="s4">&quot;primaryKey&quot;</span><span class="s3">: [</span><span class="s4">&quot;idx&quot;</span><span class="s3">],</span>
+        <span class="s3">}</span>
+        <span class="s2">if </span><span class="s1">using_infer_string</span><span class="s3">:</span>
+            <span class="s1">expected</span><span class="s3">[</span><span class="s4">&quot;fields&quot;</span><span class="s3">][</span><span class="s5">2</span><span class="s3">] = {</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;B&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;string&quot;</span><span class="s3">, </span><span class="s4">&quot;extDtype&quot;</span><span class="s3">: </span><span class="s4">&quot;str&quot;</span><span class="s3">}</span>
+        <span class="s2">assert </span><span class="s1">result </span><span class="s3">== </span><span class="s1">expected</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">build_table_schema</span><span class="s3">(</span><span class="s1">df_schema</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s4">&quot;pandas_version&quot; </span><span class="s2">in </span><span class="s1">result</span>
+
+    <span class="s2">def </span><span class="s1">test_series</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">s </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">([</span><span class="s5">1</span><span class="s3">, </span><span class="s5">2</span><span class="s3">, </span><span class="s5">3</span><span class="s3">], </span><span class="s1">name</span><span class="s3">=</span><span class="s4">&quot;foo&quot;</span><span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">build_table_schema</span><span class="s3">(</span><span class="s1">s</span><span class="s3">, </span><span class="s1">version</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+        <span class="s1">expected </span><span class="s3">= {</span>
+            <span class="s4">&quot;fields&quot;</span><span class="s3">: [</span>
+                <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;index&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;integer&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;foo&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;integer&quot;</span><span class="s3">},</span>
+            <span class="s3">],</span>
+            <span class="s4">&quot;primaryKey&quot;</span><span class="s3">: [</span><span class="s4">&quot;index&quot;</span><span class="s3">],</span>
+        <span class="s3">}</span>
+        <span class="s2">assert </span><span class="s1">result </span><span class="s3">== </span><span class="s1">expected</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">build_table_schema</span><span class="s3">(</span><span class="s1">s</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s4">&quot;pandas_version&quot; </span><span class="s2">in </span><span class="s1">result</span>
+
+    <span class="s2">def </span><span class="s1">test_series_unnamed</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">build_table_schema</span><span class="s3">(</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">([</span><span class="s5">1</span><span class="s3">, </span><span class="s5">2</span><span class="s3">, </span><span class="s5">3</span><span class="s3">]), </span><span class="s1">version</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+        <span class="s1">expected </span><span class="s3">= {</span>
+            <span class="s4">&quot;fields&quot;</span><span class="s3">: [</span>
+                <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;index&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;integer&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;values&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;integer&quot;</span><span class="s3">},</span>
+            <span class="s3">],</span>
+            <span class="s4">&quot;primaryKey&quot;</span><span class="s3">: [</span><span class="s4">&quot;index&quot;</span><span class="s3">],</span>
+        <span class="s3">}</span>
+        <span class="s2">assert </span><span class="s1">result </span><span class="s3">== </span><span class="s1">expected</span>
+
+    <span class="s2">def </span><span class="s1">test_multiindex</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">df_schema</span><span class="s3">, </span><span class="s1">using_infer_string</span><span class="s3">):</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">df_schema</span>
+        <span class="s1">idx </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">MultiIndex</span><span class="s3">.</span><span class="s1">from_product</span><span class="s3">([(</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">), (</span><span class="s5">1</span><span class="s3">, </span><span class="s5">2</span><span class="s3">)])</span>
+        <span class="s1">df</span><span class="s3">.</span><span class="s1">index </span><span class="s3">= </span><span class="s1">idx</span>
+
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">build_table_schema</span><span class="s3">(</span><span class="s1">df</span><span class="s3">, </span><span class="s1">version</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+        <span class="s1">expected </span><span class="s3">= {</span>
+            <span class="s4">&quot;fields&quot;</span><span class="s3">: [</span>
+                <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;level_0&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;string&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;level_1&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;integer&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;A&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;integer&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;B&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;string&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;C&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;datetime&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;duration&quot;</span><span class="s3">},</span>
+            <span class="s3">],</span>
+            <span class="s4">&quot;primaryKey&quot;</span><span class="s3">: [</span><span class="s4">&quot;level_0&quot;</span><span class="s3">, </span><span class="s4">&quot;level_1&quot;</span><span class="s3">],</span>
+        <span class="s3">}</span>
+        <span class="s2">if </span><span class="s1">using_infer_string</span><span class="s3">:</span>
+            <span class="s1">expected</span><span class="s3">[</span><span class="s4">&quot;fields&quot;</span><span class="s3">][</span><span class="s5">0</span><span class="s3">] = {</span>
+                <span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;level_0&quot;</span><span class="s3">,</span>
+                <span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;string&quot;</span><span class="s3">,</span>
+                <span class="s4">&quot;extDtype&quot;</span><span class="s3">: </span><span class="s4">&quot;str&quot;</span><span class="s3">,</span>
+            <span class="s3">}</span>
+            <span class="s1">expected</span><span class="s3">[</span><span class="s4">&quot;fields&quot;</span><span class="s3">][</span><span class="s5">3</span><span class="s3">] = {</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;B&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;string&quot;</span><span class="s3">, </span><span class="s4">&quot;extDtype&quot;</span><span class="s3">: </span><span class="s4">&quot;str&quot;</span><span class="s3">}</span>
+        <span class="s2">assert </span><span class="s1">result </span><span class="s3">== </span><span class="s1">expected</span>
+
+        <span class="s1">df</span><span class="s3">.</span><span class="s1">index</span><span class="s3">.</span><span class="s1">names </span><span class="s3">= [</span><span class="s4">&quot;idx0&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">]</span>
+        <span class="s1">expected</span><span class="s3">[</span><span class="s4">&quot;fields&quot;</span><span class="s3">][</span><span class="s5">0</span><span class="s3">][</span><span class="s4">&quot;name&quot;</span><span class="s3">] = </span><span class="s4">&quot;idx0&quot;</span>
+        <span class="s1">expected</span><span class="s3">[</span><span class="s4">&quot;primaryKey&quot;</span><span class="s3">] = [</span><span class="s4">&quot;idx0&quot;</span><span class="s3">, </span><span class="s4">&quot;level_1&quot;</span><span class="s3">]</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">build_table_schema</span><span class="s3">(</span><span class="s1">df</span><span class="s3">, </span><span class="s1">version</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">result </span><span class="s3">== </span><span class="s1">expected</span>
+
+
+<span class="s2">class </span><span class="s1">TestTableSchemaType</span><span class="s3">:</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;int_type&quot;</span><span class="s3">, [</span><span class="s1">int</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">int16</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">int32</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_as_json_table_type_int_data</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">int_type</span><span class="s3">):</span>
+        <span class="s1">int_data </span><span class="s3">= [</span><span class="s5">1</span><span class="s3">, </span><span class="s5">2</span><span class="s3">, </span><span class="s5">3</span><span class="s3">]</span>
+        <span class="s2">assert </span><span class="s1">as_json_table_type</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">int_data</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">int_type</span><span class="s3">).</span><span class="s1">dtype</span><span class="s3">) == </span><span class="s4">&quot;integer&quot;</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;float_type&quot;</span><span class="s3">, [</span><span class="s1">float</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">float16</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">float32</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">float64</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_as_json_table_type_float_data</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">float_type</span><span class="s3">):</span>
+        <span class="s1">float_data </span><span class="s3">= [</span><span class="s5">1.0</span><span class="s3">, </span><span class="s5">2.0</span><span class="s3">, </span><span class="s5">3.0</span><span class="s3">]</span>
+        <span class="s2">assert </span><span class="s3">(</span>
+            <span class="s1">as_json_table_type</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">float_data</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">float_type</span><span class="s3">).</span><span class="s1">dtype</span><span class="s3">) == </span><span class="s4">&quot;number&quot;</span>
+        <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;bool_type&quot;</span><span class="s3">, [</span><span class="s1">bool</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">bool_</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_as_json_table_type_bool_data</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">bool_type</span><span class="s3">):</span>
+        <span class="s1">bool_data </span><span class="s3">= [</span><span class="s2">True</span><span class="s3">, </span><span class="s2">False</span><span class="s3">]</span>
+        <span class="s2">assert </span><span class="s3">(</span>
+            <span class="s1">as_json_table_type</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">bool_data</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">bool_type</span><span class="s3">).</span><span class="s1">dtype</span><span class="s3">) == </span><span class="s4">&quot;boolean&quot;</span>
+        <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+        <span class="s4">&quot;date_data&quot;</span><span class="s3">,</span>
+        <span class="s3">[</span>
+            <span class="s1">pd</span><span class="s3">.</span><span class="s1">to_datetime</span><span class="s3">([</span><span class="s4">&quot;2016&quot;</span><span class="s3">]),</span>
+            <span class="s1">pd</span><span class="s3">.</span><span class="s1">to_datetime</span><span class="s3">([</span><span class="s4">&quot;2016&quot;</span><span class="s3">], </span><span class="s1">utc</span><span class="s3">=</span><span class="s2">True</span><span class="s3">),</span>
+            <span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">(</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">to_datetime</span><span class="s3">([</span><span class="s4">&quot;2016&quot;</span><span class="s3">])),</span>
+            <span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">(</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">to_datetime</span><span class="s3">([</span><span class="s4">&quot;2016&quot;</span><span class="s3">], </span><span class="s1">utc</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)),</span>
+            <span class="s1">pd</span><span class="s3">.</span><span class="s1">period_range</span><span class="s3">(</span><span class="s4">&quot;2016&quot;</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;Y&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s5">3</span><span class="s3">),</span>
+        <span class="s3">],</span>
+    <span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_as_json_table_type_date_data</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">date_data</span><span class="s3">):</span>
+        <span class="s2">assert </span><span class="s1">as_json_table_type</span><span class="s3">(</span><span class="s1">date_data</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">) == </span><span class="s4">&quot;datetime&quot;</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;klass&quot;</span><span class="s3">, [</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">, </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Index</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_as_json_table_type_string_data</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">klass</span><span class="s3">):</span>
+        <span class="s1">str_data </span><span class="s3">= </span><span class="s1">klass</span><span class="s3">([</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">object</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">as_json_table_type</span><span class="s3">(</span><span class="s1">str_data</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">) == </span><span class="s4">&quot;string&quot;</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+        <span class="s4">&quot;cat_data&quot;</span><span class="s3">,</span>
+        <span class="s3">[</span>
+            <span class="s1">pd</span><span class="s3">.</span><span class="s1">Categorical</span><span class="s3">([</span><span class="s4">&quot;a&quot;</span><span class="s3">]),</span>
+            <span class="s1">pd</span><span class="s3">.</span><span class="s1">Categorical</span><span class="s3">([</span><span class="s5">1</span><span class="s3">]),</span>
+            <span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">(</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Categorical</span><span class="s3">([</span><span class="s5">1</span><span class="s3">])),</span>
+            <span class="s1">pd</span><span class="s3">.</span><span class="s1">CategoricalIndex</span><span class="s3">([</span><span class="s5">1</span><span class="s3">]),</span>
+        <span class="s3">],</span>
+    <span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_as_json_table_type_categorical_data</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">cat_data</span><span class="s3">):</span>
+        <span class="s2">assert </span><span class="s1">as_json_table_type</span><span class="s3">(</span><span class="s1">cat_data</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">) == </span><span class="s4">&quot;any&quot;</span>
+
+    <span class="s6"># ------</span>
+    <span class="s6"># dtypes</span>
+    <span class="s6"># ------</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;int_dtype&quot;</span><span class="s3">, [</span><span class="s1">int</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">int16</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">int32</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_as_json_table_type_int_dtypes</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">int_dtype</span><span class="s3">):</span>
+        <span class="s2">assert </span><span class="s1">as_json_table_type</span><span class="s3">(</span><span class="s1">int_dtype</span><span class="s3">) == </span><span class="s4">&quot;integer&quot;</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;float_dtype&quot;</span><span class="s3">, [</span><span class="s1">float</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">float16</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">float32</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">float64</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_as_json_table_type_float_dtypes</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">float_dtype</span><span class="s3">):</span>
+        <span class="s2">assert </span><span class="s1">as_json_table_type</span><span class="s3">(</span><span class="s1">float_dtype</span><span class="s3">) == </span><span class="s4">&quot;number&quot;</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;bool_dtype&quot;</span><span class="s3">, [</span><span class="s1">bool</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">bool_</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_as_json_table_type_bool_dtypes</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">bool_dtype</span><span class="s3">):</span>
+        <span class="s2">assert </span><span class="s1">as_json_table_type</span><span class="s3">(</span><span class="s1">bool_dtype</span><span class="s3">) == </span><span class="s4">&quot;boolean&quot;</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+        <span class="s4">&quot;date_dtype&quot;</span><span class="s3">,</span>
+        <span class="s3">[</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s4">&quot;&lt;M8[ns]&quot;</span><span class="s3">),</span>
+            <span class="s1">PeriodDtype</span><span class="s3">(</span><span class="s4">&quot;D&quot;</span><span class="s3">),</span>
+            <span class="s1">DatetimeTZDtype</span><span class="s3">(</span><span class="s4">&quot;ns&quot;</span><span class="s3">, </span><span class="s4">&quot;US/Central&quot;</span><span class="s3">),</span>
+        <span class="s3">],</span>
+    <span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_as_json_table_type_date_dtypes</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">date_dtype</span><span class="s3">):</span>
+        <span class="s6"># TODO: datedate.date? datetime.time?</span>
+        <span class="s2">assert </span><span class="s1">as_json_table_type</span><span class="s3">(</span><span class="s1">date_dtype</span><span class="s3">) == </span><span class="s4">&quot;datetime&quot;</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;td_dtype&quot;</span><span class="s3">, [</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s4">&quot;&lt;m8[ns]&quot;</span><span class="s3">)])</span>
+    <span class="s2">def </span><span class="s1">test_as_json_table_type_timedelta_dtypes</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">td_dtype</span><span class="s3">):</span>
+        <span class="s2">assert </span><span class="s1">as_json_table_type</span><span class="s3">(</span><span class="s1">td_dtype</span><span class="s3">) == </span><span class="s4">&quot;duration&quot;</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;str_dtype&quot;</span><span class="s3">, [</span><span class="s1">object</span><span class="s3">])  </span><span class="s6"># TODO(GH#14904) flesh out dtypes?</span>
+    <span class="s2">def </span><span class="s1">test_as_json_table_type_string_dtypes</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">str_dtype</span><span class="s3">):</span>
+        <span class="s2">assert </span><span class="s1">as_json_table_type</span><span class="s3">(</span><span class="s1">str_dtype</span><span class="s3">) == </span><span class="s4">&quot;string&quot;</span>
+
+    <span class="s2">def </span><span class="s1">test_as_json_table_type_categorical_dtypes</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">assert </span><span class="s1">as_json_table_type</span><span class="s3">(</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Categorical</span><span class="s3">([</span><span class="s4">&quot;a&quot;</span><span class="s3">]).</span><span class="s1">dtype</span><span class="s3">) == </span><span class="s4">&quot;any&quot;</span>
+        <span class="s2">assert </span><span class="s1">as_json_table_type</span><span class="s3">(</span><span class="s1">CategoricalDtype</span><span class="s3">()) == </span><span class="s4">&quot;any&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">TestTableOrient</span><span class="s3">:</span>
+    <span class="s2">def </span><span class="s1">test_build_series</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">s </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">([</span><span class="s5">1</span><span class="s3">, </span><span class="s5">2</span><span class="s3">], </span><span class="s1">name</span><span class="s3">=</span><span class="s4">&quot;a&quot;</span><span class="s3">)</span>
+        <span class="s1">s</span><span class="s3">.</span><span class="s1">index</span><span class="s3">.</span><span class="s1">name </span><span class="s3">= </span><span class="s4">&quot;id&quot;</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">s</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">, </span><span class="s1">date_format</span><span class="s3">=</span><span class="s4">&quot;iso&quot;</span><span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">json</span><span class="s3">.</span><span class="s1">loads</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">object_pairs_hook</span><span class="s3">=</span><span class="s1">OrderedDict</span><span class="s3">)</span>
+
+        <span class="s2">assert </span><span class="s4">&quot;pandas_version&quot; </span><span class="s2">in </span><span class="s1">result</span><span class="s3">[</span><span class="s4">&quot;schema&quot;</span><span class="s3">]</span>
+        <span class="s1">result</span><span class="s3">[</span><span class="s4">&quot;schema&quot;</span><span class="s3">].</span><span class="s1">pop</span><span class="s3">(</span><span class="s4">&quot;pandas_version&quot;</span><span class="s3">)</span>
+
+        <span class="s1">fields </span><span class="s3">= [{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;integer&quot;</span><span class="s3">}, {</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;integer&quot;</span><span class="s3">}]</span>
+
+        <span class="s1">schema </span><span class="s3">= {</span><span class="s4">&quot;fields&quot;</span><span class="s3">: </span><span class="s1">fields</span><span class="s3">, </span><span class="s4">&quot;primaryKey&quot;</span><span class="s3">: [</span><span class="s4">&quot;id&quot;</span><span class="s3">]}</span>
+
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">OrderedDict</span><span class="s3">(</span>
+            <span class="s3">[</span>
+                <span class="s3">(</span><span class="s4">&quot;schema&quot;</span><span class="s3">, </span><span class="s1">schema</span><span class="s3">),</span>
+                <span class="s3">(</span>
+                    <span class="s4">&quot;data&quot;</span><span class="s3">,</span>
+                    <span class="s3">[</span>
+                        <span class="s1">OrderedDict</span><span class="s3">([(</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s5">0</span><span class="s3">), (</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">)]),</span>
+                        <span class="s1">OrderedDict</span><span class="s3">([(</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">), (</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s5">2</span><span class="s3">)]),</span>
+                    <span class="s3">],</span>
+                <span class="s3">),</span>
+            <span class="s3">]</span>
+        <span class="s3">)</span>
+
+        <span class="s2">assert </span><span class="s1">result </span><span class="s3">== </span><span class="s1">expected</span>
+
+    <span class="s2">def </span><span class="s1">test_read_json_from_to_json_results</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s6"># GH32383</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">DataFrame</span><span class="s3">(</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;_id&quot;</span><span class="s3">: {</span><span class="s4">&quot;row_0&quot;</span><span class="s3">: </span><span class="s5">0</span><span class="s3">},</span>
+                <span class="s4">&quot;category&quot;</span><span class="s3">: {</span><span class="s4">&quot;row_0&quot;</span><span class="s3">: </span><span class="s4">&quot;Goods&quot;</span><span class="s3">},</span>
+                <span class="s4">&quot;recommender_id&quot;</span><span class="s3">: {</span><span class="s4">&quot;row_0&quot;</span><span class="s3">: </span><span class="s5">3</span><span class="s3">},</span>
+                <span class="s4">&quot;recommender_name_jp&quot;</span><span class="s3">: {</span><span class="s4">&quot;row_0&quot;</span><span class="s3">: </span><span class="s4">&quot;浦田&quot;</span><span class="s3">},</span>
+                <span class="s4">&quot;recommender_name_en&quot;</span><span class="s3">: {</span><span class="s4">&quot;row_0&quot;</span><span class="s3">: </span><span class="s4">&quot;Urata&quot;</span><span class="s3">},</span>
+                <span class="s4">&quot;name_jp&quot;</span><span class="s3">: {</span><span class="s4">&quot;row_0&quot;</span><span class="s3">: </span><span class="s4">&quot;博多人形(松尾吉将まつお よしまさ)&quot;</span><span class="s3">},</span>
+                <span class="s4">&quot;name_en&quot;</span><span class="s3">: {</span><span class="s4">&quot;row_0&quot;</span><span class="s3">: </span><span class="s4">&quot;Hakata Dolls Matsuo&quot;</span><span class="s3">},</span>
+            <span class="s3">}</span>
+        <span class="s3">)</span>
+
+        <span class="s1">result1 </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">read_json</span><span class="s3">(</span><span class="s1">StringIO</span><span class="s3">(</span><span class="s1">df</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">()))</span>
+        <span class="s1">result2 </span><span class="s3">= </span><span class="s1">DataFrame</span><span class="s3">.</span><span class="s1">from_dict</span><span class="s3">(</span><span class="s1">json</span><span class="s3">.</span><span class="s1">loads</span><span class="s3">(</span><span class="s1">df</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">()))</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">result1</span><span class="s3">, </span><span class="s1">df</span><span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">result2</span><span class="s3">, </span><span class="s1">df</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_to_json</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">df_table</span><span class="s3">, </span><span class="s1">using_infer_string</span><span class="s3">):</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">df_table</span>
+        <span class="s1">df</span><span class="s3">.</span><span class="s1">index</span><span class="s3">.</span><span class="s1">name </span><span class="s3">= </span><span class="s4">&quot;idx&quot;</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">df</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">, </span><span class="s1">date_format</span><span class="s3">=</span><span class="s4">&quot;iso&quot;</span><span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">json</span><span class="s3">.</span><span class="s1">loads</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">object_pairs_hook</span><span class="s3">=</span><span class="s1">OrderedDict</span><span class="s3">)</span>
+
+        <span class="s2">assert </span><span class="s4">&quot;pandas_version&quot; </span><span class="s2">in </span><span class="s1">result</span><span class="s3">[</span><span class="s4">&quot;schema&quot;</span><span class="s3">]</span>
+        <span class="s1">result</span><span class="s3">[</span><span class="s4">&quot;schema&quot;</span><span class="s3">].</span><span class="s1">pop</span><span class="s3">(</span><span class="s4">&quot;pandas_version&quot;</span><span class="s3">)</span>
+
+        <span class="s1">fields </span><span class="s3">= [</span>
+            <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;idx&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;integer&quot;</span><span class="s3">},</span>
+            <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;A&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;integer&quot;</span><span class="s3">},</span>
+            <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;B&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;string&quot;</span><span class="s3">},</span>
+            <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;C&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;datetime&quot;</span><span class="s3">},</span>
+            <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;duration&quot;</span><span class="s3">},</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;constraints&quot;</span><span class="s3">: {</span><span class="s4">&quot;enum&quot;</span><span class="s3">: [</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">]},</span>
+                <span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;E&quot;</span><span class="s3">,</span>
+                <span class="s4">&quot;ordered&quot;</span><span class="s3">: </span><span class="s2">False</span><span class="s3">,</span>
+                <span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;any&quot;</span><span class="s3">,</span>
+            <span class="s3">},</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;constraints&quot;</span><span class="s3">: {</span><span class="s4">&quot;enum&quot;</span><span class="s3">: [</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">]},</span>
+                <span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;F&quot;</span><span class="s3">,</span>
+                <span class="s4">&quot;ordered&quot;</span><span class="s3">: </span><span class="s2">True</span><span class="s3">,</span>
+                <span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;any&quot;</span><span class="s3">,</span>
+            <span class="s3">},</span>
+            <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;G&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;number&quot;</span><span class="s3">},</span>
+            <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;H&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;datetime&quot;</span><span class="s3">, </span><span class="s4">&quot;tz&quot;</span><span class="s3">: </span><span class="s4">&quot;US/Central&quot;</span><span class="s3">},</span>
+        <span class="s3">]</span>
+
+        <span class="s2">if </span><span class="s1">using_infer_string</span><span class="s3">:</span>
+            <span class="s1">fields</span><span class="s3">[</span><span class="s5">2</span><span class="s3">] = {</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;B&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;string&quot;</span><span class="s3">, </span><span class="s4">&quot;extDtype&quot;</span><span class="s3">: </span><span class="s4">&quot;str&quot;</span><span class="s3">}</span>
+
+        <span class="s1">schema </span><span class="s3">= {</span><span class="s4">&quot;fields&quot;</span><span class="s3">: </span><span class="s1">fields</span><span class="s3">, </span><span class="s4">&quot;primaryKey&quot;</span><span class="s3">: [</span><span class="s4">&quot;idx&quot;</span><span class="s3">]}</span>
+        <span class="s1">data </span><span class="s3">= [</span>
+            <span class="s1">OrderedDict</span><span class="s3">(</span>
+                <span class="s3">[</span>
+                    <span class="s3">(</span><span class="s4">&quot;idx&quot;</span><span class="s3">, </span><span class="s5">0</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;A&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;B&quot;</span><span class="s3">, </span><span class="s4">&quot;a&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;C&quot;</span><span class="s3">, </span><span class="s4">&quot;2016-01-01T00:00:00.000&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s4">&quot;P0DT1H0M0S&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;E&quot;</span><span class="s3">, </span><span class="s4">&quot;a&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;F&quot;</span><span class="s3">, </span><span class="s4">&quot;a&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;G&quot;</span><span class="s3">, </span><span class="s5">1.0</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;H&quot;</span><span class="s3">, </span><span class="s4">&quot;2016-01-01T06:00:00.000Z&quot;</span><span class="s3">),</span>
+                <span class="s3">]</span>
+            <span class="s3">),</span>
+            <span class="s1">OrderedDict</span><span class="s3">(</span>
+                <span class="s3">[</span>
+                    <span class="s3">(</span><span class="s4">&quot;idx&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;A&quot;</span><span class="s3">, </span><span class="s5">2</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;B&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;C&quot;</span><span class="s3">, </span><span class="s4">&quot;2016-01-02T00:00:00.000&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s4">&quot;P0DT1H1M0S&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;E&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;F&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;G&quot;</span><span class="s3">, </span><span class="s5">2.0</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;H&quot;</span><span class="s3">, </span><span class="s4">&quot;2016-01-02T06:00:00.000Z&quot;</span><span class="s3">),</span>
+                <span class="s3">]</span>
+            <span class="s3">),</span>
+            <span class="s1">OrderedDict</span><span class="s3">(</span>
+                <span class="s3">[</span>
+                    <span class="s3">(</span><span class="s4">&quot;idx&quot;</span><span class="s3">, </span><span class="s5">2</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;A&quot;</span><span class="s3">, </span><span class="s5">3</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;B&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;C&quot;</span><span class="s3">, </span><span class="s4">&quot;2016-01-03T00:00:00.000&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s4">&quot;P0DT1H2M0S&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;E&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;F&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;G&quot;</span><span class="s3">, </span><span class="s5">3.0</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;H&quot;</span><span class="s3">, </span><span class="s4">&quot;2016-01-03T06:00:00.000Z&quot;</span><span class="s3">),</span>
+                <span class="s3">]</span>
+            <span class="s3">),</span>
+            <span class="s1">OrderedDict</span><span class="s3">(</span>
+                <span class="s3">[</span>
+                    <span class="s3">(</span><span class="s4">&quot;idx&quot;</span><span class="s3">, </span><span class="s5">3</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;A&quot;</span><span class="s3">, </span><span class="s5">4</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;B&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;C&quot;</span><span class="s3">, </span><span class="s4">&quot;2016-01-04T00:00:00.000&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s4">&quot;P0DT1H3M0S&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;E&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;F&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;G&quot;</span><span class="s3">, </span><span class="s5">4.0</span><span class="s3">),</span>
+                    <span class="s3">(</span><span class="s4">&quot;H&quot;</span><span class="s3">, </span><span class="s4">&quot;2016-01-04T06:00:00.000Z&quot;</span><span class="s3">),</span>
+                <span class="s3">]</span>
+            <span class="s3">),</span>
+        <span class="s3">]</span>
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">OrderedDict</span><span class="s3">([(</span><span class="s4">&quot;schema&quot;</span><span class="s3">, </span><span class="s1">schema</span><span class="s3">), (</span><span class="s4">&quot;data&quot;</span><span class="s3">, </span><span class="s1">data</span><span class="s3">)])</span>
+
+        <span class="s2">assert </span><span class="s1">result </span><span class="s3">== </span><span class="s1">expected</span>
+
+    <span class="s2">def </span><span class="s1">test_to_json_float_index</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">data </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">(</span><span class="s5">1</span><span class="s3">, </span><span class="s1">index</span><span class="s3">=[</span><span class="s5">1.0</span><span class="s3">, </span><span class="s5">2.0</span><span class="s3">])</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">data</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">, </span><span class="s1">date_format</span><span class="s3">=</span><span class="s4">&quot;iso&quot;</span><span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">json</span><span class="s3">.</span><span class="s1">loads</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">object_pairs_hook</span><span class="s3">=</span><span class="s1">OrderedDict</span><span class="s3">)</span>
+        <span class="s1">result</span><span class="s3">[</span><span class="s4">&quot;schema&quot;</span><span class="s3">].</span><span class="s1">pop</span><span class="s3">(</span><span class="s4">&quot;pandas_version&quot;</span><span class="s3">)</span>
+
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">OrderedDict</span><span class="s3">(</span>
+            <span class="s3">[</span>
+                <span class="s3">(</span>
+                    <span class="s4">&quot;schema&quot;</span><span class="s3">,</span>
+                    <span class="s3">{</span>
+                        <span class="s4">&quot;fields&quot;</span><span class="s3">: [</span>
+                            <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;index&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;number&quot;</span><span class="s3">},</span>
+                            <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;values&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;integer&quot;</span><span class="s3">},</span>
+                        <span class="s3">],</span>
+                        <span class="s4">&quot;primaryKey&quot;</span><span class="s3">: [</span><span class="s4">&quot;index&quot;</span><span class="s3">],</span>
+                    <span class="s3">},</span>
+                <span class="s3">),</span>
+                <span class="s3">(</span>
+                    <span class="s4">&quot;data&quot;</span><span class="s3">,</span>
+                    <span class="s3">[</span>
+                        <span class="s1">OrderedDict</span><span class="s3">([(</span><span class="s4">&quot;index&quot;</span><span class="s3">, </span><span class="s5">1.0</span><span class="s3">), (</span><span class="s4">&quot;values&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">)]),</span>
+                        <span class="s1">OrderedDict</span><span class="s3">([(</span><span class="s4">&quot;index&quot;</span><span class="s3">, </span><span class="s5">2.0</span><span class="s3">), (</span><span class="s4">&quot;values&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">)]),</span>
+                    <span class="s3">],</span>
+                <span class="s3">),</span>
+            <span class="s3">]</span>
+        <span class="s3">)</span>
+
+        <span class="s2">assert </span><span class="s1">result </span><span class="s3">== </span><span class="s1">expected</span>
+
+    <span class="s2">def </span><span class="s1">test_to_json_period_index</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">idx </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">period_range</span><span class="s3">(</span><span class="s4">&quot;2016&quot;</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;Q-JAN&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s5">2</span><span class="s3">)</span>
+        <span class="s1">data </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">(</span><span class="s5">1</span><span class="s3">, </span><span class="s1">idx</span><span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">data</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">, </span><span class="s1">date_format</span><span class="s3">=</span><span class="s4">&quot;iso&quot;</span><span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">json</span><span class="s3">.</span><span class="s1">loads</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">object_pairs_hook</span><span class="s3">=</span><span class="s1">OrderedDict</span><span class="s3">)</span>
+        <span class="s1">result</span><span class="s3">[</span><span class="s4">&quot;schema&quot;</span><span class="s3">].</span><span class="s1">pop</span><span class="s3">(</span><span class="s4">&quot;pandas_version&quot;</span><span class="s3">)</span>
+
+        <span class="s1">fields </span><span class="s3">= [</span>
+            <span class="s3">{</span><span class="s4">&quot;freq&quot;</span><span class="s3">: </span><span class="s4">&quot;QE-JAN&quot;</span><span class="s3">, </span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;index&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;datetime&quot;</span><span class="s3">},</span>
+            <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;values&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;integer&quot;</span><span class="s3">},</span>
+        <span class="s3">]</span>
+
+        <span class="s1">schema </span><span class="s3">= {</span><span class="s4">&quot;fields&quot;</span><span class="s3">: </span><span class="s1">fields</span><span class="s3">, </span><span class="s4">&quot;primaryKey&quot;</span><span class="s3">: [</span><span class="s4">&quot;index&quot;</span><span class="s3">]}</span>
+        <span class="s1">data </span><span class="s3">= [</span>
+            <span class="s1">OrderedDict</span><span class="s3">([(</span><span class="s4">&quot;index&quot;</span><span class="s3">, </span><span class="s4">&quot;2015-11-01T00:00:00.000&quot;</span><span class="s3">), (</span><span class="s4">&quot;values&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">)]),</span>
+            <span class="s1">OrderedDict</span><span class="s3">([(</span><span class="s4">&quot;index&quot;</span><span class="s3">, </span><span class="s4">&quot;2016-02-01T00:00:00.000&quot;</span><span class="s3">), (</span><span class="s4">&quot;values&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">)]),</span>
+        <span class="s3">]</span>
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">OrderedDict</span><span class="s3">([(</span><span class="s4">&quot;schema&quot;</span><span class="s3">, </span><span class="s1">schema</span><span class="s3">), (</span><span class="s4">&quot;data&quot;</span><span class="s3">, </span><span class="s1">data</span><span class="s3">)])</span>
+
+        <span class="s2">assert </span><span class="s1">result </span><span class="s3">== </span><span class="s1">expected</span>
+
+    <span class="s2">def </span><span class="s1">test_to_json_categorical_index</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">data </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">(</span><span class="s5">1</span><span class="s3">, </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">CategoricalIndex</span><span class="s3">([</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">]))</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">data</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">, </span><span class="s1">date_format</span><span class="s3">=</span><span class="s4">&quot;iso&quot;</span><span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">json</span><span class="s3">.</span><span class="s1">loads</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">object_pairs_hook</span><span class="s3">=</span><span class="s1">OrderedDict</span><span class="s3">)</span>
+        <span class="s1">result</span><span class="s3">[</span><span class="s4">&quot;schema&quot;</span><span class="s3">].</span><span class="s1">pop</span><span class="s3">(</span><span class="s4">&quot;pandas_version&quot;</span><span class="s3">)</span>
+
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">OrderedDict</span><span class="s3">(</span>
+            <span class="s3">[</span>
+                <span class="s3">(</span>
+                    <span class="s4">&quot;schema&quot;</span><span class="s3">,</span>
+                    <span class="s3">{</span>
+                        <span class="s4">&quot;fields&quot;</span><span class="s3">: [</span>
+                            <span class="s3">{</span>
+                                <span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;index&quot;</span><span class="s3">,</span>
+                                <span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;any&quot;</span><span class="s3">,</span>
+                                <span class="s4">&quot;constraints&quot;</span><span class="s3">: {</span><span class="s4">&quot;enum&quot;</span><span class="s3">: [</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">]},</span>
+                                <span class="s4">&quot;ordered&quot;</span><span class="s3">: </span><span class="s2">False</span><span class="s3">,</span>
+                            <span class="s3">},</span>
+                            <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;values&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;integer&quot;</span><span class="s3">},</span>
+                        <span class="s3">],</span>
+                        <span class="s4">&quot;primaryKey&quot;</span><span class="s3">: [</span><span class="s4">&quot;index&quot;</span><span class="s3">],</span>
+                    <span class="s3">},</span>
+                <span class="s3">),</span>
+                <span class="s3">(</span>
+                    <span class="s4">&quot;data&quot;</span><span class="s3">,</span>
+                    <span class="s3">[</span>
+                        <span class="s1">OrderedDict</span><span class="s3">([(</span><span class="s4">&quot;index&quot;</span><span class="s3">, </span><span class="s4">&quot;a&quot;</span><span class="s3">), (</span><span class="s4">&quot;values&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">)]),</span>
+                        <span class="s1">OrderedDict</span><span class="s3">([(</span><span class="s4">&quot;index&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">), (</span><span class="s4">&quot;values&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">)]),</span>
+                    <span class="s3">],</span>
+                <span class="s3">),</span>
+            <span class="s3">]</span>
+        <span class="s3">)</span>
+
+        <span class="s2">assert </span><span class="s1">result </span><span class="s3">== </span><span class="s1">expected</span>
+
+    <span class="s2">def </span><span class="s1">test_date_format_raises</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">df_table</span><span class="s3">):</span>
+        <span class="s1">error_msg </span><span class="s3">= (</span>
+            <span class="s4">&quot;Trying to write with `orient='table'` and `date_format='epoch'`. Table &quot;</span>
+            <span class="s4">&quot;Schema requires dates to be formatted with `date_format='iso'`&quot;</span>
+        <span class="s3">)</span>
+        <span class="s1">warning_msg </span><span class="s3">= (</span>
+            <span class="s4">&quot;'epoch' date format is deprecated and will be removed in a future &quot;</span>
+            <span class="s4">&quot;version, please use 'iso' date format instead.&quot;</span>
+        <span class="s3">)</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">, </span><span class="s1">match</span><span class="s3">=</span><span class="s1">error_msg</span><span class="s3">):</span>
+            <span class="s2">with </span><span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_produces_warning</span><span class="s3">(</span><span class="s1">Pandas4Warning</span><span class="s3">, </span><span class="s1">match</span><span class="s3">=</span><span class="s1">warning_msg</span><span class="s3">):</span>
+                <span class="s1">df_table</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">, </span><span class="s1">date_format</span><span class="s3">=</span><span class="s4">&quot;epoch&quot;</span><span class="s3">)</span>
+
+        <span class="s6"># others work</span>
+        <span class="s1">df_table</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">, </span><span class="s1">date_format</span><span class="s3">=</span><span class="s4">&quot;iso&quot;</span><span class="s3">)</span>
+        <span class="s1">df_table</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_convert_pandas_type_to_json_field_int</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">index_or_series</span><span class="s3">):</span>
+        <span class="s1">kind </span><span class="s3">= </span><span class="s1">index_or_series</span>
+        <span class="s1">data </span><span class="s3">= [</span><span class="s5">1</span><span class="s3">, </span><span class="s5">2</span><span class="s3">, </span><span class="s5">3</span><span class="s3">]</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">convert_pandas_type_to_json_field</span><span class="s3">(</span><span class="s1">kind</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s4">&quot;name&quot;</span><span class="s3">))</span>
+        <span class="s1">expected </span><span class="s3">= {</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;name&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;integer&quot;</span><span class="s3">}</span>
+        <span class="s2">assert </span><span class="s1">result </span><span class="s3">== </span><span class="s1">expected</span>
+
+    <span class="s2">def </span><span class="s1">test_convert_pandas_type_to_json_field_float</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">index_or_series</span><span class="s3">):</span>
+        <span class="s1">kind </span><span class="s3">= </span><span class="s1">index_or_series</span>
+        <span class="s1">data </span><span class="s3">= [</span><span class="s5">1.0</span><span class="s3">, </span><span class="s5">2.0</span><span class="s3">, </span><span class="s5">3.0</span><span class="s3">]</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">convert_pandas_type_to_json_field</span><span class="s3">(</span><span class="s1">kind</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s4">&quot;name&quot;</span><span class="s3">))</span>
+        <span class="s1">expected </span><span class="s3">= {</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;name&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;number&quot;</span><span class="s3">}</span>
+        <span class="s2">assert </span><span class="s1">result </span><span class="s3">== </span><span class="s1">expected</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+        <span class="s4">&quot;dt_args,extra_exp&quot;</span><span class="s3">, [({}, {}), ({</span><span class="s4">&quot;utc&quot;</span><span class="s3">: </span><span class="s2">True</span><span class="s3">}, {</span><span class="s4">&quot;tz&quot;</span><span class="s3">: </span><span class="s4">&quot;UTC&quot;</span><span class="s3">})]</span>
+    <span class="s3">)</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;wrapper&quot;</span><span class="s3">, [</span><span class="s2">None</span><span class="s3">, </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_convert_pandas_type_to_json_field_datetime</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">dt_args</span><span class="s3">, </span><span class="s1">extra_exp</span><span class="s3">, </span><span class="s1">wrapper</span>
+    <span class="s3">):</span>
+        <span class="s1">data </span><span class="s3">= [</span><span class="s5">1.0</span><span class="s3">, </span><span class="s5">2.0</span><span class="s3">, </span><span class="s5">3.0</span><span class="s3">]</span>
+        <span class="s1">data </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">to_datetime</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, **</span><span class="s1">dt_args</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">wrapper </span><span class="s2">is </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">:</span>
+            <span class="s1">data </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s4">&quot;values&quot;</span><span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">convert_pandas_type_to_json_field</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)</span>
+        <span class="s1">expected </span><span class="s3">= {</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;values&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;datetime&quot;</span><span class="s3">}</span>
+        <span class="s1">expected</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">extra_exp</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">result </span><span class="s3">== </span><span class="s1">expected</span>
+
+    <span class="s2">def </span><span class="s1">test_convert_pandas_type_to_json_period_range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">period_range</span><span class="s3">(</span><span class="s4">&quot;2016&quot;</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;Y-DEC&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s5">4</span><span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">convert_pandas_type_to_json_field</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">)</span>
+        <span class="s1">expected </span><span class="s3">= {</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;values&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;datetime&quot;</span><span class="s3">, </span><span class="s4">&quot;freq&quot;</span><span class="s3">: </span><span class="s4">&quot;YE-DEC&quot;</span><span class="s3">}</span>
+        <span class="s2">assert </span><span class="s1">result </span><span class="s3">== </span><span class="s1">expected</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;kind&quot;</span><span class="s3">, [</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Categorical</span><span class="s3">, </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">CategoricalIndex</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;ordered&quot;</span><span class="s3">, [</span><span class="s2">True</span><span class="s3">, </span><span class="s2">False</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_convert_pandas_type_to_json_field_categorical</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">kind</span><span class="s3">, </span><span class="s1">ordered</span><span class="s3">):</span>
+        <span class="s1">data </span><span class="s3">= [</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">]</span>
+        <span class="s2">if </span><span class="s1">kind </span><span class="s2">is </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Categorical</span><span class="s3">:</span>
+            <span class="s1">arr </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">(</span><span class="s1">kind</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">ordered</span><span class="s3">=</span><span class="s1">ordered</span><span class="s3">), </span><span class="s1">name</span><span class="s3">=</span><span class="s4">&quot;cats&quot;</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">kind </span><span class="s2">is </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">CategoricalIndex</span><span class="s3">:</span>
+            <span class="s1">arr </span><span class="s3">= </span><span class="s1">kind</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">ordered</span><span class="s3">=</span><span class="s1">ordered</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s4">&quot;cats&quot;</span><span class="s3">)</span>
+
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">convert_pandas_type_to_json_field</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">)</span>
+        <span class="s1">expected </span><span class="s3">= {</span>
+            <span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;cats&quot;</span><span class="s3">,</span>
+            <span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;any&quot;</span><span class="s3">,</span>
+            <span class="s4">&quot;constraints&quot;</span><span class="s3">: {</span><span class="s4">&quot;enum&quot;</span><span class="s3">: </span><span class="s1">data</span><span class="s3">},</span>
+            <span class="s4">&quot;ordered&quot;</span><span class="s3">: </span><span class="s1">ordered</span><span class="s3">,</span>
+        <span class="s3">}</span>
+        <span class="s2">assert </span><span class="s1">result </span><span class="s3">== </span><span class="s1">expected</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+        <span class="s4">&quot;inp,exp&quot;</span><span class="s3">,</span>
+        <span class="s3">[</span>
+            <span class="s3">({</span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;integer&quot;</span><span class="s3">}, </span><span class="s4">&quot;int64&quot;</span><span class="s3">),</span>
+            <span class="s3">({</span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;number&quot;</span><span class="s3">}, </span><span class="s4">&quot;float64&quot;</span><span class="s3">),</span>
+            <span class="s3">({</span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;boolean&quot;</span><span class="s3">}, </span><span class="s4">&quot;bool&quot;</span><span class="s3">),</span>
+            <span class="s3">({</span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;duration&quot;</span><span class="s3">}, </span><span class="s4">&quot;timedelta64&quot;</span><span class="s3">),</span>
+            <span class="s3">({</span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;datetime&quot;</span><span class="s3">}, </span><span class="s4">&quot;datetime64[ns]&quot;</span><span class="s3">),</span>
+            <span class="s3">({</span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;datetime&quot;</span><span class="s3">, </span><span class="s4">&quot;tz&quot;</span><span class="s3">: </span><span class="s4">&quot;US/Hawaii&quot;</span><span class="s3">}, </span><span class="s4">&quot;datetime64[ns, US/Hawaii]&quot;</span><span class="s3">),</span>
+            <span class="s3">({</span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;any&quot;</span><span class="s3">}, </span><span class="s4">&quot;object&quot;</span><span class="s3">),</span>
+            <span class="s3">(</span>
+                <span class="s3">{</span>
+                    <span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;any&quot;</span><span class="s3">,</span>
+                    <span class="s4">&quot;constraints&quot;</span><span class="s3">: {</span><span class="s4">&quot;enum&quot;</span><span class="s3">: [</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">]},</span>
+                    <span class="s4">&quot;ordered&quot;</span><span class="s3">: </span><span class="s2">False</span><span class="s3">,</span>
+                <span class="s3">},</span>
+                <span class="s1">CategoricalDtype</span><span class="s3">(</span><span class="s1">categories</span><span class="s3">=[</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">], </span><span class="s1">ordered</span><span class="s3">=</span><span class="s2">False</span><span class="s3">),</span>
+            <span class="s3">),</span>
+            <span class="s3">(</span>
+                <span class="s3">{</span>
+                    <span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;any&quot;</span><span class="s3">,</span>
+                    <span class="s4">&quot;constraints&quot;</span><span class="s3">: {</span><span class="s4">&quot;enum&quot;</span><span class="s3">: [</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">]},</span>
+                    <span class="s4">&quot;ordered&quot;</span><span class="s3">: </span><span class="s2">True</span><span class="s3">,</span>
+                <span class="s3">},</span>
+                <span class="s1">CategoricalDtype</span><span class="s3">(</span><span class="s1">categories</span><span class="s3">=[</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">], </span><span class="s1">ordered</span><span class="s3">=</span><span class="s2">True</span><span class="s3">),</span>
+            <span class="s3">),</span>
+            <span class="s3">({</span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;string&quot;</span><span class="s3">}, </span><span class="s2">None</span><span class="s3">),</span>
+        <span class="s3">],</span>
+    <span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_convert_json_field_to_pandas_type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">inp</span><span class="s3">, </span><span class="s1">exp</span><span class="s3">):</span>
+        <span class="s1">field </span><span class="s3">= {</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;foo&quot;</span><span class="s3">}</span>
+        <span class="s1">field</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">inp</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">convert_json_field_to_pandas_type</span><span class="s3">(</span><span class="s1">field</span><span class="s3">) == </span><span class="s1">exp</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;inp&quot;</span><span class="s3">, [</span><span class="s4">&quot;geopoint&quot;</span><span class="s3">, </span><span class="s4">&quot;geojson&quot;</span><span class="s3">, </span><span class="s4">&quot;fake_type&quot;</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_convert_json_field_to_pandas_type_raises</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">inp</span><span class="s3">):</span>
+        <span class="s1">field </span><span class="s3">= {</span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s1">inp</span><span class="s3">}</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span>
+            <span class="s1">ValueError</span><span class="s3">, </span><span class="s1">match</span><span class="s3">=</span><span class="s4">f&quot;Unsupported or invalid field type: </span><span class="s2">{</span><span class="s1">inp</span><span class="s2">}</span><span class="s4">&quot;</span>
+        <span class="s3">):</span>
+            <span class="s1">convert_json_field_to_pandas_type</span><span class="s3">(</span><span class="s1">field</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_categorical</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">s </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">(</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Categorical</span><span class="s3">([</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;a&quot;</span><span class="s3">]))</span>
+        <span class="s1">s</span><span class="s3">.</span><span class="s1">index</span><span class="s3">.</span><span class="s1">name </span><span class="s3">= </span><span class="s4">&quot;idx&quot;</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">s</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">, </span><span class="s1">date_format</span><span class="s3">=</span><span class="s4">&quot;iso&quot;</span><span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">json</span><span class="s3">.</span><span class="s1">loads</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">object_pairs_hook</span><span class="s3">=</span><span class="s1">OrderedDict</span><span class="s3">)</span>
+        <span class="s1">result</span><span class="s3">[</span><span class="s4">&quot;schema&quot;</span><span class="s3">].</span><span class="s1">pop</span><span class="s3">(</span><span class="s4">&quot;pandas_version&quot;</span><span class="s3">)</span>
+
+        <span class="s1">fields </span><span class="s3">= [</span>
+            <span class="s3">{</span><span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;idx&quot;</span><span class="s3">, </span><span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;integer&quot;</span><span class="s3">},</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;constraints&quot;</span><span class="s3">: {</span><span class="s4">&quot;enum&quot;</span><span class="s3">: [</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">]},</span>
+                <span class="s4">&quot;name&quot;</span><span class="s3">: </span><span class="s4">&quot;values&quot;</span><span class="s3">,</span>
+                <span class="s4">&quot;ordered&quot;</span><span class="s3">: </span><span class="s2">False</span><span class="s3">,</span>
+                <span class="s4">&quot;type&quot;</span><span class="s3">: </span><span class="s4">&quot;any&quot;</span><span class="s3">,</span>
+            <span class="s3">},</span>
+        <span class="s3">]</span>
+
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">OrderedDict</span><span class="s3">(</span>
+            <span class="s3">[</span>
+                <span class="s3">(</span><span class="s4">&quot;schema&quot;</span><span class="s3">, {</span><span class="s4">&quot;fields&quot;</span><span class="s3">: </span><span class="s1">fields</span><span class="s3">, </span><span class="s4">&quot;primaryKey&quot;</span><span class="s3">: [</span><span class="s4">&quot;idx&quot;</span><span class="s3">]}),</span>
+                <span class="s3">(</span>
+                    <span class="s4">&quot;data&quot;</span><span class="s3">,</span>
+                    <span class="s3">[</span>
+                        <span class="s1">OrderedDict</span><span class="s3">([(</span><span class="s4">&quot;idx&quot;</span><span class="s3">, </span><span class="s5">0</span><span class="s3">), (</span><span class="s4">&quot;values&quot;</span><span class="s3">, </span><span class="s4">&quot;a&quot;</span><span class="s3">)]),</span>
+                        <span class="s1">OrderedDict</span><span class="s3">([(</span><span class="s4">&quot;idx&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">), (</span><span class="s4">&quot;values&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">)]),</span>
+                        <span class="s1">OrderedDict</span><span class="s3">([(</span><span class="s4">&quot;idx&quot;</span><span class="s3">, </span><span class="s5">2</span><span class="s3">), (</span><span class="s4">&quot;values&quot;</span><span class="s3">, </span><span class="s4">&quot;a&quot;</span><span class="s3">)]),</span>
+                    <span class="s3">],</span>
+                <span class="s3">),</span>
+            <span class="s3">]</span>
+        <span class="s3">)</span>
+
+        <span class="s2">assert </span><span class="s1">result </span><span class="s3">== </span><span class="s1">expected</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+        <span class="s4">&quot;idx,nm,prop&quot;</span><span class="s3">,</span>
+        <span class="s3">[</span>
+            <span class="s3">(</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Index</span><span class="s3">([</span><span class="s5">1</span><span class="s3">]), </span><span class="s4">&quot;index&quot;</span><span class="s3">, </span><span class="s4">&quot;name&quot;</span><span class="s3">),</span>
+            <span class="s3">(</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Index</span><span class="s3">([</span><span class="s5">1</span><span class="s3">], </span><span class="s1">name</span><span class="s3">=</span><span class="s4">&quot;myname&quot;</span><span class="s3">), </span><span class="s4">&quot;myname&quot;</span><span class="s3">, </span><span class="s4">&quot;name&quot;</span><span class="s3">),</span>
+            <span class="s3">(</span>
+                <span class="s1">pd</span><span class="s3">.</span><span class="s1">MultiIndex</span><span class="s3">.</span><span class="s1">from_product</span><span class="s3">([(</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">), (</span><span class="s4">&quot;c&quot;</span><span class="s3">, </span><span class="s4">&quot;d&quot;</span><span class="s3">)]),</span>
+                <span class="s3">[</span><span class="s4">&quot;level_0&quot;</span><span class="s3">, </span><span class="s4">&quot;level_1&quot;</span><span class="s3">],</span>
+                <span class="s4">&quot;names&quot;</span><span class="s3">,</span>
+            <span class="s3">),</span>
+            <span class="s3">(</span>
+                <span class="s1">pd</span><span class="s3">.</span><span class="s1">MultiIndex</span><span class="s3">.</span><span class="s1">from_product</span><span class="s3">(</span>
+                    <span class="s3">[(</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">), (</span><span class="s4">&quot;c&quot;</span><span class="s3">, </span><span class="s4">&quot;d&quot;</span><span class="s3">)], </span><span class="s1">names</span><span class="s3">=[</span><span class="s4">&quot;n1&quot;</span><span class="s3">, </span><span class="s4">&quot;n2&quot;</span><span class="s3">]</span>
+                <span class="s3">),</span>
+                <span class="s3">[</span><span class="s4">&quot;n1&quot;</span><span class="s3">, </span><span class="s4">&quot;n2&quot;</span><span class="s3">],</span>
+                <span class="s4">&quot;names&quot;</span><span class="s3">,</span>
+            <span class="s3">),</span>
+            <span class="s3">(</span>
+                <span class="s1">pd</span><span class="s3">.</span><span class="s1">MultiIndex</span><span class="s3">.</span><span class="s1">from_product</span><span class="s3">(</span>
+                    <span class="s3">[(</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">), (</span><span class="s4">&quot;c&quot;</span><span class="s3">, </span><span class="s4">&quot;d&quot;</span><span class="s3">)], </span><span class="s1">names</span><span class="s3">=[</span><span class="s4">&quot;n1&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">]</span>
+                <span class="s3">),</span>
+                <span class="s3">[</span><span class="s4">&quot;n1&quot;</span><span class="s3">, </span><span class="s4">&quot;level_1&quot;</span><span class="s3">],</span>
+                <span class="s4">&quot;names&quot;</span><span class="s3">,</span>
+            <span class="s3">),</span>
+        <span class="s3">],</span>
+    <span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_set_names_unset</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">idx</span><span class="s3">, </span><span class="s1">nm</span><span class="s3">, </span><span class="s1">prop</span><span class="s3">):</span>
+        <span class="s1">data </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">(</span><span class="s5">1</span><span class="s3">, </span><span class="s1">idx</span><span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">set_default_names</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">result</span><span class="s3">.</span><span class="s1">index</span><span class="s3">, </span><span class="s1">prop</span><span class="s3">) == </span><span class="s1">nm</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+        <span class="s4">&quot;idx&quot;</span><span class="s3">,</span>
+        <span class="s3">[</span>
+            <span class="s1">pd</span><span class="s3">.</span><span class="s1">Index</span><span class="s3">([], </span><span class="s1">name</span><span class="s3">=</span><span class="s4">&quot;index&quot;</span><span class="s3">),</span>
+            <span class="s1">pd</span><span class="s3">.</span><span class="s1">MultiIndex</span><span class="s3">.</span><span class="s1">from_arrays</span><span class="s3">([[</span><span class="s4">&quot;foo&quot;</span><span class="s3">], [</span><span class="s4">&quot;bar&quot;</span><span class="s3">]], </span><span class="s1">names</span><span class="s3">=(</span><span class="s4">&quot;level_0&quot;</span><span class="s3">, </span><span class="s4">&quot;level_1&quot;</span><span class="s3">)),</span>
+            <span class="s1">pd</span><span class="s3">.</span><span class="s1">MultiIndex</span><span class="s3">.</span><span class="s1">from_arrays</span><span class="s3">([[</span><span class="s4">&quot;foo&quot;</span><span class="s3">], [</span><span class="s4">&quot;bar&quot;</span><span class="s3">]], </span><span class="s1">names</span><span class="s3">=(</span><span class="s4">&quot;foo&quot;</span><span class="s3">, </span><span class="s4">&quot;level_1&quot;</span><span class="s3">)),</span>
+        <span class="s3">],</span>
+    <span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_warns_non_roundtrippable_names</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">idx</span><span class="s3">):</span>
+        <span class="s6"># GH 19130</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">DataFrame</span><span class="s3">(</span><span class="s1">index</span><span class="s3">=</span><span class="s1">idx</span><span class="s3">)</span>
+        <span class="s1">df</span><span class="s3">.</span><span class="s1">index</span><span class="s3">.</span><span class="s1">name </span><span class="s3">= </span><span class="s4">&quot;index&quot;</span>
+        <span class="s2">with </span><span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_produces_warning</span><span class="s3">(</span><span class="s1">UserWarning</span><span class="s3">, </span><span class="s1">match</span><span class="s3">=</span><span class="s4">&quot;not round-trippable&quot;</span><span class="s3">):</span>
+            <span class="s1">set_default_names</span><span class="s3">(</span><span class="s1">df</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_timestamp_in_columns</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">DataFrame</span><span class="s3">(</span>
+            <span class="s3">[[</span><span class="s5">1</span><span class="s3">, </span><span class="s5">2</span><span class="s3">]], </span><span class="s1">columns</span><span class="s3">=[</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Timestamp</span><span class="s3">(</span><span class="s4">&quot;2016&quot;</span><span class="s3">), </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Timedelta</span><span class="s3">(</span><span class="s5">10</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">=</span><span class="s4">&quot;s&quot;</span><span class="s3">)]</span>
+        <span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">df</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">)</span>
+        <span class="s1">js </span><span class="s3">= </span><span class="s1">json</span><span class="s3">.</span><span class="s1">loads</span><span class="s3">(</span><span class="s1">result</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">js</span><span class="s3">[</span><span class="s4">&quot;schema&quot;</span><span class="s3">][</span><span class="s4">&quot;fields&quot;</span><span class="s3">][</span><span class="s5">1</span><span class="s3">][</span><span class="s4">&quot;name&quot;</span><span class="s3">] == </span><span class="s4">&quot;2016-01-01T00:00:00.000&quot;</span>
+        <span class="s2">assert </span><span class="s1">js</span><span class="s3">[</span><span class="s4">&quot;schema&quot;</span><span class="s3">][</span><span class="s4">&quot;fields&quot;</span><span class="s3">][</span><span class="s5">2</span><span class="s3">][</span><span class="s4">&quot;name&quot;</span><span class="s3">] == </span><span class="s4">&quot;P0DT0H0M10S&quot;</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+        <span class="s4">&quot;case&quot;</span><span class="s3">,</span>
+        <span class="s3">[</span>
+            <span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">([</span><span class="s5">1</span><span class="s3">], </span><span class="s1">index</span><span class="s3">=</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Index</span><span class="s3">([</span><span class="s5">1</span><span class="s3">], </span><span class="s1">name</span><span class="s3">=</span><span class="s4">&quot;a&quot;</span><span class="s3">), </span><span class="s1">name</span><span class="s3">=</span><span class="s4">&quot;a&quot;</span><span class="s3">),</span>
+            <span class="s1">DataFrame</span><span class="s3">({</span><span class="s4">&quot;A&quot;</span><span class="s3">: [</span><span class="s5">1</span><span class="s3">]}, </span><span class="s1">index</span><span class="s3">=</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Index</span><span class="s3">([</span><span class="s5">1</span><span class="s3">], </span><span class="s1">name</span><span class="s3">=</span><span class="s4">&quot;A&quot;</span><span class="s3">)),</span>
+            <span class="s1">DataFrame</span><span class="s3">(</span>
+                <span class="s3">{</span><span class="s4">&quot;A&quot;</span><span class="s3">: [</span><span class="s5">1</span><span class="s3">]},</span>
+                <span class="s1">index</span><span class="s3">=</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">MultiIndex</span><span class="s3">.</span><span class="s1">from_arrays</span><span class="s3">([[</span><span class="s4">&quot;a&quot;</span><span class="s3">], [</span><span class="s5">1</span><span class="s3">]], </span><span class="s1">names</span><span class="s3">=[</span><span class="s4">&quot;A&quot;</span><span class="s3">, </span><span class="s4">&quot;a&quot;</span><span class="s3">]),</span>
+            <span class="s3">),</span>
+        <span class="s3">],</span>
+    <span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_overlapping_names</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">case</span><span class="s3">):</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">, </span><span class="s1">match</span><span class="s3">=</span><span class="s4">&quot;Overlapping&quot;</span><span class="s3">):</span>
+            <span class="s1">case</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_mi_falsey_name</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s6"># GH 16203</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">DataFrame</span><span class="s3">(</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">random</span><span class="s3">.</span><span class="s1">default_rng</span><span class="s3">(</span><span class="s5">2</span><span class="s3">).</span><span class="s1">standard_normal</span><span class="s3">((</span><span class="s5">4</span><span class="s3">, </span><span class="s5">4</span><span class="s3">)),</span>
+            <span class="s1">index</span><span class="s3">=</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">MultiIndex</span><span class="s3">.</span><span class="s1">from_product</span><span class="s3">([(</span><span class="s4">&quot;A&quot;</span><span class="s3">, </span><span class="s4">&quot;B&quot;</span><span class="s3">), (</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">)]),</span>
+        <span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= [</span><span class="s1">x</span><span class="s3">[</span><span class="s4">&quot;name&quot;</span><span class="s3">] </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">build_table_schema</span><span class="s3">(</span><span class="s1">df</span><span class="s3">)[</span><span class="s4">&quot;fields&quot;</span><span class="s3">]]</span>
+        <span class="s2">assert </span><span class="s1">result </span><span class="s3">== [</span><span class="s4">&quot;level_0&quot;</span><span class="s3">, </span><span class="s4">&quot;level_1&quot;</span><span class="s3">, </span><span class="s5">0</span><span class="s3">, </span><span class="s5">1</span><span class="s3">, </span><span class="s5">2</span><span class="s3">, </span><span class="s5">3</span><span class="s3">]</span>
+
+
+<span class="s2">class </span><span class="s1">TestTableOrientReader</span><span class="s3">:</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+        <span class="s4">&quot;index_nm&quot;</span><span class="s3">,</span>
+        <span class="s3">[</span><span class="s2">None</span><span class="s3">, </span><span class="s4">&quot;idx&quot;</span><span class="s3">, </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">param</span><span class="s3">(</span><span class="s4">&quot;index&quot;</span><span class="s3">, </span><span class="s1">marks</span><span class="s3">=</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">xfail</span><span class="s3">), </span><span class="s4">&quot;level_0&quot;</span><span class="s3">],</span>
+    <span class="s3">)</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+        <span class="s4">&quot;vals&quot;</span><span class="s3">,</span>
+        <span class="s3">[</span>
+            <span class="s3">{</span><span class="s4">&quot;ints&quot;</span><span class="s3">: [</span><span class="s5">1</span><span class="s3">, </span><span class="s5">2</span><span class="s3">, </span><span class="s5">3</span><span class="s3">, </span><span class="s5">4</span><span class="s3">]},</span>
+            <span class="s3">{</span><span class="s4">&quot;objects&quot;</span><span class="s3">: [</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">, </span><span class="s4">&quot;d&quot;</span><span class="s3">]},</span>
+            <span class="s3">{</span><span class="s4">&quot;objects&quot;</span><span class="s3">: [</span><span class="s4">&quot;1&quot;</span><span class="s3">, </span><span class="s4">&quot;2&quot;</span><span class="s3">, </span><span class="s4">&quot;3&quot;</span><span class="s3">, </span><span class="s4">&quot;4&quot;</span><span class="s3">]},</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;date_ranges&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">date_range</span><span class="s3">(</span>
+                    <span class="s4">&quot;2016-01-01&quot;</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s5">4</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">=</span><span class="s4">&quot;ns&quot;</span>
+                <span class="s3">)</span>
+            <span class="s3">},</span>
+            <span class="s3">{</span><span class="s4">&quot;categoricals&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">(</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Categorical</span><span class="s3">([</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">]))},</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;ordered_cats&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">(</span>
+                    <span class="s1">pd</span><span class="s3">.</span><span class="s1">Categorical</span><span class="s3">([</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">], </span><span class="s1">ordered</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+                <span class="s3">)</span>
+            <span class="s3">},</span>
+            <span class="s3">{</span><span class="s4">&quot;floats&quot;</span><span class="s3">: [</span><span class="s5">1.0</span><span class="s3">, </span><span class="s5">2.0</span><span class="s3">, </span><span class="s5">3.0</span><span class="s3">, </span><span class="s5">4.0</span><span class="s3">]},</span>
+            <span class="s3">{</span><span class="s4">&quot;floats&quot;</span><span class="s3">: [</span><span class="s5">1.1</span><span class="s3">, </span><span class="s5">2.2</span><span class="s3">, </span><span class="s5">3.3</span><span class="s3">, </span><span class="s5">4.4</span><span class="s3">]},</span>
+            <span class="s3">{</span><span class="s4">&quot;bools&quot;</span><span class="s3">: [</span><span class="s2">True</span><span class="s3">, </span><span class="s2">False</span><span class="s3">, </span><span class="s2">False</span><span class="s3">, </span><span class="s2">True</span><span class="s3">]},</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;timezones&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">date_range</span><span class="s3">(</span>
+                    <span class="s4">&quot;2016-01-01&quot;</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s5">4</span><span class="s3">, </span><span class="s1">tz</span><span class="s3">=</span><span class="s4">&quot;US/Central&quot;</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">=</span><span class="s4">&quot;ns&quot;</span>
+                <span class="s3">)  </span><span class="s6"># added in # GH 35973</span>
+            <span class="s3">},</span>
+        <span class="s3">],</span>
+    <span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_read_json_table_orient</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">index_nm</span><span class="s3">, </span><span class="s1">vals</span><span class="s3">):</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">DataFrame</span><span class="s3">(</span><span class="s1">vals</span><span class="s3">, </span><span class="s1">index</span><span class="s3">=</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Index</span><span class="s3">(</span><span class="s1">range</span><span class="s3">(</span><span class="s5">4</span><span class="s3">), </span><span class="s1">name</span><span class="s3">=</span><span class="s1">index_nm</span><span class="s3">))</span>
+        <span class="s1">out </span><span class="s3">= </span><span class="s1">StringIO</span><span class="s3">(</span><span class="s1">df</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">))</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">read_json</span><span class="s3">(</span><span class="s1">out</span><span class="s3">, </span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">df</span><span class="s3">, </span><span class="s1">result</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+        <span class="s4">&quot;index_nm&quot;</span><span class="s3">,</span>
+        <span class="s3">[</span>
+            <span class="s2">None</span><span class="s3">,</span>
+            <span class="s4">&quot;idx&quot;</span><span class="s3">,</span>
+            <span class="s1">pytest</span><span class="s3">.</span><span class="s1">param</span><span class="s3">(</span>
+                <span class="s4">&quot;index&quot;</span><span class="s3">,</span>
+                <span class="s1">marks</span><span class="s3">=</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">filterwarnings</span><span class="s3">(</span><span class="s4">&quot;ignore:Index name:UserWarning&quot;</span><span class="s3">),</span>
+            <span class="s3">),</span>
+        <span class="s3">],</span>
+    <span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_read_json_table_orient_raises</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">index_nm</span><span class="s3">):</span>
+        <span class="s1">vals </span><span class="s3">= {</span><span class="s4">&quot;timedeltas&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">timedelta_range</span><span class="s3">(</span><span class="s4">&quot;1h&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s5">4</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;min&quot;</span><span class="s3">)}</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">DataFrame</span><span class="s3">(</span><span class="s1">vals</span><span class="s3">, </span><span class="s1">index</span><span class="s3">=</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Index</span><span class="s3">(</span><span class="s1">range</span><span class="s3">(</span><span class="s5">4</span><span class="s3">), </span><span class="s1">name</span><span class="s3">=</span><span class="s1">index_nm</span><span class="s3">))</span>
+        <span class="s1">out </span><span class="s3">= </span><span class="s1">StringIO</span><span class="s3">(</span><span class="s1">df</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">))</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">NotImplementedError</span><span class="s3">, </span><span class="s1">match</span><span class="s3">=</span><span class="s4">&quot;can not yet read &quot;</span><span class="s3">):</span>
+            <span class="s1">pd</span><span class="s3">.</span><span class="s1">read_json</span><span class="s3">(</span><span class="s1">out</span><span class="s3">, </span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+        <span class="s4">&quot;index_nm&quot;</span><span class="s3">,</span>
+        <span class="s3">[</span><span class="s2">None</span><span class="s3">, </span><span class="s4">&quot;idx&quot;</span><span class="s3">, </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">param</span><span class="s3">(</span><span class="s4">&quot;index&quot;</span><span class="s3">, </span><span class="s1">marks</span><span class="s3">=</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">xfail</span><span class="s3">), </span><span class="s4">&quot;level_0&quot;</span><span class="s3">],</span>
+    <span class="s3">)</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+        <span class="s4">&quot;vals&quot;</span><span class="s3">,</span>
+        <span class="s3">[</span>
+            <span class="s3">{</span><span class="s4">&quot;ints&quot;</span><span class="s3">: [</span><span class="s5">1</span><span class="s3">, </span><span class="s5">2</span><span class="s3">, </span><span class="s5">3</span><span class="s3">, </span><span class="s5">4</span><span class="s3">]},</span>
+            <span class="s3">{</span><span class="s4">&quot;objects&quot;</span><span class="s3">: [</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">, </span><span class="s4">&quot;d&quot;</span><span class="s3">]},</span>
+            <span class="s3">{</span><span class="s4">&quot;objects&quot;</span><span class="s3">: [</span><span class="s4">&quot;1&quot;</span><span class="s3">, </span><span class="s4">&quot;2&quot;</span><span class="s3">, </span><span class="s4">&quot;3&quot;</span><span class="s3">, </span><span class="s4">&quot;4&quot;</span><span class="s3">]},</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;date_ranges&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">date_range</span><span class="s3">(</span>
+                    <span class="s4">&quot;2016-01-01&quot;</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s5">4</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">=</span><span class="s4">&quot;ns&quot;</span>
+                <span class="s3">)</span>
+            <span class="s3">},</span>
+            <span class="s3">{</span><span class="s4">&quot;categoricals&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">(</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Categorical</span><span class="s3">([</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">]))},</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;ordered_cats&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">(</span>
+                    <span class="s1">pd</span><span class="s3">.</span><span class="s1">Categorical</span><span class="s3">([</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">], </span><span class="s1">ordered</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+                <span class="s3">)</span>
+            <span class="s3">},</span>
+            <span class="s3">{</span><span class="s4">&quot;floats&quot;</span><span class="s3">: [</span><span class="s5">1.0</span><span class="s3">, </span><span class="s5">2.0</span><span class="s3">, </span><span class="s5">3.0</span><span class="s3">, </span><span class="s5">4.0</span><span class="s3">]},</span>
+            <span class="s3">{</span><span class="s4">&quot;floats&quot;</span><span class="s3">: [</span><span class="s5">1.1</span><span class="s3">, </span><span class="s5">2.2</span><span class="s3">, </span><span class="s5">3.3</span><span class="s3">, </span><span class="s5">4.4</span><span class="s3">]},</span>
+            <span class="s3">{</span><span class="s4">&quot;bools&quot;</span><span class="s3">: [</span><span class="s2">True</span><span class="s3">, </span><span class="s2">False</span><span class="s3">, </span><span class="s2">False</span><span class="s3">, </span><span class="s2">True</span><span class="s3">]},</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;timezones&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">date_range</span><span class="s3">(</span>
+                    <span class="s4">&quot;2016-01-01&quot;</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s5">4</span><span class="s3">, </span><span class="s1">tz</span><span class="s3">=</span><span class="s4">&quot;US/Central&quot;</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">=</span><span class="s4">&quot;ns&quot;</span>
+                <span class="s3">)  </span><span class="s6"># added in # GH 35973</span>
+            <span class="s3">},</span>
+        <span class="s3">],</span>
+    <span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_read_json_table_period_orient</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">index_nm</span><span class="s3">, </span><span class="s1">vals</span><span class="s3">):</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">DataFrame</span><span class="s3">(</span>
+            <span class="s1">vals</span><span class="s3">,</span>
+            <span class="s1">index</span><span class="s3">=</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Index</span><span class="s3">(</span>
+                <span class="s3">(</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Period</span><span class="s3">(</span><span class="s4">f&quot;2022Q</span><span class="s2">{</span><span class="s1">q</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">) </span><span class="s2">for </span><span class="s1">q </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s5">1</span><span class="s3">, </span><span class="s5">5</span><span class="s3">)), </span><span class="s1">name</span><span class="s3">=</span><span class="s1">index_nm</span>
+            <span class="s3">),</span>
+        <span class="s3">)</span>
+        <span class="s1">out </span><span class="s3">= </span><span class="s1">StringIO</span><span class="s3">(</span><span class="s1">df</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">))</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">read_json</span><span class="s3">(</span><span class="s1">out</span><span class="s3">, </span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">df</span><span class="s3">, </span><span class="s1">result</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+        <span class="s4">&quot;idx&quot;</span><span class="s3">,</span>
+        <span class="s3">[</span>
+            <span class="s1">pd</span><span class="s3">.</span><span class="s1">Index</span><span class="s3">(</span><span class="s1">range</span><span class="s3">(</span><span class="s5">4</span><span class="s3">)),</span>
+            <span class="s1">pd</span><span class="s3">.</span><span class="s1">date_range</span><span class="s3">(</span>
+                <span class="s4">&quot;2020-08-30&quot;</span><span class="s3">,</span>
+                <span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;D&quot;</span><span class="s3">,</span>
+                <span class="s1">periods</span><span class="s3">=</span><span class="s5">4</span><span class="s3">,</span>
+                <span class="s1">unit</span><span class="s3">=</span><span class="s4">&quot;ns&quot;</span><span class="s3">,</span>
+            <span class="s3">).</span><span class="s1">_with_freq</span><span class="s3">(</span><span class="s2">None</span><span class="s3">),</span>
+            <span class="s1">pd</span><span class="s3">.</span><span class="s1">date_range</span><span class="s3">(</span>
+                <span class="s4">&quot;2020-08-30&quot;</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s5">4</span><span class="s3">, </span><span class="s1">tz</span><span class="s3">=</span><span class="s4">&quot;US/Central&quot;</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">=</span><span class="s4">&quot;ns&quot;</span>
+            <span class="s3">).</span><span class="s1">_with_freq</span><span class="s3">(</span><span class="s2">None</span><span class="s3">),</span>
+            <span class="s1">pd</span><span class="s3">.</span><span class="s1">MultiIndex</span><span class="s3">.</span><span class="s1">from_product</span><span class="s3">(</span>
+                <span class="s3">[</span>
+                    <span class="s1">pd</span><span class="s3">.</span><span class="s1">date_range</span><span class="s3">(</span>
+                        <span class="s4">&quot;2020-08-30&quot;</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s5">2</span><span class="s3">, </span><span class="s1">tz</span><span class="s3">=</span><span class="s4">&quot;US/Central&quot;</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">=</span><span class="s4">&quot;ns&quot;</span>
+                    <span class="s3">),</span>
+                    <span class="s3">[</span><span class="s4">&quot;x&quot;</span><span class="s3">, </span><span class="s4">&quot;y&quot;</span><span class="s3">],</span>
+                <span class="s3">],</span>
+            <span class="s3">),</span>
+        <span class="s3">],</span>
+    <span class="s3">)</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+        <span class="s4">&quot;vals&quot;</span><span class="s3">,</span>
+        <span class="s3">[</span>
+            <span class="s3">{</span><span class="s4">&quot;floats&quot;</span><span class="s3">: [</span><span class="s5">1.1</span><span class="s3">, </span><span class="s5">2.2</span><span class="s3">, </span><span class="s5">3.3</span><span class="s3">, </span><span class="s5">4.4</span><span class="s3">]},</span>
+            <span class="s3">{</span><span class="s4">&quot;dates&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">date_range</span><span class="s3">(</span><span class="s4">&quot;2020-08-30&quot;</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s5">4</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">=</span><span class="s4">&quot;ns&quot;</span><span class="s3">)},</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;timezones&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">date_range</span><span class="s3">(</span>
+                    <span class="s4">&quot;2020-08-30&quot;</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s5">4</span><span class="s3">, </span><span class="s1">tz</span><span class="s3">=</span><span class="s4">&quot;Europe/London&quot;</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">=</span><span class="s4">&quot;ns&quot;</span>
+                <span class="s3">)</span>
+            <span class="s3">},</span>
+        <span class="s3">],</span>
+    <span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_read_json_table_timezones_orient</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">idx</span><span class="s3">, </span><span class="s1">vals</span><span class="s3">):</span>
+        <span class="s6"># GH 35973</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">DataFrame</span><span class="s3">(</span><span class="s1">vals</span><span class="s3">, </span><span class="s1">index</span><span class="s3">=</span><span class="s1">idx</span><span class="s3">)</span>
+        <span class="s1">out </span><span class="s3">= </span><span class="s1">StringIO</span><span class="s3">(</span><span class="s1">df</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">))</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">read_json</span><span class="s3">(</span><span class="s1">out</span><span class="s3">, </span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">df</span><span class="s3">, </span><span class="s1">result</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_comprehensive</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">DataFrame</span><span class="s3">(</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;A&quot;</span><span class="s3">: [</span><span class="s5">1</span><span class="s3">, </span><span class="s5">2</span><span class="s3">, </span><span class="s5">3</span><span class="s3">, </span><span class="s5">4</span><span class="s3">],</span>
+                <span class="s4">&quot;B&quot;</span><span class="s3">: [</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">],</span>
+                <span class="s4">&quot;C&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">date_range</span><span class="s3">(</span><span class="s4">&quot;2016-01-01&quot;</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s5">4</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">=</span><span class="s4">&quot;ns&quot;</span><span class="s3">),</span>
+                <span class="s6"># 'D': pd.timedelta_range('1h', periods=4, freq='min'),</span>
+                <span class="s4">&quot;E&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">(</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Categorical</span><span class="s3">([</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">])),</span>
+                <span class="s4">&quot;F&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">(</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Categorical</span><span class="s3">([</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">], </span><span class="s1">ordered</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)),</span>
+                <span class="s4">&quot;G&quot;</span><span class="s3">: [</span><span class="s5">1.1</span><span class="s3">, </span><span class="s5">2.2</span><span class="s3">, </span><span class="s5">3.3</span><span class="s3">, </span><span class="s5">4.4</span><span class="s3">],</span>
+                <span class="s4">&quot;H&quot;</span><span class="s3">: </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">date_range</span><span class="s3">(</span>
+                    <span class="s4">&quot;2016-01-01&quot;</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">=</span><span class="s4">&quot;D&quot;</span><span class="s3">, </span><span class="s1">periods</span><span class="s3">=</span><span class="s5">4</span><span class="s3">, </span><span class="s1">tz</span><span class="s3">=</span><span class="s4">&quot;US/Central&quot;</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">=</span><span class="s4">&quot;ns&quot;</span>
+                <span class="s3">),</span>
+                <span class="s4">&quot;I&quot;</span><span class="s3">: [</span><span class="s2">True</span><span class="s3">, </span><span class="s2">False</span><span class="s3">, </span><span class="s2">False</span><span class="s3">, </span><span class="s2">True</span><span class="s3">],</span>
+            <span class="s3">},</span>
+            <span class="s1">index</span><span class="s3">=</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Index</span><span class="s3">(</span><span class="s1">range</span><span class="s3">(</span><span class="s5">4</span><span class="s3">), </span><span class="s1">name</span><span class="s3">=</span><span class="s4">&quot;idx&quot;</span><span class="s3">),</span>
+        <span class="s3">)</span>
+
+        <span class="s1">out </span><span class="s3">= </span><span class="s1">StringIO</span><span class="s3">(</span><span class="s1">df</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">))</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">read_json</span><span class="s3">(</span><span class="s1">out</span><span class="s3">, </span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">df</span><span class="s3">, </span><span class="s1">result</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+        <span class="s4">&quot;index_names&quot;</span><span class="s3">,</span>
+        <span class="s3">[[</span><span class="s2">None</span><span class="s3">, </span><span class="s2">None</span><span class="s3">], [</span><span class="s4">&quot;foo&quot;</span><span class="s3">, </span><span class="s4">&quot;bar&quot;</span><span class="s3">], [</span><span class="s4">&quot;foo&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">], [</span><span class="s2">None</span><span class="s3">, </span><span class="s4">&quot;foo&quot;</span><span class="s3">], [</span><span class="s4">&quot;index&quot;</span><span class="s3">, </span><span class="s4">&quot;foo&quot;</span><span class="s3">]],</span>
+    <span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_multiindex</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">index_names</span><span class="s3">):</span>
+        <span class="s6"># GH 18912</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">DataFrame</span><span class="s3">(</span>
+            <span class="s3">[[</span><span class="s4">&quot;Arr&quot;</span><span class="s3">, </span><span class="s4">&quot;alpha&quot;</span><span class="s3">, [</span><span class="s5">1</span><span class="s3">, </span><span class="s5">2</span><span class="s3">, </span><span class="s5">3</span><span class="s3">, </span><span class="s5">4</span><span class="s3">]], [</span><span class="s4">&quot;Bee&quot;</span><span class="s3">, </span><span class="s4">&quot;Beta&quot;</span><span class="s3">, [</span><span class="s5">10</span><span class="s3">, </span><span class="s5">20</span><span class="s3">, </span><span class="s5">30</span><span class="s3">, </span><span class="s5">40</span><span class="s3">]]],</span>
+            <span class="s1">index</span><span class="s3">=[[</span><span class="s4">&quot;A&quot;</span><span class="s3">, </span><span class="s4">&quot;B&quot;</span><span class="s3">], [</span><span class="s4">&quot;Null&quot;</span><span class="s3">, </span><span class="s4">&quot;Eins&quot;</span><span class="s3">]],</span>
+            <span class="s1">columns</span><span class="s3">=[</span><span class="s4">&quot;Aussprache&quot;</span><span class="s3">, </span><span class="s4">&quot;Griechisch&quot;</span><span class="s3">, </span><span class="s4">&quot;Args&quot;</span><span class="s3">],</span>
+        <span class="s3">)</span>
+        <span class="s1">df</span><span class="s3">.</span><span class="s1">index</span><span class="s3">.</span><span class="s1">names </span><span class="s3">= </span><span class="s1">index_names</span>
+        <span class="s1">out </span><span class="s3">= </span><span class="s1">StringIO</span><span class="s3">(</span><span class="s1">df</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">))</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">read_json</span><span class="s3">(</span><span class="s1">out</span><span class="s3">, </span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">df</span><span class="s3">, </span><span class="s1">result</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_empty_frame_roundtrip</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s6"># GH 21287</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">DataFrame</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">=[</span><span class="s4">&quot;a&quot;</span><span class="s3">, </span><span class="s4">&quot;b&quot;</span><span class="s3">, </span><span class="s4">&quot;c&quot;</span><span class="s3">])</span>
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">df</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+        <span class="s1">out </span><span class="s3">= </span><span class="s1">StringIO</span><span class="s3">(</span><span class="s1">df</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">))</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">read_json</span><span class="s3">(</span><span class="s1">out</span><span class="s3">, </span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">expected</span><span class="s3">, </span><span class="s1">result</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_read_json_orient_table_old_schema_version</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">df_json </span><span class="s3">= </span><span class="s4">&quot;&quot;&quot; 
+        { 
+            &quot;schema&quot;:{ 
+                &quot;fields&quot;:[ 
+                    {&quot;name&quot;:&quot;index&quot;,&quot;type&quot;:&quot;integer&quot;}, 
+                    {&quot;name&quot;:&quot;a&quot;,&quot;type&quot;:&quot;string&quot;} 
+                ], 
+                &quot;primaryKey&quot;:[&quot;index&quot;], 
+                &quot;pandas_version&quot;:&quot;0.20.0&quot; 
+            }, 
+            &quot;data&quot;:[ 
+                {&quot;index&quot;:0,&quot;a&quot;:1}, 
+                {&quot;index&quot;:1,&quot;a&quot;:2.0}, 
+                {&quot;index&quot;:2,&quot;a&quot;:&quot;s&quot;} 
+            ] 
+        } 
+        &quot;&quot;&quot;</span>
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">DataFrame</span><span class="s3">({</span><span class="s4">&quot;a&quot;</span><span class="s3">: [</span><span class="s5">1</span><span class="s3">, </span><span class="s5">2.0</span><span class="s3">, </span><span class="s4">&quot;s&quot;</span><span class="s3">]})</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">read_json</span><span class="s3">(</span><span class="s1">StringIO</span><span class="s3">(</span><span class="s1">df_json</span><span class="s3">), </span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">expected</span><span class="s3">, </span><span class="s1">result</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;freq&quot;</span><span class="s3">, [</span><span class="s4">&quot;M&quot;</span><span class="s3">, </span><span class="s4">&quot;2M&quot;</span><span class="s3">, </span><span class="s4">&quot;Q&quot;</span><span class="s3">, </span><span class="s4">&quot;2Q&quot;</span><span class="s3">, </span><span class="s4">&quot;Y&quot;</span><span class="s3">, </span><span class="s4">&quot;2Y&quot;</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_read_json_table_orient_period_depr_freq</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">freq</span><span class="s3">):</span>
+        <span class="s6"># GH#9586</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">DataFrame</span><span class="s3">(</span>
+            <span class="s3">{</span><span class="s4">&quot;ints&quot;</span><span class="s3">: [</span><span class="s5">1</span><span class="s3">, </span><span class="s5">2</span><span class="s3">]},</span>
+            <span class="s1">index</span><span class="s3">=</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">PeriodIndex</span><span class="s3">([</span><span class="s4">&quot;2020-01&quot;</span><span class="s3">, </span><span class="s4">&quot;2021-06&quot;</span><span class="s3">], </span><span class="s1">freq</span><span class="s3">=</span><span class="s1">freq</span><span class="s3">),</span>
+        <span class="s3">)</span>
+        <span class="s1">out </span><span class="s3">= </span><span class="s1">StringIO</span><span class="s3">(</span><span class="s1">df</span><span class="s3">.</span><span class="s1">to_json</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">))</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">read_json</span><span class="s3">(</span><span class="s1">out</span><span class="s3">, </span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;table&quot;</span><span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">df</span><span class="s3">, </span><span class="s1">result</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

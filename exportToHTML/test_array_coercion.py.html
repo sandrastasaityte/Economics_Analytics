@@ -1,0 +1,967 @@
+<html>
+<head>
+<title>test_array_coercion.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #7a7e85;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+.s7 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_array_coercion.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Tests for array coercion, mainly through testing `np.array` results directly. 
+Note that other such tests exist, e.g., in `test_api.py` and many corner-cases 
+are tested (sometimes indirectly) elsewhere. 
+&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">itertools </span><span class="s2">import </span><span class="s1">permutations</span><span class="s3">, </span><span class="s1">product</span>
+
+<span class="s2">import </span><span class="s1">pytest</span>
+<span class="s2">from </span><span class="s1">pytest </span><span class="s2">import </span><span class="s1">param</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+<span class="s2">import </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">_core</span><span class="s3">.</span><span class="s1">_multiarray_umath </span><span class="s2">as </span><span class="s1">ncu</span>
+<span class="s2">from </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">_core</span><span class="s3">.</span><span class="s1">_rational_tests </span><span class="s2">import </span><span class="s1">rational</span><span class="s3">, </span><span class="s1">rational2</span>
+<span class="s2">from </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">testing </span><span class="s2">import </span><span class="s1">IS_64BIT</span><span class="s3">, </span><span class="s1">assert_array_equal</span>
+
+
+<span class="s2">def </span><span class="s1">arraylikes</span><span class="s3">():</span>
+    <span class="s0">&quot;&quot;&quot;Test parameters for functions converting an array into various array-likes.&quot;&quot;&quot;</span>
+
+    <span class="s1">params </span><span class="s3">= []</span>
+
+    <span class="s4"># base array:</span>
+    <span class="s2">def </span><span class="s1">ndarray</span><span class="s3">(</span><span class="s1">a</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">a</span>
+
+    <span class="s1">params</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">param</span><span class="s3">(</span><span class="s1">ndarray</span><span class="s3">, </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;ndarray&quot;</span><span class="s3">))</span>
+
+    <span class="s4"># subclass:</span>
+    <span class="s2">class </span><span class="s1">MyArr</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">):</span>
+        <span class="s2">pass</span>
+
+    <span class="s2">def </span><span class="s1">subclass</span><span class="s3">(</span><span class="s1">a</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">a</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s1">MyArr</span><span class="s3">)</span>
+
+    <span class="s1">params</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">subclass</span><span class="s3">)</span>
+
+    <span class="s2">class </span><span class="s1">_SequenceLike</span><span class="s3">:</span>
+        <span class="s4"># Older NumPy versions, sometimes cared whether a protocol array was</span>
+        <span class="s4"># also _SequenceLike.  This shouldn't matter, but keep it for now</span>
+        <span class="s4"># for __array__ and not the others.</span>
+        <span class="s2">def </span><span class="s1">__len__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">TypeError</span>
+
+        <span class="s2">def </span><span class="s1">__getitem__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">_</span><span class="s3">, /):</span>
+            <span class="s2">raise </span><span class="s1">TypeError</span>
+
+    <span class="s4"># Array-interface</span>
+    <span class="s2">class </span><span class="s1">ArrayDunder</span><span class="s3">(</span><span class="s1">_SequenceLike</span><span class="s3">):</span>
+        <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">a</span><span class="s3">):</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">a </span><span class="s3">= </span><span class="s1">a</span>
+
+        <span class="s2">def </span><span class="s1">__array__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">dtype </span><span class="s2">is None</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">a</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">a</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+
+    <span class="s1">params</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">param</span><span class="s3">(</span><span class="s1">ArrayDunder</span><span class="s3">, </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;__array__&quot;</span><span class="s3">))</span>
+
+    <span class="s4"># memory-view</span>
+    <span class="s1">params</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">param</span><span class="s3">(</span><span class="s1">memoryview</span><span class="s3">, </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;memoryview&quot;</span><span class="s3">))</span>
+
+    <span class="s4"># Array-interface</span>
+    <span class="s2">class </span><span class="s1">ArrayInterface</span><span class="s3">:</span>
+        <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">a</span><span class="s3">):</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">a </span><span class="s3">= </span><span class="s1">a  </span><span class="s4"># need to hold on to keep interface valid</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">__array_interface__ </span><span class="s3">= </span><span class="s1">a</span><span class="s3">.</span><span class="s1">__array_interface__</span>
+
+    <span class="s1">params</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">param</span><span class="s3">(</span><span class="s1">ArrayInterface</span><span class="s3">, </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;__array_interface__&quot;</span><span class="s3">))</span>
+
+    <span class="s4"># Array-Struct</span>
+    <span class="s2">class </span><span class="s1">ArrayStruct</span><span class="s3">:</span>
+        <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">a</span><span class="s3">):</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">a </span><span class="s3">= </span><span class="s1">a  </span><span class="s4"># need to hold on to keep struct valid</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">__array_struct__ </span><span class="s3">= </span><span class="s1">a</span><span class="s3">.</span><span class="s1">__array_struct__</span>
+
+    <span class="s1">params</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">param</span><span class="s3">(</span><span class="s1">ArrayStruct</span><span class="s3">, </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;__array_struct__&quot;</span><span class="s3">))</span>
+
+    <span class="s2">return </span><span class="s1">params</span>
+
+
+<span class="s2">def </span><span class="s1">scalar_instances</span><span class="s3">(</span><span class="s1">times</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">extended_precision</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">user_dtype</span><span class="s3">=</span><span class="s2">True</span><span class="s3">):</span>
+    <span class="s4"># Hard-coded list of scalar instances.</span>
+    <span class="s4"># Floats:</span>
+    <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">sqrt</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">float16</span><span class="s3">(</span><span class="s6">5</span><span class="s3">)), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;float16&quot;</span><span class="s3">)</span>
+    <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">sqrt</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">float32</span><span class="s3">(</span><span class="s6">5</span><span class="s3">)), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;float32&quot;</span><span class="s3">)</span>
+    <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">sqrt</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">float64</span><span class="s3">(</span><span class="s6">5</span><span class="s3">)), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;float64&quot;</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">extended_precision</span><span class="s3">:</span>
+        <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">sqrt</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">longdouble</span><span class="s3">(</span><span class="s6">5</span><span class="s3">)), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;longdouble&quot;</span><span class="s3">)</span>
+
+    <span class="s4"># Complex:</span>
+    <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">sqrt</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">complex64</span><span class="s3">(</span><span class="s6">2 </span><span class="s3">+ </span><span class="s6">3j</span><span class="s3">)), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;complex64&quot;</span><span class="s3">)</span>
+    <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">sqrt</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">complex128</span><span class="s3">(</span><span class="s6">2 </span><span class="s3">+ </span><span class="s6">3j</span><span class="s3">)), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;complex128&quot;</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">extended_precision</span><span class="s3">:</span>
+        <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">sqrt</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">clongdouble</span><span class="s3">(</span><span class="s6">2 </span><span class="s3">+ </span><span class="s6">3j</span><span class="s3">)), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;clongdouble&quot;</span><span class="s3">)</span>
+
+    <span class="s4"># Bool:</span>
+    <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">bool</span><span class="s3">(</span><span class="s6">0</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;bool&quot;</span><span class="s3">)</span>
+
+    <span class="s4"># Integers:</span>
+    <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int8</span><span class="s3">(</span><span class="s6">2</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;int8&quot;</span><span class="s3">)</span>
+    <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int16</span><span class="s3">(</span><span class="s6">2</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;int16&quot;</span><span class="s3">)</span>
+    <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int32</span><span class="s3">(</span><span class="s6">2</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;int32&quot;</span><span class="s3">)</span>
+    <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">(</span><span class="s6">2</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;int64&quot;</span><span class="s3">)</span>
+
+    <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint8</span><span class="s3">(</span><span class="s6">2</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;uint8&quot;</span><span class="s3">)</span>
+    <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint16</span><span class="s3">(</span><span class="s6">2</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;uint16&quot;</span><span class="s3">)</span>
+    <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint32</span><span class="s3">(</span><span class="s6">2</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;uint32&quot;</span><span class="s3">)</span>
+    <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint64</span><span class="s3">(</span><span class="s6">2</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;uint64&quot;</span><span class="s3">)</span>
+
+    <span class="s4"># Rational:</span>
+    <span class="s2">if </span><span class="s1">user_dtype</span><span class="s3">:</span>
+        <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">rational</span><span class="s3">(</span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;rational&quot;</span><span class="s3">)</span>
+        <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">rational2</span><span class="s3">(</span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;rational2&quot;</span><span class="s3">)</span>
+
+    <span class="s4"># Cannot create a structured void scalar directly:</span>
+    <span class="s1">structured </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([(</span><span class="s6">1</span><span class="s3">, </span><span class="s6">3</span><span class="s3">)], </span><span class="s5">&quot;i,i&quot;</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]</span>
+    <span class="s2">assert </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">structured</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">void</span><span class="s3">)</span>
+    <span class="s2">assert </span><span class="s1">structured</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;i,i&quot;</span><span class="s3">)</span>
+    <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">structured</span><span class="s3">, </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;structured&quot;</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">times</span><span class="s3">:</span>
+        <span class="s4"># Datetimes and timedelta</span>
+        <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">timedelta64</span><span class="s3">(</span><span class="s6">2</span><span class="s3">, </span><span class="s5">&quot;ns&quot;</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;timedelta64[ns]&quot;</span><span class="s3">)</span>
+        <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">timedelta64</span><span class="s3">(</span><span class="s6">23</span><span class="s3">, </span><span class="s5">&quot;s&quot;</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;timedelta64[s]&quot;</span><span class="s3">)</span>
+        <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">timedelta64</span><span class="s3">(</span><span class="s5">&quot;NaT&quot;</span><span class="s3">, </span><span class="s5">&quot;s&quot;</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;timedelta64[s](NaT)&quot;</span><span class="s3">)</span>
+
+        <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">datetime64</span><span class="s3">(</span><span class="s5">&quot;NaT&quot;</span><span class="s3">, </span><span class="s5">&quot;D&quot;</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;datetime64[D](NaT)&quot;</span><span class="s3">)</span>
+        <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">datetime64</span><span class="s3">(</span><span class="s5">&quot;2020-06-07 12:43&quot;</span><span class="s3">, </span><span class="s5">&quot;ms&quot;</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;datetime64[ms]&quot;</span><span class="s3">)</span>
+
+    <span class="s4"># Strings and unstructured void:</span>
+    <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">bytes_</span><span class="s3">(</span><span class="s7">b&quot;1234&quot;</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;bytes&quot;</span><span class="s3">)</span>
+    <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">str_</span><span class="s3">(</span><span class="s5">&quot;2345&quot;</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;unicode&quot;</span><span class="s3">)</span>
+    <span class="s2">yield </span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">void</span><span class="s3">(</span><span class="s7">b&quot;4321&quot;</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;unstructured_void&quot;</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">is_parametric_dtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Returns True if the dtype is a parametric legacy dtype (itemsize 
+    is 0, or a datetime without units) 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">== </span><span class="s6">0</span><span class="s3">:</span>
+        <span class="s2">return True</span>
+    <span class="s2">if </span><span class="s1">issubclass</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">type</span><span class="s3">, (</span><span class="s1">np</span><span class="s3">.</span><span class="s1">datetime64</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">timedelta64</span><span class="s3">)):</span>
+        <span class="s2">if </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">name</span><span class="s3">.</span><span class="s1">endswith</span><span class="s3">(</span><span class="s5">&quot;64&quot;</span><span class="s3">):</span>
+            <span class="s4"># Generic time units</span>
+            <span class="s2">return True</span>
+    <span class="s2">return False</span>
+
+
+<span class="s2">class </span><span class="s1">TestStringDiscovery</span><span class="s3">:</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;obj&quot;</span><span class="s3">,</span>
+            <span class="s3">[</span><span class="s1">object</span><span class="s3">(), </span><span class="s6">1.2</span><span class="s3">, </span><span class="s6">10</span><span class="s3">**</span><span class="s6">43</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s5">&quot;string&quot;</span><span class="s3">],</span>
+            <span class="s1">ids</span><span class="s3">=[</span><span class="s5">&quot;object&quot;</span><span class="s3">, </span><span class="s5">&quot;1.2&quot;</span><span class="s3">, </span><span class="s5">&quot;10**43&quot;</span><span class="s3">, </span><span class="s5">&quot;None&quot;</span><span class="s3">, </span><span class="s5">&quot;string&quot;</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_basic_stringlength</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">obj</span><span class="s3">):</span>
+        <span class="s1">length </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">str</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">))</span>
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">f&quot;S</span><span class="s2">{</span><span class="s1">length</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s3">)</span>
+
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;S&quot;</span><span class="s3">).</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">expected</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">obj</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;S&quot;</span><span class="s3">).</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">expected</span>
+
+        <span class="s4"># A nested array is also discovered correctly</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;O&quot;</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;S&quot;</span><span class="s3">).</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">expected</span>
+        <span class="s4"># Also if we use the dtype class</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">type</span><span class="s3">(</span><span class="s1">expected</span><span class="s3">)).</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">expected</span>
+        <span class="s4"># Check that .astype() behaves identical</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s5">&quot;S&quot;</span><span class="s3">).</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">expected</span>
+        <span class="s4"># The DType class is accepted by `.astype()`</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">type</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;S&quot;</span><span class="s3">))).</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">expected</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;obj&quot;</span><span class="s3">,</span>
+            <span class="s3">[</span><span class="s1">object</span><span class="s3">(), </span><span class="s6">1.2</span><span class="s3">, </span><span class="s6">10</span><span class="s3">**</span><span class="s6">43</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s5">&quot;string&quot;</span><span class="s3">],</span>
+            <span class="s1">ids</span><span class="s3">=[</span><span class="s5">&quot;object&quot;</span><span class="s3">, </span><span class="s5">&quot;1.2&quot;</span><span class="s3">, </span><span class="s5">&quot;10**43&quot;</span><span class="s3">, </span><span class="s5">&quot;None&quot;</span><span class="s3">, </span><span class="s5">&quot;string&quot;</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_nested_arrays_stringlength</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">obj</span><span class="s3">):</span>
+        <span class="s1">length </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">str</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">))</span>
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">f&quot;S</span><span class="s2">{</span><span class="s1">length</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s3">)</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;O&quot;</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">arr</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;S&quot;</span><span class="s3">).</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">expected</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;arraylike&quot;</span><span class="s3">, </span><span class="s1">arraylikes</span><span class="s3">())</span>
+    <span class="s2">def </span><span class="s1">test_unpack_first_level</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">arraylike</span><span class="s3">):</span>
+        <span class="s4"># We unpack exactly one level of array likes</span>
+        <span class="s1">obj </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s2">None</span><span class="s3">])</span>
+        <span class="s1">obj</span><span class="s3">[</span><span class="s6">0</span><span class="s3">] = </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s6">1.2</span><span class="s3">)</span>
+        <span class="s4"># the length of the included item, not of the float dtype</span>
+        <span class="s1">length </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">str</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]))</span>
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">f&quot;S</span><span class="s2">{</span><span class="s1">length</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s3">)</span>
+
+        <span class="s1">obj </span><span class="s3">= </span><span class="s1">arraylike</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">)</span>
+        <span class="s4"># casting to string usually calls str(obj)</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">obj</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;S&quot;</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">shape </span><span class="s3">== (</span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">expected</span>
+
+
+<span class="s2">class </span><span class="s1">TestScalarDiscovery</span><span class="s3">:</span>
+    <span class="s2">def </span><span class="s1">test_void_special_case</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4"># Void dtypes with structures discover tuples as elements</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">((</span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">, </span><span class="s6">3</span><span class="s3">), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;i,i,i&quot;</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">shape </span><span class="s3">== ()</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([(</span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">, </span><span class="s6">3</span><span class="s3">)], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;i,i,i&quot;</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">shape </span><span class="s3">== (</span><span class="s6">1</span><span class="s3">,)</span>
+
+    <span class="s2">def </span><span class="s1">test_char_special_case</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s5">&quot;string&quot;</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;c&quot;</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">shape </span><span class="s3">== (</span><span class="s6">6</span><span class="s3">,)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">char </span><span class="s3">== </span><span class="s5">&quot;c&quot;</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s5">&quot;string&quot;</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;c&quot;</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">shape </span><span class="s3">== (</span><span class="s6">1</span><span class="s3">, </span><span class="s6">6</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">char </span><span class="s3">== </span><span class="s5">&quot;c&quot;</span>
+
+    <span class="s2">def </span><span class="s1">test_char_special_case_deep</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4"># Check that the character special case errors correctly if the</span>
+        <span class="s4"># array is too deep:</span>
+        <span class="s1">nested </span><span class="s3">= [</span><span class="s5">&quot;string&quot;</span><span class="s3">]  </span><span class="s4"># 2 dimensions (due to string being sequence)</span>
+        <span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">ncu</span><span class="s3">.</span><span class="s1">MAXDIMS </span><span class="s3">- </span><span class="s6">2</span><span class="s3">):</span>
+            <span class="s1">nested </span><span class="s3">= [</span><span class="s1">nested</span><span class="s3">]</span>
+
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">nested</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">'c'</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">shape </span><span class="s3">== (</span><span class="s6">1</span><span class="s3">,) * (</span><span class="s1">ncu</span><span class="s3">.</span><span class="s1">MAXDIMS </span><span class="s3">- </span><span class="s6">1</span><span class="s3">) + (</span><span class="s6">6</span><span class="s3">,)</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">):</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">nested</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;c&quot;</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_unknown_object</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">object</span><span class="s3">())</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">shape </span><span class="s3">== ()</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;O&quot;</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;scalar&quot;</span><span class="s3">, </span><span class="s1">list</span><span class="s3">(</span><span class="s1">scalar_instances</span><span class="s3">()))</span>
+    <span class="s2">def </span><span class="s1">test_scalar</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">scalar</span><span class="s3">):</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">shape </span><span class="s3">== ()</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">scalar</span><span class="s3">.</span><span class="s1">dtype</span>
+
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([[</span><span class="s1">scalar</span><span class="s3">, </span><span class="s1">scalar</span><span class="s3">]])</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">shape </span><span class="s3">== (</span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">scalar</span><span class="s3">.</span><span class="s1">dtype</span>
+
+    <span class="s4"># Additionally to string this test also runs into a corner case</span>
+    <span class="s4"># with datetime promotion (the difference is the promotion order).</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">filterwarnings</span><span class="s3">(</span><span class="s5">&quot;ignore:Promotion of numbers:FutureWarning&quot;</span><span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_scalar_promotion</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">for </span><span class="s1">sc1</span><span class="s3">, </span><span class="s1">sc2 </span><span class="s2">in </span><span class="s1">product</span><span class="s3">(</span><span class="s1">scalar_instances</span><span class="s3">(), </span><span class="s1">scalar_instances</span><span class="s3">()):</span>
+            <span class="s1">sc1</span><span class="s3">, </span><span class="s1">sc2 </span><span class="s3">= </span><span class="s1">sc1</span><span class="s3">.</span><span class="s1">values</span><span class="s3">[</span><span class="s6">0</span><span class="s3">], </span><span class="s1">sc2</span><span class="s3">.</span><span class="s1">values</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]</span>
+            <span class="s4"># test all combinations:</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">sc1</span><span class="s3">, </span><span class="s1">sc2</span><span class="s3">])</span>
+            <span class="s2">except </span><span class="s3">(</span><span class="s1">TypeError</span><span class="s3">, </span><span class="s1">ValueError</span><span class="s3">):</span>
+                <span class="s4"># The promotion between two times can fail</span>
+                <span class="s4"># XFAIL (ValueError): Some object casts are currently undefined</span>
+                <span class="s2">continue</span>
+            <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">shape </span><span class="s3">== (</span><span class="s6">2</span><span class="s3">,)</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">dt1</span><span class="s3">, </span><span class="s1">dt2 </span><span class="s3">= </span><span class="s1">sc1</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">sc2</span><span class="s3">.</span><span class="s1">dtype</span>
+                <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">promote_types</span><span class="s3">(</span><span class="s1">dt1</span><span class="s3">, </span><span class="s1">dt2</span><span class="s3">)</span>
+                <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">expected_dtype</span>
+            <span class="s2">except </span><span class="s1">TypeError </span><span class="s2">as </span><span class="s1">e</span><span class="s3">:</span>
+                <span class="s4"># Will currently always go to object dtype</span>
+                <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;O&quot;</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;scalar&quot;</span><span class="s3">, </span><span class="s1">list</span><span class="s3">(</span><span class="s1">scalar_instances</span><span class="s3">()))</span>
+    <span class="s2">def </span><span class="s1">test_scalar_coercion</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">scalar</span><span class="s3">):</span>
+        <span class="s4"># This tests various scalar coercion paths, mainly for the numerical</span>
+        <span class="s4"># types. It includes some paths not directly related to `np.array`.</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">inexact</span><span class="s3">):</span>
+            <span class="s4"># Ensure we have a full-precision number if available</span>
+            <span class="s1">scalar </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">)((</span><span class="s1">scalar </span><span class="s3">* </span><span class="s6">2</span><span class="s3">)**</span><span class="s6">0.5</span><span class="s3">)</span>
+
+        <span class="s4"># Use casting from object:</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">object</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">)</span>
+
+        <span class="s4"># Test various ways to create an array containing this scalar:</span>
+        <span class="s1">arr1 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">).</span><span class="s1">reshape</span><span class="s3">(</span><span class="s6">1</span><span class="s3">)</span>
+        <span class="s1">arr2 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">scalar</span><span class="s3">])</span>
+        <span class="s1">arr3 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty</span><span class="s3">(</span><span class="s6">1</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">scalar</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s1">arr3</span><span class="s3">[</span><span class="s6">0</span><span class="s3">] = </span><span class="s1">scalar</span>
+        <span class="s1">arr4 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty</span><span class="s3">(</span><span class="s6">1</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">scalar</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s1">arr4</span><span class="s3">[:] = [</span><span class="s1">scalar</span><span class="s3">]</span>
+        <span class="s4"># All of these methods should yield the same results</span>
+        <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">arr1</span><span class="s3">)</span>
+        <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">arr2</span><span class="s3">)</span>
+        <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">arr3</span><span class="s3">)</span>
+        <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">arr4</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">filterwarnings</span><span class="s3">(</span><span class="s5">&quot;ignore::numpy.exceptions.ComplexWarning&quot;</span><span class="s3">)</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;cast_to&quot;</span><span class="s3">, </span><span class="s1">list</span><span class="s3">(</span><span class="s1">scalar_instances</span><span class="s3">()))</span>
+    <span class="s2">def </span><span class="s1">test_scalar_coercion_same_as_cast_and_assignment</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">cast_to</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Test that in most cases: 
+           * `np.array(scalar, dtype=dtype)` 
+           * `np.empty((), dtype=dtype)[()] = scalar` 
+           * `np.array(scalar).astype(dtype)` 
+        should behave the same.  The only exceptions are parametric dtypes 
+        (mainly datetime/timedelta without unit) and void without fields. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">dtype </span><span class="s3">= </span><span class="s1">cast_to</span><span class="s3">.</span><span class="s1">dtype  </span><span class="s4"># use to parametrize only the target dtype</span>
+
+        <span class="s2">for </span><span class="s1">scalar </span><span class="s2">in </span><span class="s1">scalar_instances</span><span class="s3">(</span><span class="s1">times</span><span class="s3">=</span><span class="s2">False</span><span class="s3">):</span>
+            <span class="s1">scalar </span><span class="s3">= </span><span class="s1">scalar</span><span class="s3">.</span><span class="s1">values</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]</span>
+
+            <span class="s2">if </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">type </span><span class="s3">== </span><span class="s1">np</span><span class="s3">.</span><span class="s1">void</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">scalar</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">fields </span><span class="s2">is not None and </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">fields </span><span class="s2">is None</span><span class="s3">:</span>
+                    <span class="s4"># Here, coercion to &quot;V6&quot; works, but the cast fails.</span>
+                    <span class="s4"># Since the types are identical, SETITEM takes care of</span>
+                    <span class="s4"># this, but has different rules than the cast.</span>
+                    <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">TypeError</span><span class="s3">):</span>
+                        <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+                    <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+                    <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">scalar</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+                    <span class="s2">continue</span>
+
+            <span class="s4"># The main test, we first try to use casting and if it succeeds</span>
+            <span class="s4"># continue below testing that things are the same, otherwise</span>
+            <span class="s4"># test that the alternative paths at least also fail.</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">cast </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+            <span class="s2">except </span><span class="s3">(</span><span class="s1">TypeError</span><span class="s3">, </span><span class="s1">ValueError</span><span class="s3">, </span><span class="s1">RuntimeError</span><span class="s3">):</span>
+                <span class="s4"># coercion should also raise (error type may change)</span>
+                <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">Exception</span><span class="s3">):  </span><span class="s4"># noqa: B017</span>
+                    <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+
+                <span class="s2">if </span><span class="s3">(</span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">, </span><span class="s1">rational</span><span class="s3">) </span><span class="s2">and</span>
+                        <span class="s1">np</span><span class="s3">.</span><span class="s1">issubdtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">signedinteger</span><span class="s3">)):</span>
+                    <span class="s2">return</span>
+
+                <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">Exception</span><span class="s3">):  </span><span class="s4"># noqa: B017</span>
+                    <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">scalar</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+                <span class="s4"># assignment should also raise</span>
+                <span class="s1">res </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">zeros</span><span class="s3">((), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+                <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">Exception</span><span class="s3">):  </span><span class="s4"># noqa: B017</span>
+                    <span class="s1">res</span><span class="s3">[()] = </span><span class="s1">scalar</span>
+
+                <span class="s2">return</span>
+
+            <span class="s4"># Non error path:</span>
+            <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+            <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">cast</span><span class="s3">)</span>
+            <span class="s4"># assignment behaves the same</span>
+            <span class="s1">ass </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">zeros</span><span class="s3">((), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+            <span class="s1">ass</span><span class="s3">[()] = </span><span class="s1">scalar</span>
+            <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">ass</span><span class="s3">, </span><span class="s1">cast</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;pyscalar&quot;</span><span class="s3">, [</span><span class="s6">10</span><span class="s3">, </span><span class="s6">10.32</span><span class="s3">, </span><span class="s6">10.14j</span><span class="s3">, </span><span class="s6">10</span><span class="s3">**</span><span class="s6">100</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_pyscalar_subclasses</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">pyscalar</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;NumPy arrays are read/write which means that anything but invariant 
+        behaviour is on thin ice.  However, we currently are happy to discover 
+        subclasses of Python float, int, complex the same as the base classes. 
+        This should potentially be deprecated. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">class </span><span class="s1">MyScalar</span><span class="s3">(</span><span class="s1">type</span><span class="s3">(</span><span class="s1">pyscalar</span><span class="s3">)):</span>
+            <span class="s2">pass</span>
+
+        <span class="s1">res </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">MyScalar</span><span class="s3">(</span><span class="s1">pyscalar</span><span class="s3">))</span>
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">pyscalar</span><span class="s3">)</span>
+        <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">res</span><span class="s3">, </span><span class="s1">expected</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;dtype_char&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">typecodes</span><span class="s3">[</span><span class="s5">&quot;All&quot;</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_default_dtype_instance</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dtype_char</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">dtype_char </span><span class="s2">in </span><span class="s5">&quot;SU&quot;</span><span class="s3">:</span>
+            <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">dtype_char </span><span class="s3">+ </span><span class="s5">&quot;1&quot;</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">dtype_char </span><span class="s3">== </span><span class="s5">&quot;V&quot;</span><span class="s3">:</span>
+            <span class="s4"># Legacy behaviour was to use V8. The reason was float64 being the</span>
+            <span class="s4"># default dtype and that having 8 bytes.</span>
+            <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;V8&quot;</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">dtype_char</span><span class="s3">)</span>
+
+        <span class="s1">discovered_dtype</span><span class="s3">, </span><span class="s1">_ </span><span class="s3">= </span><span class="s1">ncu</span><span class="s3">.</span><span class="s1">_discover_array_parameters</span><span class="s3">([], </span><span class="s1">type</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">))</span>
+
+        <span class="s2">assert </span><span class="s1">discovered_dtype </span><span class="s3">== </span><span class="s1">dtype</span>
+        <span class="s2">assert </span><span class="s1">discovered_dtype</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">== </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;dtype&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">typecodes</span><span class="s3">[</span><span class="s5">&quot;Integer&quot;</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">([</span><span class="s5">&quot;scalar&quot;</span><span class="s3">, </span><span class="s5">&quot;error&quot;</span><span class="s3">],</span>
+            <span class="s3">[(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">float64</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">nan</span><span class="s3">), </span><span class="s1">ValueError</span><span class="s3">),</span>
+             <span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(-</span><span class="s6">1</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">ulonglong</span><span class="s3">)[()], </span><span class="s1">OverflowError</span><span class="s3">)])</span>
+    <span class="s2">def </span><span class="s1">test_scalar_to_int_coerce_does_not_cast</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">scalar</span><span class="s3">, </span><span class="s1">error</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Signed integers are currently different in that they do not cast other 
+        NumPy scalar, but instead use scalar.__int__(). The hardcoded 
+        exception to this rule is `np.array(scalar, dtype=integer)`. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+
+        <span class="s4"># This is a special case using casting logic. It warns for the NaN</span>
+        <span class="s4"># but allows the cast (giving undefined behaviour).</span>
+        <span class="s2">with </span><span class="s1">np</span><span class="s3">.</span><span class="s1">errstate</span><span class="s3">(</span><span class="s1">invalid</span><span class="s3">=</span><span class="s5">&quot;ignore&quot;</span><span class="s3">):</span>
+            <span class="s1">coerced </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+            <span class="s1">cast </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">coerced</span><span class="s3">, </span><span class="s1">cast</span><span class="s3">)</span>
+
+        <span class="s4"># However these fail:</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">error</span><span class="s3">):</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">scalar</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">error</span><span class="s3">):</span>
+            <span class="s1">cast</span><span class="s3">[()] = </span><span class="s1">scalar</span>
+
+
+<span class="s2">class </span><span class="s1">TestTimeScalars</span><span class="s3">:</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;dtype&quot;</span><span class="s3">, [</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">float32</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;scalar&quot;</span><span class="s3">,</span>
+            <span class="s3">[</span><span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">timedelta64</span><span class="s3">(</span><span class="s5">&quot;NaT&quot;</span><span class="s3">, </span><span class="s5">&quot;s&quot;</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;timedelta64[s](NaT)&quot;</span><span class="s3">),</span>
+             <span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">timedelta64</span><span class="s3">(</span><span class="s6">123</span><span class="s3">, </span><span class="s5">&quot;s&quot;</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;timedelta64[s]&quot;</span><span class="s3">),</span>
+             <span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">datetime64</span><span class="s3">(</span><span class="s5">&quot;NaT&quot;</span><span class="s3">, </span><span class="s5">&quot;D&quot;</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;datetime64[D](NaT)&quot;</span><span class="s3">),</span>
+             <span class="s1">param</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">datetime64</span><span class="s3">(</span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;D&quot;</span><span class="s3">), </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;datetime64[D]&quot;</span><span class="s3">)],)</span>
+    <span class="s2">def </span><span class="s1">test_coercion_basic</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">scalar</span><span class="s3">):</span>
+        <span class="s4"># Note the `[scalar]` is there because np.array(scalar) uses stricter</span>
+        <span class="s4"># `scalar.__int__()` rules for backward compatibility right now.</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s1">cast </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">cast</span><span class="s3">)</span>
+
+        <span class="s1">ass </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ones</span><span class="s3">((), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">issubclass</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">integer</span><span class="s3">):</span>
+            <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">TypeError</span><span class="s3">):</span>
+                <span class="s4"># raises, as would np.array([scalar], dtype=dtype), this is</span>
+                <span class="s4"># conversion from times, but behaviour of integers.</span>
+                <span class="s1">ass</span><span class="s3">[()] = </span><span class="s1">scalar</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">ass</span><span class="s3">[()] = </span><span class="s1">scalar</span>
+            <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">ass</span><span class="s3">, </span><span class="s1">cast</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;dtype&quot;</span><span class="s3">, [</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">float32</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;value, unit&quot;</span><span class="s3">, [</span><span class="s1">param</span><span class="s3">(</span><span class="s6">123</span><span class="s3">, </span><span class="s5">&quot;ns&quot;</span><span class="s3">, </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;timedelta64[ns]&quot;</span><span class="s3">)])</span>
+    <span class="s2">def </span><span class="s1">test_coercion_timedelta_convert_to_number</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">value</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">):</span>
+        <span class="s4"># Only &quot;ns&quot; and &quot;generic&quot; timedeltas can be converted to numbers</span>
+        <span class="s4"># so these are slightly special.</span>
+        <span class="s1">scalar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">timedelta64</span><span class="s3">(</span><span class="s1">value</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">)</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s1">cast </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s1">ass </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ones</span><span class="s3">((), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s1">ass</span><span class="s3">[()] = </span><span class="s1">scalar  </span><span class="s4"># raises, as would np.array([scalar], dtype=dtype)</span>
+
+        <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">cast</span><span class="s3">)</span>
+        <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">cast</span><span class="s3">, </span><span class="s1">cast</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;dtype&quot;</span><span class="s3">, [</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">float32</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;value, unit&quot;</span><span class="s3">,</span>
+            <span class="s3">[</span><span class="s1">param</span><span class="s3">(</span><span class="s6">12</span><span class="s3">, </span><span class="s5">&quot;generic&quot;</span><span class="s3">, </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;timedelta64[generic]&quot;</span><span class="s3">)])</span>
+    <span class="s2">def </span><span class="s1">test_coercion_generic_timedelta_convert_to_number</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">value</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">):</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">warns</span><span class="s3">(</span>
+            <span class="s1">DeprecationWarning</span><span class="s3">,</span>
+            <span class="s1">match</span><span class="s3">=</span><span class="s5">&quot;The 'generic' unit for NumPy timedelta is deprecated&quot;</span><span class="s3">,</span>
+        <span class="s3">):</span>
+            <span class="s1">scalar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">timedelta64</span><span class="s3">(</span><span class="s1">value</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">)</span>
+            <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+            <span class="s1">cast </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+            <span class="s1">ass </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ones</span><span class="s3">((), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+            <span class="s1">ass</span><span class="s3">[()] = </span><span class="s1">scalar  </span><span class="s4"># raises, as would np.array([scalar], dtype=dtype)</span>
+
+            <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">cast</span><span class="s3">)</span>
+            <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">cast</span><span class="s3">, </span><span class="s1">cast</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;dtype&quot;</span><span class="s3">, [</span><span class="s5">&quot;S6&quot;</span><span class="s3">, </span><span class="s5">&quot;U6&quot;</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">([</span><span class="s5">&quot;val&quot;</span><span class="s3">, </span><span class="s5">&quot;unit&quot;</span><span class="s3">],</span>
+            <span class="s3">[</span><span class="s1">param</span><span class="s3">(</span><span class="s6">123</span><span class="s3">, </span><span class="s5">&quot;s&quot;</span><span class="s3">, </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;[s]&quot;</span><span class="s3">), </span><span class="s1">param</span><span class="s3">(</span><span class="s6">123</span><span class="s3">, </span><span class="s5">&quot;D&quot;</span><span class="s3">, </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;[D]&quot;</span><span class="s3">)])</span>
+    <span class="s2">def </span><span class="s1">test_coercion_assignment_datetime</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">val</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">):</span>
+        <span class="s4"># String from datetime64 assignment is currently special cased to</span>
+        <span class="s4"># never use casting.  This is because casting will error in this</span>
+        <span class="s4"># case, and traditionally in most cases the behaviour is maintained</span>
+        <span class="s4"># like this.  (`np.array(scalar, dtype=&quot;U6&quot;)` would have failed before)</span>
+        <span class="s4"># TODO: This discrepancy _should_ be resolved, either by relaxing the</span>
+        <span class="s4">#       cast, or by deprecating the first part.</span>
+        <span class="s1">scalar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">datetime64</span><span class="s3">(</span><span class="s1">val</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">)</span>
+        <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s1">cut_string </span><span class="s3">= </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">type</span><span class="s3">(</span><span class="s1">str</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">)[:</span><span class="s6">6</span><span class="s3">])</span>
+
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">[()] == </span><span class="s1">cut_string</span>
+        <span class="s1">ass </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ones</span><span class="s3">((), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s1">ass</span><span class="s3">[()] = </span><span class="s1">scalar</span>
+        <span class="s2">assert </span><span class="s1">ass</span><span class="s3">[()] == </span><span class="s1">cut_string</span>
+
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">RuntimeError</span><span class="s3">):</span>
+            <span class="s4"># However, unlike the above assignment using `str(scalar)[:6]`</span>
+            <span class="s4"># due to being handled by the string DType and not be casting</span>
+            <span class="s4"># the explicit cast fails:</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">([</span><span class="s5">&quot;val&quot;</span><span class="s3">, </span><span class="s5">&quot;unit&quot;</span><span class="s3">],</span>
+            <span class="s3">[</span><span class="s1">param</span><span class="s3">(</span><span class="s6">123</span><span class="s3">, </span><span class="s5">&quot;s&quot;</span><span class="s3">, </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;[s]&quot;</span><span class="s3">), </span><span class="s1">param</span><span class="s3">(</span><span class="s6">123</span><span class="s3">, </span><span class="s5">&quot;D&quot;</span><span class="s3">, </span><span class="s1">id</span><span class="s3">=</span><span class="s5">&quot;[D]&quot;</span><span class="s3">)])</span>
+    <span class="s2">def </span><span class="s1">test_coercion_assignment_timedelta</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">val</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">):</span>
+        <span class="s1">scalar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">timedelta64</span><span class="s3">(</span><span class="s1">val</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">)</span>
+
+        <span class="s4"># Unlike datetime64, timedelta allows the unsafe cast:</span>
+        <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;S6&quot;</span><span class="s3">)</span>
+        <span class="s1">cast </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">scalar</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s5">&quot;S6&quot;</span><span class="s3">)</span>
+        <span class="s1">ass </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ones</span><span class="s3">((), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;S6&quot;</span><span class="s3">)</span>
+        <span class="s1">ass</span><span class="s3">[()] = </span><span class="s1">scalar</span>
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">scalar</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s5">&quot;S&quot;</span><span class="s3">)[:</span><span class="s6">6</span><span class="s3">]</span>
+        <span class="s2">assert </span><span class="s1">cast</span><span class="s3">[()] == </span><span class="s1">expected</span>
+        <span class="s2">assert </span><span class="s1">ass</span><span class="s3">[()] == </span><span class="s1">expected</span>
+
+<span class="s2">class </span><span class="s1">TestNested</span><span class="s3">:</span>
+    <span class="s2">def </span><span class="s1">test_nested_simple</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">initial </span><span class="s3">= [</span><span class="s6">1.2</span><span class="s3">]</span>
+        <span class="s1">nested </span><span class="s3">= </span><span class="s1">initial</span>
+        <span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">ncu</span><span class="s3">.</span><span class="s1">MAXDIMS </span><span class="s3">- </span><span class="s6">1</span><span class="s3">):</span>
+            <span class="s1">nested </span><span class="s3">= [</span><span class="s1">nested</span><span class="s3">]</span>
+
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">nested</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;float64&quot;</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">shape </span><span class="s3">== (</span><span class="s6">1</span><span class="s3">,) * </span><span class="s1">ncu</span><span class="s3">.</span><span class="s1">MAXDIMS</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">):</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">nested</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;float64&quot;</span><span class="s3">)</span>
+
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">, </span><span class="s1">match</span><span class="s3">=</span><span class="s5">&quot;.*would exceed the maximum&quot;</span><span class="s3">):</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">nested</span><span class="s3">])  </span><span class="s4"># user must ask for `object` explicitly</span>
+
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">nested</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">object</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;O&quot;</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">shape </span><span class="s3">== (</span><span class="s6">1</span><span class="s3">,) * </span><span class="s1">ncu</span><span class="s3">.</span><span class="s1">MAXDIMS</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">item</span><span class="s3">() </span><span class="s2">is </span><span class="s1">initial</span>
+
+    <span class="s2">def </span><span class="s1">test_pathological_self_containing</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4"># Test that this also works for two nested sequences</span>
+        <span class="s1">l </span><span class="s3">= []</span>
+        <span class="s1">l</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">l</span><span class="s3">)</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">l</span><span class="s3">, </span><span class="s1">l</span><span class="s3">, </span><span class="s1">l</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">object</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">shape </span><span class="s3">== (</span><span class="s6">3</span><span class="s3">,) + (</span><span class="s6">1</span><span class="s3">,) * (</span><span class="s1">ncu</span><span class="s3">.</span><span class="s1">MAXDIMS </span><span class="s3">- </span><span class="s6">1</span><span class="s3">)</span>
+
+        <span class="s4"># Also check a ragged case:</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">l</span><span class="s3">, [</span><span class="s2">None</span><span class="s3">], </span><span class="s1">l</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">object</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">shape </span><span class="s3">== (</span><span class="s6">3</span><span class="s3">, </span><span class="s6">1</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;arraylike&quot;</span><span class="s3">, </span><span class="s1">arraylikes</span><span class="s3">())</span>
+    <span class="s2">def </span><span class="s1">test_nested_arraylikes</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">arraylike</span><span class="s3">):</span>
+        <span class="s4"># We try storing an array like into an array, but the array-like</span>
+        <span class="s4"># will have too many dimensions.  This means the shape discovery</span>
+        <span class="s4"># decides that the array-like must be treated as an object (a special</span>
+        <span class="s4"># case of ragged discovery).  The result will be an array with one</span>
+        <span class="s4"># dimension less than the maximum dimensions, and the array being</span>
+        <span class="s4"># assigned to it (which does work for object or if `float(arraylike)`</span>
+        <span class="s4"># works).</span>
+        <span class="s1">initial </span><span class="s3">= </span><span class="s1">arraylike</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">ones</span><span class="s3">((</span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">)))</span>
+
+        <span class="s1">nested </span><span class="s3">= </span><span class="s1">initial</span>
+        <span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">ncu</span><span class="s3">.</span><span class="s1">MAXDIMS </span><span class="s3">- </span><span class="s6">1</span><span class="s3">):</span>
+            <span class="s1">nested </span><span class="s3">= [</span><span class="s1">nested</span><span class="s3">]</span>
+
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">, </span><span class="s1">match</span><span class="s3">=</span><span class="s5">&quot;.*would exceed the maximum&quot;</span><span class="s3">):</span>
+            <span class="s4"># It will refuse to assign the array into</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">nested</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;float64&quot;</span><span class="s3">)</span>
+
+        <span class="s4"># If this is object, we end up assigning a (1, 1) array into (1,)</span>
+        <span class="s4"># (due to running out of dimensions), this is currently supported but</span>
+        <span class="s4"># a special case which is not ideal.</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">nested</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">object</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">shape </span><span class="s3">== (</span><span class="s6">1</span><span class="s3">,) * </span><span class="s1">ncu</span><span class="s3">.</span><span class="s1">MAXDIMS</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">item</span><span class="s3">() == </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">initial</span><span class="s3">).</span><span class="s1">item</span><span class="s3">()</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;arraylike&quot;</span><span class="s3">, </span><span class="s1">arraylikes</span><span class="s3">())</span>
+    <span class="s2">def </span><span class="s1">test_uneven_depth_ragged</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">arraylike</span><span class="s3">):</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">arange</span><span class="s3">(</span><span class="s6">4</span><span class="s3">).</span><span class="s1">reshape</span><span class="s3">((</span><span class="s6">2</span><span class="s3">, </span><span class="s6">2</span><span class="s3">))</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">arraylike</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">)</span>
+
+        <span class="s4"># Array is ragged in the second dimension already:</span>
+        <span class="s1">out </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">arr</span><span class="s3">, [</span><span class="s1">arr</span><span class="s3">]], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">object</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">out</span><span class="s3">.</span><span class="s1">shape </span><span class="s3">== (</span><span class="s6">2</span><span class="s3">,)</span>
+        <span class="s2">assert </span><span class="s1">out</span><span class="s3">[</span><span class="s6">0</span><span class="s3">] </span><span class="s2">is </span><span class="s1">arr</span>
+        <span class="s2">assert </span><span class="s1">type</span><span class="s3">(</span><span class="s1">out</span><span class="s3">[</span><span class="s6">1</span><span class="s3">]) </span><span class="s2">is </span><span class="s1">list</span>
+
+        <span class="s4"># Array is ragged in the third dimension:</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">):</span>
+            <span class="s4"># This is a broadcast error during assignment, because</span>
+            <span class="s4"># the array shape would be (2, 2, 2) but `arr[0, 0] = arr` fails.</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">arr</span><span class="s3">, [</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">arr</span><span class="s3">]], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">object</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_empty_sequence</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([[], [</span><span class="s6">1</span><span class="s3">], [[</span><span class="s6">1</span><span class="s3">]]], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">object</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">shape </span><span class="s3">== (</span><span class="s6">3</span><span class="s3">,)</span>
+
+        <span class="s4"># The empty sequence stops further dimension discovery, so the</span>
+        <span class="s4"># result shape will be (0,) which leads to an error during:</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">):</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([[], </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty</span><span class="s3">((</span><span class="s6">0</span><span class="s3">, </span><span class="s6">1</span><span class="s3">))], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">object</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_array_of_different_depths</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4"># When multiple arrays (or array-likes) are included in a</span>
+        <span class="s4"># sequences and have different depth, we currently discover</span>
+        <span class="s4"># as many dimensions as they share. (see also gh-17224)</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">zeros</span><span class="s3">((</span><span class="s6">3</span><span class="s3">, </span><span class="s6">2</span><span class="s3">))</span>
+        <span class="s1">mismatch_first_dim </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">zeros</span><span class="s3">((</span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">))</span>
+        <span class="s1">mismatch_second_dim </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">zeros</span><span class="s3">((</span><span class="s6">3</span><span class="s3">, </span><span class="s6">3</span><span class="s3">))</span>
+
+        <span class="s1">dtype</span><span class="s3">, </span><span class="s1">shape </span><span class="s3">= </span><span class="s1">ncu</span><span class="s3">.</span><span class="s1">_discover_array_parameters</span><span class="s3">(</span>
+            <span class="s3">[</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">mismatch_second_dim</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;O&quot;</span><span class="s3">))</span>
+        <span class="s2">assert </span><span class="s1">shape </span><span class="s3">== (</span><span class="s6">2</span><span class="s3">, </span><span class="s6">3</span><span class="s3">)</span>
+
+        <span class="s1">dtype</span><span class="s3">, </span><span class="s1">shape </span><span class="s3">= </span><span class="s1">ncu</span><span class="s3">.</span><span class="s1">_discover_array_parameters</span><span class="s3">(</span>
+            <span class="s3">[</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">mismatch_first_dim</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;O&quot;</span><span class="s3">))</span>
+        <span class="s2">assert </span><span class="s1">shape </span><span class="s3">== (</span><span class="s6">2</span><span class="s3">,)</span>
+        <span class="s4"># The second case is currently supported because the arrays</span>
+        <span class="s4"># can be stored as objects:</span>
+        <span class="s1">res </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">([</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">mismatch_first_dim</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;O&quot;</span><span class="s3">))</span>
+        <span class="s2">assert </span><span class="s1">res</span><span class="s3">[</span><span class="s6">0</span><span class="s3">] </span><span class="s2">is </span><span class="s1">arr</span>
+        <span class="s2">assert </span><span class="s1">res</span><span class="s3">[</span><span class="s6">1</span><span class="s3">] </span><span class="s2">is </span><span class="s1">mismatch_first_dim</span>
+
+
+<span class="s2">class </span><span class="s1">TestBadSequences</span><span class="s3">:</span>
+    <span class="s4"># These are tests for bad objects passed into `np.array`, in general</span>
+    <span class="s4"># these have undefined behaviour.  In the old code they partially worked</span>
+    <span class="s4"># when now they will fail.  We could (and maybe should) create a copy</span>
+    <span class="s4"># of all sequences to be safe against bad-actors.</span>
+
+    <span class="s2">def </span><span class="s1">test_growing_list</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4"># List to coerce, `mylist` will append to it during coercion</span>
+        <span class="s1">obj </span><span class="s3">= []</span>
+
+        <span class="s2">class </span><span class="s1">mylist</span><span class="s3">(</span><span class="s1">list</span><span class="s3">):</span>
+            <span class="s2">def </span><span class="s1">__len__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+                <span class="s1">obj</span><span class="s3">.</span><span class="s1">append</span><span class="s3">([</span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">])</span>
+                <span class="s2">return </span><span class="s1">super</span><span class="s3">().</span><span class="s1">__len__</span><span class="s3">()</span>
+
+        <span class="s1">obj</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">mylist</span><span class="s3">([</span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">]))</span>
+
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">RuntimeError</span><span class="s3">):</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">)</span>
+
+    <span class="s4"># Note: We do not test a shrinking list.  These do very evil things</span>
+    <span class="s4">#       and the only way to fix them would be to copy all sequences.</span>
+    <span class="s4">#       (which may be a real option in the future).</span>
+
+    <span class="s2">def </span><span class="s1">test_mutated_list</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4"># List to coerce, `mylist` will mutate the first element</span>
+        <span class="s1">obj </span><span class="s3">= []</span>
+
+        <span class="s2">class </span><span class="s1">mylist</span><span class="s3">(</span><span class="s1">list</span><span class="s3">):</span>
+            <span class="s2">def </span><span class="s1">__len__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+                <span class="s1">obj</span><span class="s3">[</span><span class="s6">0</span><span class="s3">] = [</span><span class="s6">2</span><span class="s3">, </span><span class="s6">3</span><span class="s3">]  </span><span class="s4"># replace with a different list.</span>
+                <span class="s2">return </span><span class="s1">super</span><span class="s3">().</span><span class="s1">__len__</span><span class="s3">()</span>
+
+        <span class="s1">obj</span><span class="s3">.</span><span class="s1">append</span><span class="s3">([</span><span class="s6">2</span><span class="s3">, </span><span class="s6">3</span><span class="s3">])</span>
+        <span class="s1">obj</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">mylist</span><span class="s3">([</span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">]))</span>
+        <span class="s4"># Does not crash:</span>
+        <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_replace_0d_array</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4"># List to coerce, `mylist` will mutate the first element</span>
+        <span class="s1">obj </span><span class="s3">= []</span>
+
+        <span class="s2">class </span><span class="s1">baditem</span><span class="s3">:</span>
+            <span class="s2">def </span><span class="s1">__len__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+                <span class="s1">obj</span><span class="s3">[</span><span class="s6">0</span><span class="s3">][</span><span class="s6">0</span><span class="s3">] = </span><span class="s6">2  </span><span class="s4"># replace with a different list.</span>
+                <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s5">&quot;not actually a sequence!&quot;</span><span class="s3">)</span>
+
+            <span class="s2">def </span><span class="s1">__getitem__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">_</span><span class="s3">, /):</span>
+                <span class="s2">pass</span>
+
+        <span class="s4"># Runs into a corner case in the new code, the `array(2)` is cached</span>
+        <span class="s4"># so replacing it invalidates the cache.</span>
+        <span class="s1">obj</span><span class="s3">.</span><span class="s1">append</span><span class="s3">([</span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s6">2</span><span class="s3">), </span><span class="s1">baditem</span><span class="s3">()])</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">RuntimeError</span><span class="s3">):</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">TestArrayLikes</span><span class="s3">:</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;arraylike&quot;</span><span class="s3">, </span><span class="s1">arraylikes</span><span class="s3">())</span>
+    <span class="s2">def </span><span class="s1">test_0d_object_special_case</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">arraylike</span><span class="s3">):</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s6">0.</span><span class="s3">)</span>
+        <span class="s1">obj </span><span class="s3">= </span><span class="s1">arraylike</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">)</span>
+        <span class="s4"># A single array-like is always converted:</span>
+        <span class="s1">res </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">object</span><span class="s3">)</span>
+        <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">res</span><span class="s3">)</span>
+
+        <span class="s4"># But a single 0-D nested array-like never:</span>
+        <span class="s1">res </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">obj</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">object</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">res</span><span class="s3">[</span><span class="s6">0</span><span class="s3">] </span><span class="s2">is </span><span class="s1">obj</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;arraylike&quot;</span><span class="s3">, </span><span class="s1">arraylikes</span><span class="s3">())</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;arr&quot;</span><span class="s3">, [</span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s6">0.</span><span class="s3">), </span><span class="s1">np</span><span class="s3">.</span><span class="s1">arange</span><span class="s3">(</span><span class="s6">4</span><span class="s3">)])</span>
+    <span class="s2">def </span><span class="s1">test_object_assignment_special_case</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">arraylike</span><span class="s3">, </span><span class="s1">arr</span><span class="s3">):</span>
+        <span class="s1">obj </span><span class="s3">= </span><span class="s1">arraylike</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">)</span>
+        <span class="s1">empty </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">arange</span><span class="s3">(</span><span class="s6">1</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">object</span><span class="s3">)</span>
+        <span class="s1">empty</span><span class="s3">[:] = [</span><span class="s1">obj</span><span class="s3">]</span>
+        <span class="s2">assert </span><span class="s1">empty</span><span class="s3">[</span><span class="s6">0</span><span class="s3">] </span><span class="s2">is </span><span class="s1">obj</span>
+
+    <span class="s2">def </span><span class="s1">test_0d_generic_special_case</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">class </span><span class="s1">ArraySubclass</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">):</span>
+            <span class="s2">def </span><span class="s1">__float__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+                <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span><span class="s5">&quot;e.g. quantities raise on this&quot;</span><span class="s3">)</span>
+
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s6">0.</span><span class="s3">)</span>
+        <span class="s1">obj </span><span class="s3">= </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s1">ArraySubclass</span><span class="s3">)</span>
+        <span class="s1">res </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">)</span>
+        <span class="s4"># The subclass is simply cast:</span>
+        <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">res</span><span class="s3">)</span>
+
+        <span class="s4"># If the 0-D array-like is included, __float__ is currently</span>
+        <span class="s4"># guaranteed to be used.  We may want to change that, quantities</span>
+        <span class="s4"># and masked arrays half make use of this.</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">TypeError</span><span class="s3">):</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">obj</span><span class="s3">])</span>
+
+        <span class="s4"># The same holds for memoryview:</span>
+        <span class="s1">obj </span><span class="s3">= </span><span class="s1">memoryview</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">)</span>
+        <span class="s1">res </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">)</span>
+        <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">res</span><span class="s3">)</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">):</span>
+            <span class="s4"># The error type does not matter much here.</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">obj</span><span class="s3">])</span>
+
+    <span class="s2">def </span><span class="s1">test_arraylike_classes</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4"># The classes of array-likes should generally be acceptable to be</span>
+        <span class="s4"># stored inside a numpy (object) array.  This tests all of the</span>
+        <span class="s4"># special attributes (since all are checked during coercion).</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">[()] </span><span class="s2">is </span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">])</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">[</span><span class="s6">0</span><span class="s3">] </span><span class="s2">is </span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span>
+
+        <span class="s4"># This also works for properties/unbound methods:</span>
+        <span class="s2">class </span><span class="s1">ArrayLike</span><span class="s3">:</span>
+            <span class="s3">@</span><span class="s1">property</span>
+            <span class="s2">def </span><span class="s1">__array_interface__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+                <span class="s2">pass</span>
+
+            <span class="s3">@</span><span class="s1">property</span>
+            <span class="s2">def </span><span class="s1">__array_struct__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+                <span class="s2">pass</span>
+
+            <span class="s2">def </span><span class="s1">__array__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+                <span class="s2">pass</span>
+
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">ArrayLike</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">[()] </span><span class="s2">is </span><span class="s1">ArrayLike</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">ArrayLike</span><span class="s3">])</span>
+        <span class="s2">assert </span><span class="s1">arr</span><span class="s3">[</span><span class="s6">0</span><span class="s3">] </span><span class="s2">is </span><span class="s1">ArrayLike</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">skipif</span><span class="s3">(</span><span class="s2">not </span><span class="s1">IS_64BIT</span><span class="s3">, </span><span class="s1">reason</span><span class="s3">=</span><span class="s5">&quot;Needs 64bit platform&quot;</span><span class="s3">)</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">thread_unsafe</span><span class="s3">(</span><span class="s1">reason</span><span class="s3">=</span><span class="s5">&quot;large slow test in parallel&quot;</span><span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_too_large_array_error_paths</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Test the error paths, including for memory leaks&quot;&quot;&quot;</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s6">0</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;uint8&quot;</span><span class="s3">)</span>
+        <span class="s4"># Guarantees that a contiguous copy won't work:</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">broadcast_to</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s6">2</span><span class="s3">**</span><span class="s6">62</span><span class="s3">)</span>
+
+        <span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s6">5</span><span class="s3">):</span>
+            <span class="s4"># repeat, to ensure caching cannot have an effect:</span>
+            <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">MemoryError</span><span class="s3">):</span>
+                <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">)</span>
+            <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">MemoryError</span><span class="s3">):</span>
+                <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">arr</span><span class="s3">])</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;attribute&quot;</span><span class="s3">,</span>
+        <span class="s3">[</span><span class="s5">&quot;__array_interface__&quot;</span><span class="s3">, </span><span class="s5">&quot;__array__&quot;</span><span class="s3">, </span><span class="s5">&quot;__array_struct__&quot;</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;error&quot;</span><span class="s3">, [</span><span class="s1">RecursionError</span><span class="s3">, </span><span class="s1">MemoryError</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_bad_array_like_attributes</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">attribute</span><span class="s3">, </span><span class="s1">error</span><span class="s3">):</span>
+        <span class="s4"># RecursionError and MemoryError are considered fatal. All errors</span>
+        <span class="s4"># (except AttributeError) should probably be raised in the future,</span>
+        <span class="s4"># but shapely made use of it, so it will require a deprecation.</span>
+
+        <span class="s2">class </span><span class="s1">BadInterface</span><span class="s3">:</span>
+            <span class="s2">def </span><span class="s1">__getattr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">attr</span><span class="s3">):</span>
+                <span class="s2">if </span><span class="s1">attr </span><span class="s3">== </span><span class="s1">attribute</span><span class="s3">:</span>
+                    <span class="s2">raise </span><span class="s1">error</span>
+                <span class="s1">super</span><span class="s3">().</span><span class="s1">__getattr__</span><span class="s3">(</span><span class="s1">attr</span><span class="s3">)</span>
+
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">error</span><span class="s3">):</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">BadInterface</span><span class="s3">())</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;error&quot;</span><span class="s3">, [</span><span class="s1">RecursionError</span><span class="s3">, </span><span class="s1">MemoryError</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_bad_array_like_bad_length</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">error</span><span class="s3">):</span>
+        <span class="s4"># RecursionError and MemoryError are considered &quot;critical&quot; in</span>
+        <span class="s4"># sequences. We could expand this more generally though. (NumPy 1.20)</span>
+        <span class="s2">class </span><span class="s1">BadSequence</span><span class="s3">:</span>
+            <span class="s2">def </span><span class="s1">__len__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+                <span class="s2">raise </span><span class="s1">error</span>
+
+            <span class="s2">def </span><span class="s1">__getitem__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">_</span><span class="s3">, /):</span>
+                <span class="s4"># must have getitem to be a Sequence</span>
+                <span class="s2">return </span><span class="s6">1</span>
+
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">error</span><span class="s3">):</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">BadSequence</span><span class="s3">())</span>
+
+    <span class="s2">def </span><span class="s1">test_array_interface_descr_optional</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4"># The descr should be optional regression test for gh-27249</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ones</span><span class="s3">(</span><span class="s6">10</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;V10&quot;</span><span class="s3">)</span>
+        <span class="s1">iface </span><span class="s3">= </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">__array_interface__</span>
+        <span class="s1">iface</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">(</span><span class="s5">&quot;descr&quot;</span><span class="s3">)</span>
+
+        <span class="s2">class </span><span class="s1">MyClass</span><span class="s3">:</span>
+            <span class="s1">__array_interface__ </span><span class="s3">= </span><span class="s1">iface</span>
+
+        <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">MyClass</span><span class="s3">), </span><span class="s1">arr</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">TestAsArray</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot;Test expected behaviors of ``asarray``.&quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">test_dtype_identity</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Confirm the intended behavior for *dtype* kwarg. 
+ 
+        The result of ``asarray()`` should have the dtype provided through the 
+        keyword argument, when used. This forces unique array handles to be 
+        produced for unique np.dtype objects, but (for equivalent dtypes), the 
+        underlying data (the base object) is shared with the original array 
+        object. 
+ 
+        Ref https://github.com/numpy/numpy/issues/1468 
+        &quot;&quot;&quot;</span>
+        <span class="s1">int_array </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">, </span><span class="s6">3</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">'i'</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">int_array</span><span class="s3">) </span><span class="s2">is </span><span class="s1">int_array</span>
+
+        <span class="s4"># The character code resolves to the singleton dtype object provided</span>
+        <span class="s4"># by the numpy package.</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">int_array</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">'i'</span><span class="s3">) </span><span class="s2">is </span><span class="s1">int_array</span>
+
+        <span class="s4"># Derive a dtype from n.dtype('i'), but add a metadata object to force</span>
+        <span class="s4"># the dtype to be distinct.</span>
+        <span class="s1">unequal_type </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">'i'</span><span class="s3">, </span><span class="s1">metadata</span><span class="s3">={</span><span class="s5">'spam'</span><span class="s3">: </span><span class="s2">True</span><span class="s3">})</span>
+        <span class="s1">annotated_int_array </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">int_array</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">unequal_type</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">annotated_int_array </span><span class="s2">is not </span><span class="s1">int_array</span>
+        <span class="s2">assert </span><span class="s1">annotated_int_array</span><span class="s3">.</span><span class="s1">base </span><span class="s2">is </span><span class="s1">int_array</span>
+        <span class="s4"># Create an equivalent descriptor with a new and distinct dtype</span>
+        <span class="s4"># instance.</span>
+        <span class="s1">equivalent_requirement </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">'i'</span><span class="s3">, </span><span class="s1">metadata</span><span class="s3">={</span><span class="s5">'spam'</span><span class="s3">: </span><span class="s2">True</span><span class="s3">})</span>
+        <span class="s1">annotated_int_array_alt </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">annotated_int_array</span><span class="s3">,</span>
+                                             <span class="s1">dtype</span><span class="s3">=</span><span class="s1">equivalent_requirement</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">unequal_type </span><span class="s3">== </span><span class="s1">equivalent_requirement</span>
+        <span class="s2">assert </span><span class="s1">unequal_type </span><span class="s2">is not </span><span class="s1">equivalent_requirement</span>
+        <span class="s2">assert </span><span class="s1">annotated_int_array_alt </span><span class="s2">is not </span><span class="s1">annotated_int_array</span>
+        <span class="s2">assert </span><span class="s1">annotated_int_array_alt</span><span class="s3">.</span><span class="s1">dtype </span><span class="s2">is </span><span class="s1">equivalent_requirement</span>
+
+        <span class="s4"># Check the same logic for a pair of C types whose equivalence may vary</span>
+        <span class="s4"># between computing environments.</span>
+        <span class="s4"># Find an equivalent pair.</span>
+        <span class="s1">integer_type_codes </span><span class="s3">= (</span><span class="s5">'i'</span><span class="s3">, </span><span class="s5">'l'</span><span class="s3">, </span><span class="s5">'q'</span><span class="s3">)</span>
+        <span class="s1">integer_dtypes </span><span class="s3">= [</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">code</span><span class="s3">) </span><span class="s2">for </span><span class="s1">code </span><span class="s2">in </span><span class="s1">integer_type_codes</span><span class="s3">]</span>
+        <span class="s1">typeA </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s1">typeB </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">for </span><span class="s1">typeA</span><span class="s3">, </span><span class="s1">typeB </span><span class="s2">in </span><span class="s1">permutations</span><span class="s3">(</span><span class="s1">integer_dtypes</span><span class="s3">, </span><span class="s1">r</span><span class="s3">=</span><span class="s6">2</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">typeA </span><span class="s3">== </span><span class="s1">typeB</span><span class="s3">:</span>
+                <span class="s2">assert </span><span class="s1">typeA </span><span class="s2">is not </span><span class="s1">typeB</span>
+                <span class="s2">break</span>
+        <span class="s2">assert </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">typeA</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">) </span><span class="s2">and </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">typeB</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">)</span>
+
+        <span class="s4"># These ``asarray()`` calls may produce a new view or a copy,</span>
+        <span class="s4"># but never the same object.</span>
+        <span class="s1">long_int_array </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">int_array</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">'l'</span><span class="s3">)</span>
+        <span class="s1">long_long_int_array </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">int_array</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">'q'</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">long_int_array </span><span class="s2">is not </span><span class="s1">int_array</span>
+        <span class="s2">assert </span><span class="s1">long_long_int_array </span><span class="s2">is not </span><span class="s1">int_array</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">long_int_array</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">'q'</span><span class="s3">) </span><span class="s2">is not </span><span class="s1">long_int_array</span>
+        <span class="s1">array_a </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">int_array</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">typeA</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">typeA </span><span class="s3">== </span><span class="s1">typeB</span>
+        <span class="s2">assert </span><span class="s1">typeA </span><span class="s2">is not </span><span class="s1">typeB</span>
+        <span class="s2">assert </span><span class="s1">array_a</span><span class="s3">.</span><span class="s1">dtype </span><span class="s2">is </span><span class="s1">typeA</span>
+        <span class="s2">assert </span><span class="s1">array_a </span><span class="s2">is not </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">array_a</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">typeB</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">array_a</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">typeB</span><span class="s3">).</span><span class="s1">dtype </span><span class="s2">is </span><span class="s1">typeB</span>
+        <span class="s2">assert </span><span class="s1">array_a </span><span class="s2">is </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">array_a</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">typeB</span><span class="s3">).</span><span class="s1">base</span>
+
+
+<span class="s2">class </span><span class="s1">TestSpecialAttributeLookupFailure</span><span class="s3">:</span>
+    <span class="s4"># An exception was raised while fetching the attribute</span>
+
+    <span class="s2">class </span><span class="s1">WeirdArrayLike</span><span class="s3">:</span>
+        <span class="s3">@</span><span class="s1">property</span>
+        <span class="s2">def </span><span class="s1">__array__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">RuntimeError</span><span class="s3">(</span><span class="s5">&quot;oops!&quot;</span><span class="s3">)</span>
+
+    <span class="s2">class </span><span class="s1">WeirdArrayInterface</span><span class="s3">:</span>
+        <span class="s3">@</span><span class="s1">property</span>
+        <span class="s2">def </span><span class="s1">__array_interface__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">RuntimeError</span><span class="s3">(</span><span class="s5">&quot;oops!&quot;</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_deprecated</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">RuntimeError</span><span class="s3">):</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">WeirdArrayLike</span><span class="s3">())</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">RuntimeError</span><span class="s3">):</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">WeirdArrayInterface</span><span class="s3">())</span>
+
+
+<span class="s2">def </span><span class="s1">test_subarray_from_array_construction</span><span class="s3">():</span>
+    <span class="s4"># Arrays are more complex, since they &quot;broadcast&quot; on success:</span>
+    <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">])</span>
+
+    <span class="s1">res </span><span class="s3">= </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s5">&quot;2i&quot;</span><span class="s3">)</span>
+    <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">res</span><span class="s3">, [[</span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">], [</span><span class="s6">2</span><span class="s3">, </span><span class="s6">2</span><span class="s3">]])</span>
+
+    <span class="s1">res </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;(2,)i&quot;</span><span class="s3">)</span>
+
+    <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">res</span><span class="s3">, [[</span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">], [</span><span class="s6">2</span><span class="s3">, </span><span class="s6">2</span><span class="s3">]])</span>
+
+    <span class="s1">res </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([[(</span><span class="s6">1</span><span class="s3">,), (</span><span class="s6">2</span><span class="s3">,)], </span><span class="s1">arr</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;2i&quot;</span><span class="s3">)</span>
+    <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">res</span><span class="s3">, [[[</span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">], [</span><span class="s6">2</span><span class="s3">, </span><span class="s6">2</span><span class="s3">]], [[</span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">], [</span><span class="s6">2</span><span class="s3">, </span><span class="s6">2</span><span class="s3">]]])</span>
+
+    <span class="s4"># Also try a multi-dimensional example:</span>
+    <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">arange</span><span class="s3">(</span><span class="s6">5 </span><span class="s3">* </span><span class="s6">2</span><span class="s3">).</span><span class="s1">reshape</span><span class="s3">(</span><span class="s6">5</span><span class="s3">, </span><span class="s6">2</span><span class="s3">)</span>
+    <span class="s1">expected </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">broadcast_to</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">[:, :, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">newaxis</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">newaxis</span><span class="s3">], (</span><span class="s6">5</span><span class="s3">, </span><span class="s6">2</span><span class="s3">, </span><span class="s6">2</span><span class="s3">, </span><span class="s6">2</span><span class="s3">))</span>
+
+    <span class="s1">res </span><span class="s3">= </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s5">&quot;(2,2)f&quot;</span><span class="s3">)</span>
+    <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">res</span><span class="s3">, </span><span class="s1">expected</span><span class="s3">)</span>
+
+    <span class="s1">res </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;(2,2)f&quot;</span><span class="s3">)</span>
+    <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">res</span><span class="s3">, </span><span class="s1">expected</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">test_empty_string</span><span class="s3">():</span>
+    <span class="s4"># Empty strings are unfortunately often converted to S1 and we need to</span>
+    <span class="s4"># make sure we are filling the S1 and not the (possibly) detected S0</span>
+    <span class="s4"># result.  This should likely just return S0 and if not maybe the decision</span>
+    <span class="s4"># to return S1 should be moved.</span>
+    <span class="s1">res </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s5">&quot;&quot;</span><span class="s3">] * </span><span class="s6">10</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;S&quot;</span><span class="s3">)</span>
+    <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">res</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s5">&quot;</span><span class="s2">\0</span><span class="s5">&quot;</span><span class="s3">, </span><span class="s5">&quot;S1&quot;</span><span class="s3">))</span>
+    <span class="s2">assert </span><span class="s1">res</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s5">&quot;S1&quot;</span>
+
+    <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s5">&quot;&quot;</span><span class="s3">] * </span><span class="s6">10</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">object</span><span class="s3">)</span>
+
+    <span class="s1">res </span><span class="s3">= </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s5">&quot;S&quot;</span><span class="s3">)</span>
+    <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">res</span><span class="s3">, </span><span class="s7">b&quot;&quot;</span><span class="s3">)</span>
+    <span class="s2">assert </span><span class="s1">res</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s5">&quot;S1&quot;</span>
+
+    <span class="s1">res </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;S&quot;</span><span class="s3">)</span>
+    <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">res</span><span class="s3">, </span><span class="s7">b&quot;&quot;</span><span class="s3">)</span>
+    <span class="s4"># TODO: This is arguably weird/wrong, but seems old:</span>
+    <span class="s2">assert </span><span class="s1">res</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s5">f&quot;S</span><span class="s2">{</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">'O'</span><span class="s3">).</span><span class="s1">itemsize</span><span class="s2">}</span><span class="s5">&quot;</span>
+
+    <span class="s1">res </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([[</span><span class="s5">&quot;&quot;</span><span class="s3">] * </span><span class="s6">10</span><span class="s3">, </span><span class="s1">arr</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;S&quot;</span><span class="s3">)</span>
+    <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">res</span><span class="s3">, </span><span class="s7">b&quot;&quot;</span><span class="s3">)</span>
+    <span class="s2">assert </span><span class="s1">res</span><span class="s3">.</span><span class="s1">shape </span><span class="s3">== (</span><span class="s6">2</span><span class="s3">, </span><span class="s6">10</span><span class="s3">)</span>
+    <span class="s2">assert </span><span class="s1">res</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s5">&quot;S1&quot;</span>
+
+
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;dtype&quot;</span><span class="s3">, [</span><span class="s5">&quot;S&quot;</span><span class="s3">, </span><span class="s5">&quot;U&quot;</span><span class="s3">, </span><span class="s1">object</span><span class="s3">])</span>
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;res_dt,hug_val&quot;</span><span class="s3">,</span>
+    <span class="s3">[(</span><span class="s5">&quot;float16&quot;</span><span class="s3">, </span><span class="s5">&quot;1e30&quot;</span><span class="s3">), (</span><span class="s5">&quot;float32&quot;</span><span class="s3">, </span><span class="s5">&quot;1e200&quot;</span><span class="s3">)])</span>
+<span class="s2">def </span><span class="s1">test_string_to_float_coercion_errors</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">res_dt</span><span class="s3">, </span><span class="s1">hug_val</span><span class="s3">):</span>
+    <span class="s4"># This test primarily tests setitem</span>
+    <span class="s1">val </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s5">&quot;3M&quot;</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]  </span><span class="s4"># use the scalar</span>
+
+    <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">):</span>
+        <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">val</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">res_dt</span><span class="s3">)</span>
+
+    <span class="s1">val </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">hug_val</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]  </span><span class="s4"># use the scalar</span>
+
+    <span class="s2">with </span><span class="s1">np</span><span class="s3">.</span><span class="s1">errstate</span><span class="s3">(</span><span class="s1">all</span><span class="s3">=</span><span class="s5">&quot;warn&quot;</span><span class="s3">):</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">warns</span><span class="s3">(</span><span class="s1">RuntimeWarning</span><span class="s3">):</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">val</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">res_dt</span><span class="s3">)</span>
+
+    <span class="s2">with </span><span class="s1">np</span><span class="s3">.</span><span class="s1">errstate</span><span class="s3">(</span><span class="s1">all</span><span class="s3">=</span><span class="s5">&quot;raise&quot;</span><span class="s3">):</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">FloatingPointError</span><span class="s3">):</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">val</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">res_dt</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,646 @@
+<html>
+<head>
+<title>frequencies.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+frequencies.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">TYPE_CHECKING</span>
+
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_libs </span><span class="s0">import </span><span class="s1">lib</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_libs</span><span class="s2">.</span><span class="s1">algos </span><span class="s0">import </span><span class="s1">unique_deltas</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_libs</span><span class="s2">.</span><span class="s1">tslibs </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">Timestamp</span><span class="s2">,</span>
+    <span class="s1">get_unit_from_dtype</span><span class="s2">,</span>
+    <span class="s1">periods_per_day</span><span class="s2">,</span>
+    <span class="s1">tz_convert_from_utc</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_libs</span><span class="s2">.</span><span class="s1">tslibs</span><span class="s2">.</span><span class="s1">ccalendar </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">DAYS</span><span class="s2">,</span>
+    <span class="s1">MONTH_ALIASES</span><span class="s2">,</span>
+    <span class="s1">MONTH_NUMBERS</span><span class="s2">,</span>
+    <span class="s1">MONTHS</span><span class="s2">,</span>
+    <span class="s1">int_to_weekday</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_libs</span><span class="s2">.</span><span class="s1">tslibs</span><span class="s2">.</span><span class="s1">dtypes </span><span class="s0">import </span><span class="s1">OFFSET_TO_PERIOD_FREQSTR</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_libs</span><span class="s2">.</span><span class="s1">tslibs</span><span class="s2">.</span><span class="s1">fields </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">build_field_sarray</span><span class="s2">,</span>
+    <span class="s1">month_position_check</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_libs</span><span class="s2">.</span><span class="s1">tslibs</span><span class="s2">.</span><span class="s1">offsets </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">DateOffset</span><span class="s2">,</span>
+    <span class="s1">Day</span><span class="s2">,</span>
+    <span class="s1">to_offset</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_libs</span><span class="s2">.</span><span class="s1">tslibs</span><span class="s2">.</span><span class="s1">parsing </span><span class="s0">import </span><span class="s1">get_rule_month</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">util</span><span class="s2">.</span><span class="s1">_decorators </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">cache_readonly</span><span class="s2">,</span>
+    <span class="s1">set_module</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">dtypes</span><span class="s2">.</span><span class="s1">common </span><span class="s0">import </span><span class="s1">is_numeric_dtype</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">dtypes</span><span class="s2">.</span><span class="s1">dtypes </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">ArrowDtype</span><span class="s2">,</span>
+    <span class="s1">DatetimeTZDtype</span><span class="s2">,</span>
+    <span class="s1">PeriodDtype</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">dtypes</span><span class="s2">.</span><span class="s1">generic </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">ABCIndex</span><span class="s2">,</span>
+    <span class="s1">ABCSeries</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">algorithms </span><span class="s0">import </span><span class="s1">unique</span>
+
+<span class="s0">if </span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_typing </span><span class="s0">import </span><span class="s1">npt</span>
+
+    <span class="s0">from </span><span class="s1">pandas </span><span class="s0">import </span><span class="s2">(</span>
+        <span class="s1">DatetimeIndex</span><span class="s2">,</span>
+        <span class="s1">Series</span><span class="s2">,</span>
+        <span class="s1">TimedeltaIndex</span><span class="s2">,</span>
+    <span class="s2">)</span>
+    <span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">arrays</span><span class="s2">.</span><span class="s1">datetimelike </span><span class="s0">import </span><span class="s1">DatetimeLikeArrayMixin</span>
+<span class="s3"># --------------------------------------------------------------------</span>
+<span class="s3"># Offset related functions</span>
+
+<span class="s1">_need_suffix </span><span class="s2">= [</span><span class="s4">&quot;QS&quot;</span><span class="s2">, </span><span class="s4">&quot;BQE&quot;</span><span class="s2">, </span><span class="s4">&quot;BQS&quot;</span><span class="s2">, </span><span class="s4">&quot;YS&quot;</span><span class="s2">, </span><span class="s4">&quot;BYE&quot;</span><span class="s2">, </span><span class="s4">&quot;BYS&quot;</span><span class="s2">]</span>
+
+<span class="s0">for </span><span class="s1">_prefix </span><span class="s0">in </span><span class="s1">_need_suffix</span><span class="s2">:</span>
+    <span class="s0">for </span><span class="s1">_m </span><span class="s0">in </span><span class="s1">MONTHS</span><span class="s2">:</span>
+        <span class="s1">key </span><span class="s2">= </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">_prefix</span><span class="s0">}</span><span class="s4">-</span><span class="s0">{</span><span class="s1">_m</span><span class="s0">}</span><span class="s4">&quot;</span>
+        <span class="s1">OFFSET_TO_PERIOD_FREQSTR</span><span class="s2">[</span><span class="s1">key</span><span class="s2">] = </span><span class="s1">OFFSET_TO_PERIOD_FREQSTR</span><span class="s2">[</span><span class="s1">_prefix</span><span class="s2">]</span>
+
+<span class="s0">for </span><span class="s1">_prefix </span><span class="s0">in </span><span class="s2">[</span><span class="s4">&quot;Y&quot;</span><span class="s2">, </span><span class="s4">&quot;Q&quot;</span><span class="s2">]:</span>
+    <span class="s0">for </span><span class="s1">_m </span><span class="s0">in </span><span class="s1">MONTHS</span><span class="s2">:</span>
+        <span class="s1">_alias </span><span class="s2">= </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">_prefix</span><span class="s0">}</span><span class="s4">-</span><span class="s0">{</span><span class="s1">_m</span><span class="s0">}</span><span class="s4">&quot;</span>
+        <span class="s1">OFFSET_TO_PERIOD_FREQSTR</span><span class="s2">[</span><span class="s1">_alias</span><span class="s2">] = </span><span class="s1">_alias</span>
+
+<span class="s0">for </span><span class="s1">_d </span><span class="s0">in </span><span class="s1">DAYS</span><span class="s2">:</span>
+    <span class="s1">OFFSET_TO_PERIOD_FREQSTR</span><span class="s2">[</span><span class="s4">f&quot;W-</span><span class="s0">{</span><span class="s1">_d</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">] = </span><span class="s4">f&quot;W-</span><span class="s0">{</span><span class="s1">_d</span><span class="s0">}</span><span class="s4">&quot;</span>
+
+
+<span class="s0">def </span><span class="s1">get_period_alias</span><span class="s2">(</span><span class="s1">offset_str</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Alias to closest period strings BQ-&gt;Q etc. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">OFFSET_TO_PERIOD_FREQSTR</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">offset_str</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+
+
+<span class="s3"># ---------------------------------------------------------------------</span>
+<span class="s3"># Period codes</span>
+
+
+<span class="s2">@</span><span class="s1">set_module</span><span class="s2">(</span><span class="s4">&quot;pandas&quot;</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">infer_freq</span><span class="s2">(</span>
+    <span class="s1">index</span><span class="s2">: </span><span class="s1">DatetimeIndex </span><span class="s2">| </span><span class="s1">TimedeltaIndex </span><span class="s2">| </span><span class="s1">Series </span><span class="s2">| </span><span class="s1">DatetimeLikeArrayMixin</span><span class="s2">,</span>
+<span class="s2">) </span><span class="s1">-&gt; str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Infer the most likely frequency given the input index. 
+ 
+    This method attempts to deduce the most probable frequency (e.g., 'D' for daily, 
+    'H' for hourly) from a sequence of datetime-like objects. It is particularly useful 
+    when the frequency of a time series is not explicitly set or known but can be 
+    inferred from its values. 
+ 
+    Parameters 
+    ---------- 
+    index : DatetimeIndex, TimedeltaIndex, Series or array-like 
+      If passed a Series will use the values of the series (NOT THE INDEX). 
+ 
+    Returns 
+    ------- 
+    str or None 
+        None if no discernible frequency. 
+ 
+    Raises 
+    ------ 
+    TypeError 
+        If the index is not datetime-like. 
+    ValueError 
+        If there are fewer than three values. 
+ 
+    See Also 
+    -------- 
+    date_range : Return a fixed frequency DatetimeIndex. 
+    timedelta_range : Return a fixed frequency TimedeltaIndex with day as the default. 
+    period_range : Return a fixed frequency PeriodIndex. 
+    DatetimeIndex.freq : Return the frequency object if it is set, otherwise None. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; idx = pd.date_range(start=&quot;2020/12/01&quot;, end=&quot;2020/12/30&quot;, periods=30) 
+    &gt;&gt;&gt; pd.infer_freq(idx) 
+    'D' 
+    &quot;&quot;&quot;</span>
+    <span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">api </span><span class="s0">import </span><span class="s1">DatetimeIndex</span>
+
+    <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">index</span><span class="s2">, </span><span class="s1">ABCSeries</span><span class="s2">):</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">index</span><span class="s2">.</span><span class="s1">_values</span>
+
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">index</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">ArrowDtype</span><span class="s2">):</span>
+            <span class="s0">import </span><span class="s1">pyarrow </span><span class="s0">as </span><span class="s1">pa</span>
+
+            <span class="s0">if </span><span class="s1">pa</span><span class="s2">.</span><span class="s1">types</span><span class="s2">.</span><span class="s1">is_timestamp</span><span class="s2">(</span><span class="s1">values</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">pyarrow_dtype</span><span class="s2">):</span>
+                <span class="s3"># GH#58403</span>
+                <span class="s1">values </span><span class="s2">= </span><span class="s1">values</span><span class="s2">.</span><span class="s1">_to_datetimearray</span><span class="s2">()</span>
+
+        <span class="s0">if not </span><span class="s2">(</span>
+            <span class="s1">lib</span><span class="s2">.</span><span class="s1">is_np_dtype</span><span class="s2">(</span><span class="s1">values</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s4">&quot;mM&quot;</span><span class="s2">)</span>
+            <span class="s0">or </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">values</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">DatetimeTZDtype</span><span class="s2">)</span>
+            <span class="s0">or </span><span class="s1">values</span><span class="s2">.</span><span class="s1">dtype </span><span class="s2">== </span><span class="s1">object</span>
+        <span class="s2">):</span>
+            <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span>
+                <span class="s4">&quot;cannot infer freq from a non-convertible dtype &quot;</span>
+                <span class="s4">f&quot;on a Series of </span><span class="s0">{</span><span class="s1">index</span><span class="s2">.</span><span class="s1">dtype</span><span class="s0">}</span><span class="s4">&quot;</span>
+            <span class="s2">)</span>
+        <span class="s1">index </span><span class="s2">= </span><span class="s1">values</span>
+
+    <span class="s1">inferer</span><span class="s2">: </span><span class="s1">_FrequencyInferer</span>
+
+    <span class="s0">if not </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">index</span><span class="s2">, </span><span class="s4">&quot;dtype&quot;</span><span class="s2">):</span>
+        <span class="s0">pass</span>
+    <span class="s0">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">index</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">PeriodDtype</span><span class="s2">):</span>
+        <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span>
+            <span class="s4">&quot;PeriodIndex given. Check the `freq` attribute instead of using infer_freq.&quot;</span>
+        <span class="s2">)</span>
+    <span class="s0">elif </span><span class="s1">lib</span><span class="s2">.</span><span class="s1">is_np_dtype</span><span class="s2">(</span><span class="s1">index</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s4">&quot;m&quot;</span><span class="s2">):</span>
+        <span class="s3"># Allow TimedeltaIndex and TimedeltaArray</span>
+        <span class="s1">inferer </span><span class="s2">= </span><span class="s1">_TimedeltaFrequencyInferer</span><span class="s2">(</span><span class="s1">index</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">inferer</span><span class="s2">.</span><span class="s1">get_freq</span><span class="s2">()</span>
+
+    <span class="s0">elif </span><span class="s1">is_numeric_dtype</span><span class="s2">(</span><span class="s1">index</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">):</span>
+        <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span>
+            <span class="s4">f&quot;cannot infer freq from a non-convertible index of dtype </span><span class="s0">{</span><span class="s1">index</span><span class="s2">.</span><span class="s1">dtype</span><span class="s0">}</span><span class="s4">&quot;</span>
+        <span class="s2">)</span>
+
+    <span class="s0">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">index</span><span class="s2">, </span><span class="s1">DatetimeIndex</span><span class="s2">):</span>
+        <span class="s1">index </span><span class="s2">= </span><span class="s1">DatetimeIndex</span><span class="s2">(</span><span class="s1">index</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+
+    <span class="s1">inferer </span><span class="s2">= </span><span class="s1">_FrequencyInferer</span><span class="s2">(</span><span class="s1">index</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">inferer</span><span class="s2">.</span><span class="s1">get_freq</span><span class="s2">()</span>
+
+
+<span class="s0">class </span><span class="s1">_FrequencyInferer</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Not sure if I can avoid the state machine here 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">index</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">index </span><span class="s2">= </span><span class="s1">index</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">i8values </span><span class="s2">= </span><span class="s1">index</span><span class="s2">.</span><span class="s1">asi8</span>
+
+        <span class="s3"># For get_unit_from_dtype we need the dtype to the underlying ndarray,</span>
+        <span class="s3">#  which for tz-aware is not the same as index.dtype</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">index</span><span class="s2">, </span><span class="s1">ABCIndex</span><span class="s2">):</span>
+            <span class="s3"># error: Item &quot;ndarray[Any, Any]&quot; of &quot;Union[ExtensionArray,</span>
+            <span class="s3"># ndarray[Any, Any]]&quot; has no attribute &quot;_ndarray&quot;</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_creso </span><span class="s2">= </span><span class="s1">get_unit_from_dtype</span><span class="s2">(</span>
+                <span class="s1">index</span><span class="s2">.</span><span class="s1">_data</span><span class="s2">.</span><span class="s1">_ndarray</span><span class="s2">.</span><span class="s1">dtype  </span><span class="s3"># type: ignore[union-attr]</span>
+            <span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s3"># otherwise we have DTA/TDA</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_creso </span><span class="s2">= </span><span class="s1">get_unit_from_dtype</span><span class="s2">(</span><span class="s1">index</span><span class="s2">.</span><span class="s1">_ndarray</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">)</span>
+
+        <span class="s3"># This moves the values, which are implicitly in UTC, to the</span>
+        <span class="s3"># the timezone so they are in local time</span>
+        <span class="s0">if </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">index</span><span class="s2">, </span><span class="s4">&quot;tz&quot;</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s1">index</span><span class="s2">.</span><span class="s1">tz </span><span class="s0">is not None</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">i8values </span><span class="s2">= </span><span class="s1">tz_convert_from_utc</span><span class="s2">(</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">i8values</span><span class="s2">, </span><span class="s1">index</span><span class="s2">.</span><span class="s1">tz</span><span class="s2">, </span><span class="s1">reso</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_creso</span>
+                <span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">index</span><span class="s2">) &lt; </span><span class="s6">3</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s4">&quot;Need at least 3 dates to infer frequency&quot;</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">is_monotonic </span><span class="s2">= (</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">_is_monotonic_increasing </span><span class="s0">or </span><span class="s1">self</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">_is_monotonic_decreasing</span>
+        <span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">cache_readonly</span>
+    <span class="s0">def </span><span class="s1">deltas</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; npt</span><span class="s2">.</span><span class="s1">NDArray</span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">]:</span>
+        <span class="s0">return </span><span class="s1">unique_deltas</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">i8values</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">cache_readonly</span>
+    <span class="s0">def </span><span class="s1">deltas_asi8</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; npt</span><span class="s2">.</span><span class="s1">NDArray</span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">]:</span>
+        <span class="s3"># NB: we cannot use self.i8values here because we may have converted</span>
+        <span class="s3">#  the tz in __init__</span>
+        <span class="s0">return </span><span class="s1">unique_deltas</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">asi8</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">cache_readonly</span>
+    <span class="s0">def </span><span class="s1">is_unique</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">deltas</span><span class="s2">) == </span><span class="s6">1</span>
+
+    <span class="s2">@</span><span class="s1">cache_readonly</span>
+    <span class="s0">def </span><span class="s1">is_unique_asi8</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">deltas_asi8</span><span class="s2">) == </span><span class="s6">1</span>
+
+    <span class="s0">def </span><span class="s1">get_freq</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Find the appropriate frequency string to describe the inferred 
+        frequency of self.i8values 
+ 
+        Returns 
+        ------- 
+        str or None 
+        &quot;&quot;&quot;</span>
+        <span class="s0">if not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">is_monotonic </span><span class="s0">or not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">_is_unique</span><span class="s2">:</span>
+            <span class="s0">return None</span>
+
+        <span class="s1">delta </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">deltas</span><span class="s2">[</span><span class="s6">0</span><span class="s2">]</span>
+        <span class="s1">ppd </span><span class="s2">= </span><span class="s1">periods_per_day</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_creso</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">delta </span><span class="s0">and </span><span class="s1">_is_multiple</span><span class="s2">(</span><span class="s1">delta</span><span class="s2">, </span><span class="s1">ppd</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_infer_daily_rule</span><span class="s2">()</span>
+
+        <span class="s3"># Business hourly, maybe. 17: one day / 65: one weekend</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">hour_deltas </span><span class="s0">in </span><span class="s2">([</span><span class="s6">1</span><span class="s2">, </span><span class="s6">17</span><span class="s2">], [</span><span class="s6">1</span><span class="s2">, </span><span class="s6">65</span><span class="s2">], [</span><span class="s6">1</span><span class="s2">, </span><span class="s6">17</span><span class="s2">, </span><span class="s6">65</span><span class="s2">]):</span>
+            <span class="s0">return </span><span class="s4">&quot;bh&quot;</span>
+
+        <span class="s3"># Possibly intraday frequency.  Here we use the</span>
+        <span class="s3"># original .asi8 values as the modified values</span>
+        <span class="s3"># will not work around DST transitions.  See #8772</span>
+        <span class="s0">if not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">is_unique_asi8</span><span class="s2">:</span>
+            <span class="s0">return None</span>
+
+        <span class="s1">delta </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">deltas_asi8</span><span class="s2">[</span><span class="s6">0</span><span class="s2">]</span>
+        <span class="s1">pph </span><span class="s2">= </span><span class="s1">ppd </span><span class="s2">// </span><span class="s6">24</span>
+        <span class="s1">ppm </span><span class="s2">= </span><span class="s1">pph </span><span class="s2">// </span><span class="s6">60</span>
+        <span class="s1">pps </span><span class="s2">= </span><span class="s1">ppm </span><span class="s2">// </span><span class="s6">60</span>
+        <span class="s0">if </span><span class="s1">_is_multiple</span><span class="s2">(</span><span class="s1">delta</span><span class="s2">, </span><span class="s1">pph</span><span class="s2">):</span>
+            <span class="s3"># Hours</span>
+            <span class="s0">return </span><span class="s1">_maybe_add_count</span><span class="s2">(</span><span class="s4">&quot;h&quot;</span><span class="s2">, </span><span class="s1">delta </span><span class="s2">/ </span><span class="s1">pph</span><span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">_is_multiple</span><span class="s2">(</span><span class="s1">delta</span><span class="s2">, </span><span class="s1">ppm</span><span class="s2">):</span>
+            <span class="s3"># Minutes</span>
+            <span class="s0">return </span><span class="s1">_maybe_add_count</span><span class="s2">(</span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s1">delta </span><span class="s2">/ </span><span class="s1">ppm</span><span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">_is_multiple</span><span class="s2">(</span><span class="s1">delta</span><span class="s2">, </span><span class="s1">pps</span><span class="s2">):</span>
+            <span class="s3"># Seconds</span>
+            <span class="s0">return </span><span class="s1">_maybe_add_count</span><span class="s2">(</span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s1">delta </span><span class="s2">/ </span><span class="s1">pps</span><span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">_is_multiple</span><span class="s2">(</span><span class="s1">delta</span><span class="s2">, (</span><span class="s1">pps </span><span class="s2">// </span><span class="s6">1000</span><span class="s2">)):</span>
+            <span class="s3"># Milliseconds</span>
+            <span class="s0">return </span><span class="s1">_maybe_add_count</span><span class="s2">(</span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s1">delta </span><span class="s2">/ (</span><span class="s1">pps </span><span class="s2">// </span><span class="s6">1000</span><span class="s2">))</span>
+        <span class="s0">elif </span><span class="s1">_is_multiple</span><span class="s2">(</span><span class="s1">delta</span><span class="s2">, (</span><span class="s1">pps </span><span class="s2">// </span><span class="s6">1_000_000</span><span class="s2">)):</span>
+            <span class="s3"># Microseconds</span>
+            <span class="s0">return </span><span class="s1">_maybe_add_count</span><span class="s2">(</span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s1">delta </span><span class="s2">/ (</span><span class="s1">pps </span><span class="s2">// </span><span class="s6">1_000_000</span><span class="s2">))</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s3"># Nanoseconds</span>
+            <span class="s0">return </span><span class="s1">_maybe_add_count</span><span class="s2">(</span><span class="s4">&quot;ns&quot;</span><span class="s2">, </span><span class="s1">delta</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">cache_readonly</span>
+    <span class="s0">def </span><span class="s1">day_deltas</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; list</span><span class="s2">[</span><span class="s1">int</span><span class="s2">]:</span>
+        <span class="s1">ppd </span><span class="s2">= </span><span class="s1">periods_per_day</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_creso</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s2">[</span><span class="s1">x </span><span class="s2">/ </span><span class="s1">ppd </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">deltas</span><span class="s2">]</span>
+
+    <span class="s2">@</span><span class="s1">cache_readonly</span>
+    <span class="s0">def </span><span class="s1">hour_deltas</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; list</span><span class="s2">[</span><span class="s1">int</span><span class="s2">]:</span>
+        <span class="s1">pph </span><span class="s2">= </span><span class="s1">periods_per_day</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_creso</span><span class="s2">) // </span><span class="s6">24</span>
+        <span class="s0">return </span><span class="s2">[</span><span class="s1">x </span><span class="s2">/ </span><span class="s1">pph </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">deltas</span><span class="s2">]</span>
+
+    <span class="s2">@</span><span class="s1">cache_readonly</span>
+    <span class="s0">def </span><span class="s1">fields</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">:  </span><span class="s3"># structured array of fields</span>
+        <span class="s0">return </span><span class="s1">build_field_sarray</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">i8values</span><span class="s2">, </span><span class="s1">reso</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_creso</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">cache_readonly</span>
+    <span class="s0">def </span><span class="s1">rep_stamp</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Timestamp</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">Timestamp</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">i8values</span><span class="s2">[</span><span class="s6">0</span><span class="s2">], </span><span class="s1">unit</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">unit</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">month_position_check</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">month_position_check</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">fields</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">dayofweek</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">cache_readonly</span>
+    <span class="s0">def </span><span class="s1">mdiffs</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; npt</span><span class="s2">.</span><span class="s1">NDArray</span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">]:</span>
+        <span class="s1">nmonths </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">fields</span><span class="s2">[</span><span class="s4">&quot;Y&quot;</span><span class="s2">] * </span><span class="s6">12 </span><span class="s2">+ </span><span class="s1">self</span><span class="s2">.</span><span class="s1">fields</span><span class="s2">[</span><span class="s4">&quot;M&quot;</span><span class="s2">]</span>
+        <span class="s0">return </span><span class="s1">unique_deltas</span><span class="s2">(</span><span class="s1">nmonths</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s4">&quot;i8&quot;</span><span class="s2">))</span>
+
+    <span class="s2">@</span><span class="s1">cache_readonly</span>
+    <span class="s0">def </span><span class="s1">ydiffs</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; npt</span><span class="s2">.</span><span class="s1">NDArray</span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">]:</span>
+        <span class="s0">return </span><span class="s1">unique_deltas</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">fields</span><span class="s2">[</span><span class="s4">&quot;Y&quot;</span><span class="s2">].</span><span class="s1">astype</span><span class="s2">(</span><span class="s4">&quot;i8&quot;</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">_infer_daily_rule</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">annual_rule </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_annual_rule</span><span class="s2">()</span>
+        <span class="s0">if </span><span class="s1">annual_rule</span><span class="s2">:</span>
+            <span class="s1">nyears </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">ydiffs</span><span class="s2">[</span><span class="s6">0</span><span class="s2">]</span>
+            <span class="s1">month </span><span class="s2">= </span><span class="s1">MONTH_ALIASES</span><span class="s2">[</span><span class="s1">self</span><span class="s2">.</span><span class="s1">rep_stamp</span><span class="s2">.</span><span class="s1">month</span><span class="s2">]</span>
+            <span class="s1">alias </span><span class="s2">= </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">annual_rule</span><span class="s0">}</span><span class="s4">-</span><span class="s0">{</span><span class="s1">month</span><span class="s0">}</span><span class="s4">&quot;</span>
+            <span class="s0">return </span><span class="s1">_maybe_add_count</span><span class="s2">(</span><span class="s1">alias</span><span class="s2">, </span><span class="s1">nyears</span><span class="s2">)</span>
+
+        <span class="s1">quarterly_rule </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_quarterly_rule</span><span class="s2">()</span>
+        <span class="s0">if </span><span class="s1">quarterly_rule</span><span class="s2">:</span>
+            <span class="s1">nquarters </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">mdiffs</span><span class="s2">[</span><span class="s6">0</span><span class="s2">] / </span><span class="s6">3</span>
+            <span class="s1">mod_dict </span><span class="s2">= {</span><span class="s6">0</span><span class="s2">: </span><span class="s6">12</span><span class="s2">, </span><span class="s6">2</span><span class="s2">: </span><span class="s6">11</span><span class="s2">, </span><span class="s6">1</span><span class="s2">: </span><span class="s6">10</span><span class="s2">}</span>
+            <span class="s1">month </span><span class="s2">= </span><span class="s1">MONTH_ALIASES</span><span class="s2">[</span><span class="s1">mod_dict</span><span class="s2">[</span><span class="s1">self</span><span class="s2">.</span><span class="s1">rep_stamp</span><span class="s2">.</span><span class="s1">month </span><span class="s2">% </span><span class="s6">3</span><span class="s2">]]</span>
+            <span class="s1">alias </span><span class="s2">= </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">quarterly_rule</span><span class="s0">}</span><span class="s4">-</span><span class="s0">{</span><span class="s1">month</span><span class="s0">}</span><span class="s4">&quot;</span>
+            <span class="s0">return </span><span class="s1">_maybe_add_count</span><span class="s2">(</span><span class="s1">alias</span><span class="s2">, </span><span class="s1">nquarters</span><span class="s2">)</span>
+
+        <span class="s1">monthly_rule </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_monthly_rule</span><span class="s2">()</span>
+        <span class="s0">if </span><span class="s1">monthly_rule</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">_maybe_add_count</span><span class="s2">(</span><span class="s1">monthly_rule</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">mdiffs</span><span class="s2">[</span><span class="s6">0</span><span class="s2">])</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">is_unique</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_daily_rule</span><span class="s2">()</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_is_business_daily</span><span class="s2">():</span>
+            <span class="s0">return </span><span class="s4">&quot;B&quot;</span>
+
+        <span class="s1">wom_rule </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_wom_rule</span><span class="s2">()</span>
+        <span class="s0">if </span><span class="s1">wom_rule</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">wom_rule</span>
+
+        <span class="s0">return None</span>
+
+    <span class="s0">def </span><span class="s1">_get_daily_rule</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">ppd </span><span class="s2">= </span><span class="s1">periods_per_day</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_creso</span><span class="s2">)</span>
+        <span class="s1">days </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">deltas</span><span class="s2">[</span><span class="s6">0</span><span class="s2">] / </span><span class="s1">ppd</span>
+        <span class="s0">if </span><span class="s1">days </span><span class="s2">% </span><span class="s6">7 </span><span class="s2">== </span><span class="s6">0</span><span class="s2">:</span>
+            <span class="s3"># Weekly</span>
+            <span class="s1">wd </span><span class="s2">= </span><span class="s1">int_to_weekday</span><span class="s2">[</span><span class="s1">self</span><span class="s2">.</span><span class="s1">rep_stamp</span><span class="s2">.</span><span class="s1">weekday</span><span class="s2">()]</span>
+            <span class="s1">alias </span><span class="s2">= </span><span class="s4">f&quot;W-</span><span class="s0">{</span><span class="s1">wd</span><span class="s0">}</span><span class="s4">&quot;</span>
+            <span class="s0">return </span><span class="s1">_maybe_add_count</span><span class="s2">(</span><span class="s1">alias</span><span class="s2">, </span><span class="s1">days </span><span class="s2">/ </span><span class="s6">7</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">_maybe_add_count</span><span class="s2">(</span><span class="s4">&quot;D&quot;</span><span class="s2">, </span><span class="s1">days</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_get_annual_rule</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">ydiffs</span><span class="s2">) &gt; </span><span class="s6">1</span><span class="s2">:</span>
+            <span class="s0">return None</span>
+
+        <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">unique</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">fields</span><span class="s2">[</span><span class="s4">&quot;M&quot;</span><span class="s2">])) &gt; </span><span class="s6">1</span><span class="s2">:</span>
+            <span class="s0">return None</span>
+
+        <span class="s1">pos_check </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">month_position_check</span><span class="s2">()</span>
+
+        <span class="s0">if </span><span class="s1">pos_check </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s0">return None</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s2">{</span><span class="s4">&quot;cs&quot;</span><span class="s2">: </span><span class="s4">&quot;YS&quot;</span><span class="s2">, </span><span class="s4">&quot;bs&quot;</span><span class="s2">: </span><span class="s4">&quot;BYS&quot;</span><span class="s2">, </span><span class="s4">&quot;ce&quot;</span><span class="s2">: </span><span class="s4">&quot;YE&quot;</span><span class="s2">, </span><span class="s4">&quot;be&quot;</span><span class="s2">: </span><span class="s4">&quot;BYE&quot;</span><span class="s2">}.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">pos_check</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_get_quarterly_rule</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">mdiffs</span><span class="s2">) &gt; </span><span class="s6">1</span><span class="s2">:</span>
+            <span class="s0">return None</span>
+
+        <span class="s0">if not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">mdiffs</span><span class="s2">[</span><span class="s6">0</span><span class="s2">] % </span><span class="s6">3 </span><span class="s2">== </span><span class="s6">0</span><span class="s2">:</span>
+            <span class="s0">return None</span>
+
+        <span class="s1">pos_check </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">month_position_check</span><span class="s2">()</span>
+
+        <span class="s0">if </span><span class="s1">pos_check </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s0">return None</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s2">{</span><span class="s4">&quot;cs&quot;</span><span class="s2">: </span><span class="s4">&quot;QS&quot;</span><span class="s2">, </span><span class="s4">&quot;bs&quot;</span><span class="s2">: </span><span class="s4">&quot;BQS&quot;</span><span class="s2">, </span><span class="s4">&quot;ce&quot;</span><span class="s2">: </span><span class="s4">&quot;QE&quot;</span><span class="s2">, </span><span class="s4">&quot;be&quot;</span><span class="s2">: </span><span class="s4">&quot;BQE&quot;</span><span class="s2">}.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">pos_check</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_get_monthly_rule</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">mdiffs</span><span class="s2">) &gt; </span><span class="s6">1</span><span class="s2">:</span>
+            <span class="s0">return None</span>
+        <span class="s1">pos_check </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">month_position_check</span><span class="s2">()</span>
+
+        <span class="s0">if </span><span class="s1">pos_check </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s0">return None</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s2">{</span><span class="s4">&quot;cs&quot;</span><span class="s2">: </span><span class="s4">&quot;MS&quot;</span><span class="s2">, </span><span class="s4">&quot;bs&quot;</span><span class="s2">: </span><span class="s4">&quot;BMS&quot;</span><span class="s2">, </span><span class="s4">&quot;ce&quot;</span><span class="s2">: </span><span class="s4">&quot;ME&quot;</span><span class="s2">, </span><span class="s4">&quot;be&quot;</span><span class="s2">: </span><span class="s4">&quot;BME&quot;</span><span class="s2">}.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">pos_check</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_is_business_daily</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s3"># quick check: cannot be business daily</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">day_deltas </span><span class="s2">!= [</span><span class="s6">1</span><span class="s2">, </span><span class="s6">3</span><span class="s2">]:</span>
+            <span class="s0">return False</span>
+
+        <span class="s3"># probably business daily, but need to confirm</span>
+        <span class="s1">first_weekday </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">index</span><span class="s2">[</span><span class="s6">0</span><span class="s2">].</span><span class="s1">weekday</span><span class="s2">()</span>
+        <span class="s1">shifts </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">diff</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">i8values</span><span class="s2">)</span>
+        <span class="s1">ppd </span><span class="s2">= </span><span class="s1">periods_per_day</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_creso</span><span class="s2">)</span>
+        <span class="s1">shifts </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">floor_divide</span><span class="s2">(</span><span class="s1">shifts</span><span class="s2">, </span><span class="s1">ppd</span><span class="s2">)</span>
+        <span class="s1">weekdays </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">mod</span><span class="s2">(</span><span class="s1">first_weekday </span><span class="s2">+ </span><span class="s1">np</span><span class="s2">.</span><span class="s1">cumsum</span><span class="s2">(</span><span class="s1">shifts</span><span class="s2">), </span><span class="s6">7</span><span class="s2">)</span>
+
+        <span class="s0">return </span><span class="s1">bool</span><span class="s2">(</span>
+            <span class="s1">np</span><span class="s2">.</span><span class="s1">all</span><span class="s2">(</span>
+                <span class="s2">((</span><span class="s1">weekdays </span><span class="s2">== </span><span class="s6">0</span><span class="s2">) &amp; (</span><span class="s1">shifts </span><span class="s2">== </span><span class="s6">3</span><span class="s2">))</span>
+                <span class="s2">| ((</span><span class="s1">weekdays </span><span class="s2">&gt; </span><span class="s6">0</span><span class="s2">) &amp; (</span><span class="s1">weekdays </span><span class="s2">&lt;= </span><span class="s6">4</span><span class="s2">) &amp; (</span><span class="s1">shifts </span><span class="s2">== </span><span class="s6">1</span><span class="s2">))</span>
+            <span class="s2">)</span>
+        <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_get_wom_rule</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">weekdays </span><span class="s2">= </span><span class="s1">unique</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">weekday</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">weekdays</span><span class="s2">) &gt; </span><span class="s6">1</span><span class="s2">:</span>
+            <span class="s0">return None</span>
+
+        <span class="s1">week_of_months </span><span class="s2">= </span><span class="s1">unique</span><span class="s2">((</span><span class="s1">self</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">day </span><span class="s2">- </span><span class="s6">1</span><span class="s2">) // </span><span class="s6">7</span><span class="s2">)</span>
+        <span class="s3"># Only attempt to infer up to WOM-4. See #9425</span>
+        <span class="s1">week_of_months </span><span class="s2">= </span><span class="s1">week_of_months</span><span class="s2">[</span><span class="s1">week_of_months </span><span class="s2">&lt; </span><span class="s6">4</span><span class="s2">]</span>
+        <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">week_of_months</span><span class="s2">) == </span><span class="s6">0 </span><span class="s0">or </span><span class="s1">len</span><span class="s2">(</span><span class="s1">week_of_months</span><span class="s2">) &gt; </span><span class="s6">1</span><span class="s2">:</span>
+            <span class="s0">return None</span>
+
+        <span class="s3"># get which week</span>
+        <span class="s1">week </span><span class="s2">= </span><span class="s1">week_of_months</span><span class="s2">[</span><span class="s6">0</span><span class="s2">] + </span><span class="s6">1</span>
+        <span class="s1">wd </span><span class="s2">= </span><span class="s1">int_to_weekday</span><span class="s2">[</span><span class="s1">weekdays</span><span class="s2">[</span><span class="s6">0</span><span class="s2">]]</span>
+
+        <span class="s0">return </span><span class="s4">f&quot;WOM-</span><span class="s0">{</span><span class="s1">week</span><span class="s0">}{</span><span class="s1">wd</span><span class="s0">}</span><span class="s4">&quot;</span>
+
+
+<span class="s0">class </span><span class="s1">_TimedeltaFrequencyInferer</span><span class="s2">(</span><span class="s1">_FrequencyInferer</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">_infer_daily_rule</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">is_unique</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_daily_rule</span><span class="s2">()</span>
+
+
+<span class="s0">def </span><span class="s1">_is_multiple</span><span class="s2">(</span><span class="s1">us</span><span class="s2">, </span><span class="s1">mult</span><span class="s2">: </span><span class="s1">int</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s0">return </span><span class="s1">us </span><span class="s2">% </span><span class="s1">mult </span><span class="s2">== </span><span class="s6">0</span>
+
+
+<span class="s0">def </span><span class="s1">_maybe_add_count</span><span class="s2">(</span><span class="s1">base</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">count</span><span class="s2">: </span><span class="s1">float</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+    <span class="s0">if </span><span class="s1">count </span><span class="s2">!= </span><span class="s6">1</span><span class="s2">:</span>
+        <span class="s0">assert </span><span class="s1">count </span><span class="s2">== </span><span class="s1">int</span><span class="s2">(</span><span class="s1">count</span><span class="s2">)</span>
+        <span class="s1">count </span><span class="s2">= </span><span class="s1">int</span><span class="s2">(</span><span class="s1">count</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">count</span><span class="s0">}{</span><span class="s1">base</span><span class="s0">}</span><span class="s4">&quot;</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">base</span>
+
+
+<span class="s3"># ----------------------------------------------------------------------</span>
+<span class="s3"># Frequency comparison</span>
+
+
+<span class="s0">def </span><span class="s1">is_subperiod</span><span class="s2">(</span><span class="s1">source</span><span class="s2">, </span><span class="s1">target</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Returns True if downsampling is possible between source and target 
+    frequencies 
+ 
+    Parameters 
+    ---------- 
+    source : str or DateOffset 
+        Frequency converting from 
+    target : str or DateOffset 
+        Frequency converting to 
+ 
+    Returns 
+    ------- 
+    bool 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">target </span><span class="s0">is None or </span><span class="s1">source </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s0">return False</span>
+    <span class="s1">source </span><span class="s2">= </span><span class="s1">_maybe_coerce_freq</span><span class="s2">(</span><span class="s1">source</span><span class="s2">)</span>
+    <span class="s1">target </span><span class="s2">= </span><span class="s1">_maybe_coerce_freq</span><span class="s2">(</span><span class="s1">target</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">_is_annual</span><span class="s2">(</span><span class="s1">target</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">_is_quarterly</span><span class="s2">(</span><span class="s1">source</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">_quarter_months_conform</span><span class="s2">(</span>
+                <span class="s1">get_rule_month</span><span class="s2">(</span><span class="s1">source</span><span class="s2">), </span><span class="s1">get_rule_month</span><span class="s2">(</span><span class="s1">target</span><span class="s2">)</span>
+            <span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">source </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;D&quot;</span><span class="s2">, </span><span class="s4">&quot;C&quot;</span><span class="s2">, </span><span class="s4">&quot;B&quot;</span><span class="s2">, </span><span class="s4">&quot;M&quot;</span><span class="s2">, </span><span class="s4">&quot;h&quot;</span><span class="s2">, </span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">_is_quarterly</span><span class="s2">(</span><span class="s1">target</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">source </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;D&quot;</span><span class="s2">, </span><span class="s4">&quot;C&quot;</span><span class="s2">, </span><span class="s4">&quot;B&quot;</span><span class="s2">, </span><span class="s4">&quot;M&quot;</span><span class="s2">, </span><span class="s4">&quot;h&quot;</span><span class="s2">, </span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">_is_monthly</span><span class="s2">(</span><span class="s1">target</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">source </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;D&quot;</span><span class="s2">, </span><span class="s4">&quot;C&quot;</span><span class="s2">, </span><span class="s4">&quot;B&quot;</span><span class="s2">, </span><span class="s4">&quot;h&quot;</span><span class="s2">, </span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">_is_weekly</span><span class="s2">(</span><span class="s1">target</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">source </span><span class="s0">in </span><span class="s2">{</span><span class="s1">target</span><span class="s2">, </span><span class="s4">&quot;D&quot;</span><span class="s2">, </span><span class="s4">&quot;C&quot;</span><span class="s2">, </span><span class="s4">&quot;B&quot;</span><span class="s2">, </span><span class="s4">&quot;h&quot;</span><span class="s2">, </span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">target </span><span class="s2">== </span><span class="s4">&quot;B&quot;</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">source </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;B&quot;</span><span class="s2">, </span><span class="s4">&quot;h&quot;</span><span class="s2">, </span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">target </span><span class="s2">== </span><span class="s4">&quot;C&quot;</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">source </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;C&quot;</span><span class="s2">, </span><span class="s4">&quot;h&quot;</span><span class="s2">, </span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">target </span><span class="s2">== </span><span class="s4">&quot;D&quot;</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">source </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;D&quot;</span><span class="s2">, </span><span class="s4">&quot;h&quot;</span><span class="s2">, </span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">target </span><span class="s2">== </span><span class="s4">&quot;h&quot;</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">source </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;h&quot;</span><span class="s2">, </span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">target </span><span class="s2">== </span><span class="s4">&quot;min&quot;</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">source </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">target </span><span class="s2">== </span><span class="s4">&quot;s&quot;</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">source </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">target </span><span class="s2">== </span><span class="s4">&quot;ms&quot;</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">source </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">target </span><span class="s2">== </span><span class="s4">&quot;us&quot;</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">source </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">target </span><span class="s2">== </span><span class="s4">&quot;ns&quot;</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">source </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">return False</span>
+
+
+<span class="s0">def </span><span class="s1">is_superperiod</span><span class="s2">(</span><span class="s1">source</span><span class="s2">, </span><span class="s1">target</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Returns True if upsampling is possible between source and target 
+    frequencies 
+ 
+    Parameters 
+    ---------- 
+    source : str or DateOffset 
+        Frequency converting from 
+    target : str or DateOffset 
+        Frequency converting to 
+ 
+    Returns 
+    ------- 
+    bool 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">target </span><span class="s0">is None or </span><span class="s1">source </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s0">return False</span>
+    <span class="s1">source </span><span class="s2">= </span><span class="s1">_maybe_coerce_freq</span><span class="s2">(</span><span class="s1">source</span><span class="s2">)</span>
+    <span class="s1">target </span><span class="s2">= </span><span class="s1">_maybe_coerce_freq</span><span class="s2">(</span><span class="s1">target</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">_is_annual</span><span class="s2">(</span><span class="s1">source</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">_is_annual</span><span class="s2">(</span><span class="s1">target</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">get_rule_month</span><span class="s2">(</span><span class="s1">source</span><span class="s2">) == </span><span class="s1">get_rule_month</span><span class="s2">(</span><span class="s1">target</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">_is_quarterly</span><span class="s2">(</span><span class="s1">target</span><span class="s2">):</span>
+            <span class="s1">smonth </span><span class="s2">= </span><span class="s1">get_rule_month</span><span class="s2">(</span><span class="s1">source</span><span class="s2">)</span>
+            <span class="s1">tmonth </span><span class="s2">= </span><span class="s1">get_rule_month</span><span class="s2">(</span><span class="s1">target</span><span class="s2">)</span>
+            <span class="s0">return </span><span class="s1">_quarter_months_conform</span><span class="s2">(</span><span class="s1">smonth</span><span class="s2">, </span><span class="s1">tmonth</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">target </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;D&quot;</span><span class="s2">, </span><span class="s4">&quot;C&quot;</span><span class="s2">, </span><span class="s4">&quot;B&quot;</span><span class="s2">, </span><span class="s4">&quot;M&quot;</span><span class="s2">, </span><span class="s4">&quot;h&quot;</span><span class="s2">, </span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">_is_quarterly</span><span class="s2">(</span><span class="s1">source</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">target </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;D&quot;</span><span class="s2">, </span><span class="s4">&quot;C&quot;</span><span class="s2">, </span><span class="s4">&quot;B&quot;</span><span class="s2">, </span><span class="s4">&quot;M&quot;</span><span class="s2">, </span><span class="s4">&quot;h&quot;</span><span class="s2">, </span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">_is_monthly</span><span class="s2">(</span><span class="s1">source</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">target </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;D&quot;</span><span class="s2">, </span><span class="s4">&quot;C&quot;</span><span class="s2">, </span><span class="s4">&quot;B&quot;</span><span class="s2">, </span><span class="s4">&quot;h&quot;</span><span class="s2">, </span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">_is_weekly</span><span class="s2">(</span><span class="s1">source</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">target </span><span class="s0">in </span><span class="s2">{</span><span class="s1">source</span><span class="s2">, </span><span class="s4">&quot;D&quot;</span><span class="s2">, </span><span class="s4">&quot;C&quot;</span><span class="s2">, </span><span class="s4">&quot;B&quot;</span><span class="s2">, </span><span class="s4">&quot;h&quot;</span><span class="s2">, </span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">source </span><span class="s2">== </span><span class="s4">&quot;B&quot;</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">target </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;D&quot;</span><span class="s2">, </span><span class="s4">&quot;C&quot;</span><span class="s2">, </span><span class="s4">&quot;B&quot;</span><span class="s2">, </span><span class="s4">&quot;h&quot;</span><span class="s2">, </span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">source </span><span class="s2">== </span><span class="s4">&quot;C&quot;</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">target </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;D&quot;</span><span class="s2">, </span><span class="s4">&quot;C&quot;</span><span class="s2">, </span><span class="s4">&quot;B&quot;</span><span class="s2">, </span><span class="s4">&quot;h&quot;</span><span class="s2">, </span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">source </span><span class="s2">== </span><span class="s4">&quot;D&quot;</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">target </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;D&quot;</span><span class="s2">, </span><span class="s4">&quot;C&quot;</span><span class="s2">, </span><span class="s4">&quot;B&quot;</span><span class="s2">, </span><span class="s4">&quot;h&quot;</span><span class="s2">, </span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">source </span><span class="s2">== </span><span class="s4">&quot;h&quot;</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">target </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;h&quot;</span><span class="s2">, </span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">source </span><span class="s2">== </span><span class="s4">&quot;min&quot;</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">target </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">source </span><span class="s2">== </span><span class="s4">&quot;s&quot;</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">target </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">source </span><span class="s2">== </span><span class="s4">&quot;ms&quot;</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">target </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">source </span><span class="s2">== </span><span class="s4">&quot;us&quot;</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">target </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">elif </span><span class="s1">source </span><span class="s2">== </span><span class="s4">&quot;ns&quot;</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">target </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;ns&quot;</span><span class="s2">}</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">return False</span>
+
+
+<span class="s0">def </span><span class="s1">_maybe_coerce_freq</span><span class="s2">(</span><span class="s1">code</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot;we might need to coerce a code to a rule_code 
+    and uppercase it 
+ 
+    Parameters 
+    ---------- 
+    source : str or DateOffset 
+        Frequency converting from 
+ 
+    Returns 
+    ------- 
+    str 
+    &quot;&quot;&quot;</span>
+    <span class="s0">assert </span><span class="s1">code </span><span class="s0">is not None</span>
+    <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">code</span><span class="s2">, </span><span class="s1">DateOffset</span><span class="s2">):</span>
+        <span class="s1">code </span><span class="s2">= </span><span class="s1">PeriodDtype</span><span class="s2">(</span><span class="s1">to_offset</span><span class="s2">(</span><span class="s1">code</span><span class="s2">.</span><span class="s1">name</span><span class="s2">)).</span><span class="s1">_freqstr</span>
+    <span class="s0">if </span><span class="s1">code </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;h&quot;</span><span class="s2">, </span><span class="s4">&quot;min&quot;</span><span class="s2">, </span><span class="s4">&quot;s&quot;</span><span class="s2">, </span><span class="s4">&quot;ms&quot;</span><span class="s2">, </span><span class="s4">&quot;us&quot;</span><span class="s2">, </span><span class="s4">&quot;ns&quot;</span><span class="s2">}:</span>
+        <span class="s0">return </span><span class="s1">code</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">code</span><span class="s2">.</span><span class="s1">upper</span><span class="s2">()</span>
+
+
+<span class="s0">def </span><span class="s1">_quarter_months_conform</span><span class="s2">(</span><span class="s1">source</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">target</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s1">snum </span><span class="s2">= </span><span class="s1">MONTH_NUMBERS</span><span class="s2">[</span><span class="s1">source</span><span class="s2">]</span>
+    <span class="s1">tnum </span><span class="s2">= </span><span class="s1">MONTH_NUMBERS</span><span class="s2">[</span><span class="s1">target</span><span class="s2">]</span>
+    <span class="s0">return </span><span class="s1">snum </span><span class="s2">% </span><span class="s6">3 </span><span class="s2">== </span><span class="s1">tnum </span><span class="s2">% </span><span class="s6">3</span>
+
+
+<span class="s0">def </span><span class="s1">_is_annual</span><span class="s2">(</span><span class="s1">rule</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s1">rule </span><span class="s2">= </span><span class="s1">rule</span><span class="s2">.</span><span class="s1">upper</span><span class="s2">()</span>
+    <span class="s0">return </span><span class="s1">rule </span><span class="s2">== </span><span class="s4">&quot;Y&quot; </span><span class="s0">or </span><span class="s1">rule</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s4">&quot;Y-&quot;</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_is_quarterly</span><span class="s2">(</span><span class="s1">rule</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s1">rule </span><span class="s2">= </span><span class="s1">rule</span><span class="s2">.</span><span class="s1">upper</span><span class="s2">()</span>
+    <span class="s0">return </span><span class="s1">rule </span><span class="s2">== </span><span class="s4">&quot;Q&quot; </span><span class="s0">or </span><span class="s1">rule</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">((</span><span class="s4">&quot;Q-&quot;</span><span class="s2">, </span><span class="s4">&quot;BQ&quot;</span><span class="s2">))</span>
+
+
+<span class="s0">def </span><span class="s1">_is_monthly</span><span class="s2">(</span><span class="s1">rule</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s1">rule </span><span class="s2">= </span><span class="s1">rule</span><span class="s2">.</span><span class="s1">upper</span><span class="s2">()</span>
+    <span class="s0">return </span><span class="s1">rule </span><span class="s0">in </span><span class="s2">(</span><span class="s4">&quot;M&quot;</span><span class="s2">, </span><span class="s4">&quot;BM&quot;</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_is_weekly</span><span class="s2">(</span><span class="s1">rule</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s1">rule </span><span class="s2">= </span><span class="s1">rule</span><span class="s2">.</span><span class="s1">upper</span><span class="s2">()</span>
+    <span class="s0">return </span><span class="s1">rule </span><span class="s2">== </span><span class="s4">&quot;W&quot; </span><span class="s0">or </span><span class="s1">rule</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s4">&quot;W-&quot;</span><span class="s2">)</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s4">&quot;Day&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;get_period_alias&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;infer_freq&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;is_subperiod&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;is_superperiod&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;to_offset&quot;</span><span class="s2">,</span>
+<span class="s2">]</span>
+</pre>
+</body>
+</html>

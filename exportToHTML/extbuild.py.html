@@ -1,0 +1,270 @@
+<html>
+<head>
+<title>extbuild.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+extbuild.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Build a c-extension module on-the-fly in tests. 
+See build_and_import_extensions for usage hints 
+ 
+&quot;&quot;&quot;</span>
+
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">pathlib</span>
+<span class="s2">import </span><span class="s1">sys</span>
+<span class="s2">import </span><span class="s1">sysconfig</span>
+<span class="s2">import </span><span class="s1">textwrap</span>
+
+<span class="s2">from </span><span class="s3">.</span><span class="s1">utils </span><span class="s2">import </span><span class="s1">run_subprocess</span>
+
+<span class="s1">__all__ </span><span class="s3">= [</span><span class="s4">'build_and_import_extension'</span><span class="s3">, </span><span class="s4">'compile_extension_module'</span><span class="s3">]</span>
+
+
+<span class="s2">def </span><span class="s1">build_and_import_extension</span><span class="s3">(</span>
+        <span class="s1">modname</span><span class="s3">, </span><span class="s1">functions</span><span class="s3">, *, </span><span class="s1">prologue</span><span class="s3">=</span><span class="s4">&quot;&quot;</span><span class="s3">, </span><span class="s1">build_dir</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">include_dirs</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">more_init</span><span class="s3">=</span><span class="s4">&quot;&quot;</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Build and imports a c-extension module `modname` from a list of function 
+    fragments `functions`. 
+ 
+ 
+    Parameters 
+    ---------- 
+    functions : list of fragments 
+        Each fragment is a sequence of func_name, calling convention, snippet. 
+    prologue : string 
+        Code to precede the rest, usually extra ``#include`` or ``#define`` 
+        macros. 
+    build_dir : pathlib.Path 
+        Where to build the module, usually a temporary directory 
+    include_dirs : list 
+        Extra directories to find include files when compiling 
+    more_init : string 
+        Code to appear in the module PyMODINIT_FUNC 
+ 
+    Returns 
+    ------- 
+    out: module 
+        The module will have been loaded and is ready for use 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; functions = [(&quot;test_bytes&quot;, &quot;METH_O&quot;, \&quot;\&quot;\&quot; 
+        if ( !PyBytesCheck(args)) { 
+            Py_RETURN_FALSE; 
+        } 
+        Py_RETURN_TRUE; 
+    \&quot;\&quot;\&quot;)] 
+    &gt;&gt;&gt; mod = build_and_import_extension(&quot;testme&quot;, functions) 
+    &gt;&gt;&gt; assert not mod.test_bytes('abc') 
+    &gt;&gt;&gt; assert mod.test_bytes(b'abc') 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">include_dirs </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">include_dirs </span><span class="s3">= []</span>
+    <span class="s1">body </span><span class="s3">= </span><span class="s1">prologue </span><span class="s3">+ </span><span class="s1">_make_methods</span><span class="s3">(</span><span class="s1">functions</span><span class="s3">, </span><span class="s1">modname</span><span class="s3">)</span>
+    <span class="s1">init </span><span class="s3">= </span><span class="s4">&quot;&quot;&quot; 
+    PyObject *mod = PyModule_Create(&amp;moduledef); 
+    #ifdef Py_GIL_DISABLED 
+    PyUnstable_Module_SetGIL(mod, Py_MOD_GIL_NOT_USED); 
+    #endif 
+           &quot;&quot;&quot;</span>
+    <span class="s2">if not </span><span class="s1">build_dir</span><span class="s3">:</span>
+        <span class="s1">build_dir </span><span class="s3">= </span><span class="s1">pathlib</span><span class="s3">.</span><span class="s1">Path</span><span class="s3">(</span><span class="s4">'.'</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">more_init</span><span class="s3">:</span>
+        <span class="s1">init </span><span class="s3">+= </span><span class="s4">&quot;&quot;&quot;#define INITERROR return NULL 
+                &quot;&quot;&quot;</span>
+        <span class="s1">init </span><span class="s3">+= </span><span class="s1">more_init</span>
+    <span class="s1">init </span><span class="s3">+= </span><span class="s4">&quot;</span><span class="s2">\n</span><span class="s4">return mod;&quot;</span>
+    <span class="s1">source_string </span><span class="s3">= </span><span class="s1">_make_source</span><span class="s3">(</span><span class="s1">modname</span><span class="s3">, </span><span class="s1">init</span><span class="s3">, </span><span class="s1">body</span><span class="s3">)</span>
+    <span class="s1">mod_so </span><span class="s3">= </span><span class="s1">compile_extension_module</span><span class="s3">(</span>
+        <span class="s1">modname</span><span class="s3">, </span><span class="s1">build_dir</span><span class="s3">, </span><span class="s1">include_dirs</span><span class="s3">, </span><span class="s1">source_string</span><span class="s3">)</span>
+    <span class="s2">import </span><span class="s1">importlib</span><span class="s3">.</span><span class="s1">util</span>
+    <span class="s1">spec </span><span class="s3">= </span><span class="s1">importlib</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">spec_from_file_location</span><span class="s3">(</span><span class="s1">modname</span><span class="s3">, </span><span class="s1">mod_so</span><span class="s3">)</span>
+    <span class="s1">foo </span><span class="s3">= </span><span class="s1">importlib</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">module_from_spec</span><span class="s3">(</span><span class="s1">spec</span><span class="s3">)</span>
+    <span class="s1">spec</span><span class="s3">.</span><span class="s1">loader</span><span class="s3">.</span><span class="s1">exec_module</span><span class="s3">(</span><span class="s1">foo</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">foo</span>
+
+
+<span class="s2">def </span><span class="s1">compile_extension_module</span><span class="s3">(</span>
+        <span class="s1">name</span><span class="s3">, </span><span class="s1">builddir</span><span class="s3">, </span><span class="s1">include_dirs</span><span class="s3">,</span>
+        <span class="s1">source_string</span><span class="s3">, </span><span class="s1">libraries</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">library_dirs</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Build an extension module and return the filename of the resulting 
+    native code file. 
+ 
+    Parameters 
+    ---------- 
+    name : string 
+        name of the module, possibly including dots if it is a module inside a 
+        package. 
+    builddir : pathlib.Path 
+        Where to build the module, usually a temporary directory 
+    include_dirs : list 
+        Extra directories to find include files when compiling 
+    libraries : list 
+        Libraries to link into the extension module 
+    library_dirs: list 
+        Where to find the libraries, ``-L`` passed to the linker 
+    &quot;&quot;&quot;</span>
+    <span class="s1">modname </span><span class="s3">= </span><span class="s1">name</span><span class="s3">.</span><span class="s1">split</span><span class="s3">(</span><span class="s4">'.'</span><span class="s3">)[-</span><span class="s5">1</span><span class="s3">]</span>
+    <span class="s1">dirname </span><span class="s3">= </span><span class="s1">builddir </span><span class="s3">/ </span><span class="s1">name</span>
+    <span class="s1">dirname</span><span class="s3">.</span><span class="s1">mkdir</span><span class="s3">(</span><span class="s1">exist_ok</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">cfile </span><span class="s3">= </span><span class="s1">_convert_str_to_file</span><span class="s3">(</span><span class="s1">source_string</span><span class="s3">, </span><span class="s1">dirname</span><span class="s3">)</span>
+    <span class="s1">include_dirs </span><span class="s3">= </span><span class="s1">include_dirs </span><span class="s2">or </span><span class="s3">[]</span>
+    <span class="s1">libraries </span><span class="s3">= </span><span class="s1">libraries </span><span class="s2">or </span><span class="s3">[]</span>
+    <span class="s1">library_dirs </span><span class="s3">= </span><span class="s1">library_dirs </span><span class="s2">or </span><span class="s3">[]</span>
+
+    <span class="s2">return </span><span class="s1">_c_compile</span><span class="s3">(</span>
+        <span class="s1">cfile</span><span class="s3">, </span><span class="s1">outputfilename</span><span class="s3">=</span><span class="s1">dirname </span><span class="s3">/ </span><span class="s1">modname</span><span class="s3">,</span>
+        <span class="s1">include_dirs</span><span class="s3">=</span><span class="s1">include_dirs</span><span class="s3">, </span><span class="s1">libraries</span><span class="s3">=</span><span class="s1">libraries</span><span class="s3">,</span>
+        <span class="s1">library_dirs</span><span class="s3">=</span><span class="s1">library_dirs</span><span class="s3">,</span>
+        <span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_convert_str_to_file</span><span class="s3">(</span><span class="s1">source</span><span class="s3">, </span><span class="s1">dirname</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Helper function to create a file ``source.c`` in `dirname` that contains 
+    the string in `source`. Returns the file name 
+    &quot;&quot;&quot;</span>
+    <span class="s1">filename </span><span class="s3">= </span><span class="s1">dirname </span><span class="s3">/ </span><span class="s4">'source.c'</span>
+    <span class="s2">with </span><span class="s1">filename</span><span class="s3">.</span><span class="s1">open</span><span class="s3">(</span><span class="s4">'w'</span><span class="s3">) </span><span class="s2">as </span><span class="s1">f</span><span class="s3">:</span>
+        <span class="s1">f</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">str</span><span class="s3">(</span><span class="s1">source</span><span class="s3">))</span>
+    <span class="s2">return </span><span class="s1">filename</span>
+
+
+<span class="s2">def </span><span class="s1">_make_methods</span><span class="s3">(</span><span class="s1">functions</span><span class="s3">, </span><span class="s1">modname</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; Turns the name, signature, code in functions into complete functions 
+    and lists them in a methods_table. Then turns the methods_table into a 
+    ``PyMethodDef`` structure and returns the resulting code fragment ready 
+    for compilation 
+    &quot;&quot;&quot;</span>
+    <span class="s1">methods_table </span><span class="s3">= []</span>
+    <span class="s1">codes </span><span class="s3">= []</span>
+    <span class="s2">for </span><span class="s1">funcname</span><span class="s3">, </span><span class="s1">flags</span><span class="s3">, </span><span class="s1">code </span><span class="s2">in </span><span class="s1">functions</span><span class="s3">:</span>
+        <span class="s1">cfuncname </span><span class="s3">= </span><span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">modname</span><span class="s2">}</span><span class="s4">_</span><span class="s2">{</span><span class="s1">funcname</span><span class="s2">}</span><span class="s4">&quot;</span>
+        <span class="s2">if </span><span class="s4">'METH_KEYWORDS' </span><span class="s2">in </span><span class="s1">flags</span><span class="s3">:</span>
+            <span class="s1">signature </span><span class="s3">= </span><span class="s4">'(PyObject *self, PyObject *args, PyObject *kwargs)'</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">signature </span><span class="s3">= </span><span class="s4">'(PyObject *self, PyObject *args)'</span>
+        <span class="s1">methods_table</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s4">f'</span><span class="s2">{{</span><span class="s4">&quot;</span><span class="s2">{</span><span class="s1">funcname</span><span class="s2">}</span><span class="s4">&quot;, (PyCFunction)</span><span class="s2">{</span><span class="s1">cfuncname</span><span class="s2">}</span><span class="s4">, </span><span class="s2">{</span><span class="s1">flags</span><span class="s2">}}}</span><span class="s4">,'</span><span class="s3">)</span>
+        <span class="s1">func_code </span><span class="s3">= </span><span class="s4">f&quot;&quot;&quot;</span>
+        <span class="s4">static PyObject* </span><span class="s2">{</span><span class="s1">cfuncname</span><span class="s2">}{</span><span class="s1">signature</span><span class="s2">}</span>
+        <span class="s2">{{</span>
+        <span class="s2">{</span><span class="s1">code</span><span class="s2">}</span>
+        <span class="s2">}}</span>
+        <span class="s4">&quot;&quot;&quot;</span>
+        <span class="s1">codes</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">func_code</span><span class="s3">)</span>
+
+    <span class="s1">methods_str </span><span class="s3">= </span><span class="s4">'</span><span class="s2">\n</span><span class="s4">'</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">methods_table</span><span class="s3">)</span>
+    <span class="s1">body </span><span class="s3">= </span><span class="s4">&quot;</span><span class="s2">\n</span><span class="s4">&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">codes</span><span class="s3">) + </span><span class="s4">f&quot;&quot;&quot;</span>
+    <span class="s4">static PyMethodDef methods[] = </span><span class="s2">{{</span>
+    <span class="s2">{</span><span class="s1">methods_str</span><span class="s2">}</span>
+    <span class="s2">{{ </span><span class="s4">NULL </span><span class="s2">}}</span>
+    <span class="s2">}}</span><span class="s4">;</span>
+    <span class="s4">static struct PyModuleDef moduledef = </span><span class="s2">{{</span>
+        <span class="s4">PyModuleDef_HEAD_INIT,</span>
+        <span class="s4">&quot;</span><span class="s2">{</span><span class="s1">modname</span><span class="s2">}</span><span class="s4">&quot;,    /* m_name */</span>
+        <span class="s4">NULL,           /* m_doc */</span>
+        <span class="s4">-1,             /* m_size */</span>
+        <span class="s4">methods,        /* m_methods */</span>
+    <span class="s2">}}</span><span class="s4">;</span>
+    <span class="s4">&quot;&quot;&quot;</span>
+    <span class="s2">return </span><span class="s1">body</span>
+
+
+<span class="s2">def </span><span class="s1">_make_source</span><span class="s3">(</span><span class="s1">name</span><span class="s3">, </span><span class="s1">init</span><span class="s3">, </span><span class="s1">body</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; Combines the code fragments into source code ready to be compiled 
+    &quot;&quot;&quot;</span>
+    <span class="s1">code </span><span class="s3">= </span><span class="s4">f&quot;&quot;&quot;</span>
+    <span class="s4">#include &lt;Python.h&gt;</span>
+
+    <span class="s2">{</span><span class="s1">body</span><span class="s2">}</span>
+
+    <span class="s4">PyMODINIT_FUNC</span>
+    <span class="s4">PyInit_</span><span class="s2">{</span><span class="s1">name</span><span class="s2">}</span><span class="s4">(void) </span><span class="s2">{{</span>
+    <span class="s2">{</span><span class="s1">init</span><span class="s2">}</span>
+    <span class="s2">}}</span>
+    <span class="s4">&quot;&quot;&quot;</span>
+    <span class="s2">return </span><span class="s1">code</span>
+
+
+<span class="s2">def </span><span class="s1">_c_compile</span><span class="s3">(</span><span class="s1">cfile</span><span class="s3">, </span><span class="s1">outputfilename</span><span class="s3">, </span><span class="s1">include_dirs</span><span class="s3">, </span><span class="s1">libraries</span><span class="s3">,</span>
+               <span class="s1">library_dirs</span><span class="s3">):</span>
+    <span class="s1">link_extra </span><span class="s3">= []</span>
+    <span class="s2">if </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">platform </span><span class="s3">== </span><span class="s4">'win32'</span><span class="s3">:</span>
+        <span class="s1">compile_extra </span><span class="s3">= [</span><span class="s4">&quot;/we4013&quot;</span><span class="s3">]</span>
+        <span class="s1">link_extra</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s4">'/DEBUG'</span><span class="s3">)  </span><span class="s6"># generate .pdb file</span>
+    <span class="s2">elif </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">platform</span><span class="s3">.</span><span class="s1">startswith</span><span class="s3">(</span><span class="s4">'linux'</span><span class="s3">):</span>
+        <span class="s1">compile_extra </span><span class="s3">= [</span>
+            <span class="s4">&quot;-O0&quot;</span><span class="s3">, </span><span class="s4">&quot;-g&quot;</span><span class="s3">, </span><span class="s4">&quot;-Werror=implicit-function-declaration&quot;</span><span class="s3">, </span><span class="s4">&quot;-fPIC&quot;</span><span class="s3">]</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">compile_extra </span><span class="s3">= []</span>
+
+    <span class="s2">return </span><span class="s1">build</span><span class="s3">(</span>
+        <span class="s1">cfile</span><span class="s3">, </span><span class="s1">outputfilename</span><span class="s3">,</span>
+        <span class="s1">compile_extra</span><span class="s3">, </span><span class="s1">link_extra</span><span class="s3">,</span>
+        <span class="s1">include_dirs</span><span class="s3">, </span><span class="s1">libraries</span><span class="s3">, </span><span class="s1">library_dirs</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">build</span><span class="s3">(</span><span class="s1">cfile</span><span class="s3">, </span><span class="s1">outputfilename</span><span class="s3">, </span><span class="s1">compile_extra</span><span class="s3">, </span><span class="s1">link_extra</span><span class="s3">,</span>
+          <span class="s1">include_dirs</span><span class="s3">, </span><span class="s1">libraries</span><span class="s3">, </span><span class="s1">library_dirs</span><span class="s3">):</span>
+    <span class="s0">&quot;use meson to build&quot;</span>
+
+    <span class="s1">build_dir </span><span class="s3">= </span><span class="s1">cfile</span><span class="s3">.</span><span class="s1">parent </span><span class="s3">/ </span><span class="s4">&quot;build&quot;</span>
+    <span class="s1">os</span><span class="s3">.</span><span class="s1">makedirs</span><span class="s3">(</span><span class="s1">build_dir</span><span class="s3">, </span><span class="s1">exist_ok</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s2">with </span><span class="s1">open</span><span class="s3">(</span><span class="s1">cfile</span><span class="s3">.</span><span class="s1">parent </span><span class="s3">/ </span><span class="s4">&quot;meson.build&quot;</span><span class="s3">, </span><span class="s4">&quot;wt&quot;</span><span class="s3">) </span><span class="s2">as </span><span class="s1">fid</span><span class="s3">:</span>
+        <span class="s1">link_dirs </span><span class="s3">= [</span><span class="s4">'-L' </span><span class="s3">+ </span><span class="s1">d </span><span class="s2">for </span><span class="s1">d </span><span class="s2">in </span><span class="s1">library_dirs</span><span class="s3">]</span>
+        <span class="s1">fid</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">textwrap</span><span class="s3">.</span><span class="s1">dedent</span><span class="s3">(</span><span class="s4">f&quot;&quot;&quot;</span><span class="s2">\ 
+            </span><span class="s4">project('foo', 'c')</span>
+            <span class="s4">py = import('python').find_installation(pure: false)</span>
+            <span class="s4">py.extension_module(</span>
+                <span class="s4">'</span><span class="s2">{</span><span class="s1">outputfilename</span><span class="s3">.</span><span class="s1">parts</span><span class="s3">[-</span><span class="s5">1</span><span class="s3">]</span><span class="s2">}</span><span class="s4">',</span>
+                <span class="s4">'</span><span class="s2">{</span><span class="s1">cfile</span><span class="s3">.</span><span class="s1">parts</span><span class="s3">[-</span><span class="s5">1</span><span class="s3">]</span><span class="s2">}</span><span class="s4">',</span>
+                <span class="s4">c_args: </span><span class="s2">{</span><span class="s1">compile_extra</span><span class="s2">}</span><span class="s4">,</span>
+                <span class="s4">link_args: </span><span class="s2">{</span><span class="s1">link_dirs</span><span class="s2">}</span><span class="s4">,</span>
+                <span class="s4">include_directories: </span><span class="s2">{</span><span class="s1">include_dirs</span><span class="s2">}</span><span class="s4">,</span>
+            <span class="s4">)</span>
+        <span class="s4">&quot;&quot;&quot;</span><span class="s3">))</span>
+    <span class="s1">native_file_name </span><span class="s3">= </span><span class="s1">cfile</span><span class="s3">.</span><span class="s1">parent </span><span class="s3">/ </span><span class="s4">&quot;.mesonpy-native-file.ini&quot;</span>
+    <span class="s2">with </span><span class="s1">open</span><span class="s3">(</span><span class="s1">native_file_name</span><span class="s3">, </span><span class="s4">&quot;wt&quot;</span><span class="s3">) </span><span class="s2">as </span><span class="s1">fid</span><span class="s3">:</span>
+        <span class="s1">fid</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">textwrap</span><span class="s3">.</span><span class="s1">dedent</span><span class="s3">(</span><span class="s4">f&quot;&quot;&quot;</span><span class="s2">\ 
+            </span><span class="s4">[binaries]</span>
+            <span class="s4">python = '</span><span class="s2">{</span><span class="s1">sys</span><span class="s3">.</span><span class="s1">executable</span><span class="s2">}</span><span class="s4">'</span>
+        <span class="s4">&quot;&quot;&quot;</span><span class="s3">))</span>
+    <span class="s2">if </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">platform </span><span class="s3">== </span><span class="s4">&quot;win32&quot;</span><span class="s3">:</span>
+        <span class="s1">run_subprocess</span><span class="s3">([</span><span class="s4">&quot;meson&quot;</span><span class="s3">, </span><span class="s4">&quot;setup&quot;</span><span class="s3">,</span>
+                        <span class="s4">&quot;--buildtype=release&quot;</span><span class="s3">,</span>
+                        <span class="s4">&quot;--vsenv&quot;</span><span class="s3">, </span><span class="s4">&quot;..&quot;</span><span class="s3">],</span>
+                       <span class="s1">build_dir</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">run_subprocess</span><span class="s3">([</span><span class="s4">&quot;meson&quot;</span><span class="s3">, </span><span class="s4">&quot;setup&quot;</span><span class="s3">, </span><span class="s4">&quot;--vsenv&quot;</span><span class="s3">,</span>
+                        <span class="s4">&quot;..&quot;</span><span class="s3">, </span><span class="s4">f'--native-file=</span><span class="s2">{</span><span class="s1">os</span><span class="s3">.</span><span class="s1">fspath</span><span class="s3">(</span><span class="s1">native_file_name</span><span class="s3">)</span><span class="s2">}</span><span class="s4">'</span><span class="s3">],</span>
+                       <span class="s1">build_dir</span><span class="s3">)</span>
+
+    <span class="s1">so_name </span><span class="s3">= </span><span class="s1">outputfilename</span><span class="s3">.</span><span class="s1">parts</span><span class="s3">[-</span><span class="s5">1</span><span class="s3">] + </span><span class="s1">get_so_suffix</span><span class="s3">()</span>
+    <span class="s1">run_subprocess</span><span class="s3">([</span><span class="s4">&quot;meson&quot;</span><span class="s3">, </span><span class="s4">&quot;compile&quot;</span><span class="s3">], </span><span class="s1">build_dir</span><span class="s3">)</span>
+    <span class="s1">os</span><span class="s3">.</span><span class="s1">rename</span><span class="s3">(</span><span class="s1">str</span><span class="s3">(</span><span class="s1">build_dir </span><span class="s3">/ </span><span class="s1">so_name</span><span class="s3">), </span><span class="s1">cfile</span><span class="s3">.</span><span class="s1">parent </span><span class="s3">/ </span><span class="s1">so_name</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">cfile</span><span class="s3">.</span><span class="s1">parent </span><span class="s3">/ </span><span class="s1">so_name</span>
+
+
+<span class="s2">def </span><span class="s1">get_so_suffix</span><span class="s3">():</span>
+    <span class="s1">ret </span><span class="s3">= </span><span class="s1">sysconfig</span><span class="s3">.</span><span class="s1">get_config_var</span><span class="s3">(</span><span class="s4">'EXT_SUFFIX'</span><span class="s3">)</span>
+    <span class="s2">assert </span><span class="s1">ret</span>
+    <span class="s2">return </span><span class="s1">ret</span>
+</pre>
+</body>
+</html>

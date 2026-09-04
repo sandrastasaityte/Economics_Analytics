@@ -1,0 +1,404 @@
+<html>
+<head>
+<title>test_constructors.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_constructors.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_config </span><span class="s0">import </span><span class="s1">using_string_dtype</span>
+
+<span class="s0">import </span><span class="s1">pandas </span><span class="s0">as </span><span class="s1">pd</span>
+<span class="s0">from </span><span class="s1">pandas </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">DataFrame</span><span class="s2">,</span>
+    <span class="s1">DatetimeIndex</span><span class="s2">,</span>
+    <span class="s1">Index</span><span class="s2">,</span>
+    <span class="s1">Period</span><span class="s2">,</span>
+    <span class="s1">PeriodIndex</span><span class="s2">,</span>
+    <span class="s1">Series</span><span class="s2">,</span>
+    <span class="s1">Timedelta</span><span class="s2">,</span>
+    <span class="s1">TimedeltaIndex</span><span class="s2">,</span>
+    <span class="s1">Timestamp</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">import </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_testing </span><span class="s0">as </span><span class="s1">tm</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">tests</span><span class="s2">.</span><span class="s1">copy_view</span><span class="s2">.</span><span class="s1">util </span><span class="s0">import </span><span class="s1">get_array</span>
+
+<span class="s3"># -----------------------------------------------------------------------------</span>
+<span class="s3"># Copy/view behaviour for Series / DataFrame constructors</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;dtype&quot;</span><span class="s2">, [</span><span class="s0">None</span><span class="s2">, </span><span class="s4">&quot;int64&quot;</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_series_from_series</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">):</span>
+    <span class="s3"># Case: constructing a Series from another Series object follows CoW rules:</span>
+    <span class="s3"># a new object is returned and thus mutations are not propagated</span>
+    <span class="s1">ser </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">([</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">], </span><span class="s1">name</span><span class="s2">=</span><span class="s4">&quot;name&quot;</span><span class="s2">)</span>
+
+    <span class="s3"># default is copy=False -&gt; new Series is a shallow copy / view of original</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+
+    <span class="s3"># the shallow copy still shares memory</span>
+    <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">), </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">result</span><span class="s2">))</span>
+
+    <span class="s0">assert </span><span class="s1">result</span><span class="s2">.</span><span class="s1">_mgr</span><span class="s2">.</span><span class="s1">blocks</span><span class="s2">[</span><span class="s5">0</span><span class="s2">].</span><span class="s1">refs</span><span class="s2">.</span><span class="s1">has_reference</span><span class="s2">()</span>
+
+    <span class="s3"># mutating new series copy doesn't mutate original</span>
+    <span class="s1">result</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] = </span><span class="s5">0</span>
+    <span class="s0">assert </span><span class="s1">ser</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] == </span><span class="s5">1</span>
+    <span class="s3"># mutating triggered a copy-on-write -&gt; no longer shares memory</span>
+    <span class="s0">assert not </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">), </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">result</span><span class="s2">))</span>
+
+    <span class="s3"># the same when modifying the parent</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+
+    <span class="s3"># mutating original doesn't mutate new series</span>
+    <span class="s1">ser</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] = </span><span class="s5">0</span>
+    <span class="s0">assert </span><span class="s1">result</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] == </span><span class="s5">1</span>
+
+    <span class="s3"># forcing copy=False still gives a CoW shallow copy</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">), </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">result</span><span class="s2">))</span>
+    <span class="s0">assert </span><span class="s1">result</span><span class="s2">.</span><span class="s1">_mgr</span><span class="s2">.</span><span class="s1">blocks</span><span class="s2">[</span><span class="s5">0</span><span class="s2">].</span><span class="s1">refs</span><span class="s2">.</span><span class="s1">has_reference</span><span class="s2">()</span>
+
+    <span class="s3"># forcing copy=True still results in an actual hard copy up front</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">), </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">result</span><span class="s2">))</span>
+    <span class="s0">assert </span><span class="s1">ser</span><span class="s2">.</span><span class="s1">_mgr</span><span class="s2">.</span><span class="s1">_has_no_reference</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_series_from_series_with_reindex</span><span class="s2">():</span>
+    <span class="s3"># Case: constructing a Series from another Series with specifying an index</span>
+    <span class="s3"># that potentially requires a reindex of the values</span>
+    <span class="s1">ser </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">([</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">], </span><span class="s1">name</span><span class="s2">=</span><span class="s4">&quot;name&quot;</span><span class="s2">)</span>
+
+    <span class="s3"># passing an index that doesn't actually require a reindex of the values</span>
+    <span class="s3"># -&gt; still getting a CoW shallow copy</span>
+    <span class="s0">for </span><span class="s1">index </span><span class="s0">in </span><span class="s2">[</span>
+        <span class="s1">ser</span><span class="s2">.</span><span class="s1">index</span><span class="s2">,</span>
+        <span class="s1">ser</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">(),</span>
+        <span class="s1">list</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">.</span><span class="s1">index</span><span class="s2">),</span>
+        <span class="s1">ser</span><span class="s2">.</span><span class="s1">index</span><span class="s2">.</span><span class="s1">rename</span><span class="s2">(</span><span class="s4">&quot;idx&quot;</span><span class="s2">),</span>
+    <span class="s2">]:</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">index</span><span class="s2">=</span><span class="s1">index</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">.</span><span class="s1">values</span><span class="s2">, </span><span class="s1">result</span><span class="s2">.</span><span class="s1">values</span><span class="s2">)</span>
+        <span class="s1">result</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] = </span><span class="s5">0</span>
+        <span class="s0">assert </span><span class="s1">ser</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] == </span><span class="s5">1</span>
+
+        <span class="s3"># forcing copy=True still results in an actual hard copy up front</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">index</span><span class="s2">=</span><span class="s1">index</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+        <span class="s0">assert not </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">.</span><span class="s1">values</span><span class="s2">, </span><span class="s1">result</span><span class="s2">.</span><span class="s1">values</span><span class="s2">)</span>
+        <span class="s0">assert not </span><span class="s1">result</span><span class="s2">.</span><span class="s1">_mgr</span><span class="s2">.</span><span class="s1">blocks</span><span class="s2">[</span><span class="s5">0</span><span class="s2">].</span><span class="s1">refs</span><span class="s2">.</span><span class="s1">has_reference</span><span class="s2">()</span>
+
+    <span class="s3"># ensure that if an actual reindex is needed, we don't have any refs</span>
+    <span class="s3"># (mutating the result wouldn't trigger CoW)</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">index</span><span class="s2">=[</span><span class="s5">0</span><span class="s2">, </span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">])</span>
+    <span class="s0">assert not </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">.</span><span class="s1">values</span><span class="s2">, </span><span class="s1">result</span><span class="s2">.</span><span class="s1">values</span><span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s1">result</span><span class="s2">.</span><span class="s1">_mgr</span><span class="s2">.</span><span class="s1">blocks</span><span class="s2">[</span><span class="s5">0</span><span class="s2">].</span><span class="s1">refs</span><span class="s2">.</span><span class="s1">has_reference</span><span class="s2">()</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;dtype&quot;</span><span class="s2">, [</span><span class="s0">None</span><span class="s2">, </span><span class="s4">&quot;int64&quot;</span><span class="s2">])</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;idx&quot;</span><span class="s2">, [</span><span class="s0">None</span><span class="s2">, </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">RangeIndex</span><span class="s2">(</span><span class="s1">start</span><span class="s2">=</span><span class="s5">0</span><span class="s2">, </span><span class="s1">stop</span><span class="s2">=</span><span class="s5">3</span><span class="s2">, </span><span class="s1">step</span><span class="s2">=</span><span class="s5">1</span><span class="s2">)])</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s4">&quot;arr&quot;</span><span class="s2">, [</span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s4">&quot;int64&quot;</span><span class="s2">), </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s4">&quot;Int64&quot;</span><span class="s2">)]</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_series_from_array</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">arr</span><span class="s2">):</span>
+    <span class="s1">ser </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">index</span><span class="s2">=</span><span class="s1">idx</span><span class="s2">)</span>
+    <span class="s1">ser_orig </span><span class="s2">= </span><span class="s1">ser</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s4">&quot;_data&quot;</span><span class="s2">, </span><span class="s1">arr</span><span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">), </span><span class="s1">data</span><span class="s2">)</span>
+
+    <span class="s1">arr</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] = </span><span class="s5">100</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_series_equal</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">, </span><span class="s1">ser_orig</span><span class="s2">)</span>
+
+    <span class="s3"># if the user explicitly passes copy=False, we get an actual view</span>
+    <span class="s3"># not protected by CoW</span>
+    <span class="s1">ser </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">index</span><span class="s2">=</span><span class="s1">idx</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">), </span><span class="s1">data</span><span class="s2">)</span>
+    <span class="s1">arr</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] = </span><span class="s5">50</span>
+    <span class="s0">assert </span><span class="s1">ser</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] == </span><span class="s5">50</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;copy&quot;</span><span class="s2">, [</span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">, </span><span class="s0">None</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_series_from_array_different_dtype</span><span class="s2">(</span><span class="s1">copy</span><span class="s2">):</span>
+    <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s4">&quot;int64&quot;</span><span class="s2">)</span>
+    <span class="s1">ser </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s4">&quot;int32&quot;</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s1">copy</span><span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">), </span><span class="s1">arr</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s4">&quot;idx&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s1">Index</span><span class="s2">([</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">]),</span>
+        <span class="s1">DatetimeIndex</span><span class="s2">([</span><span class="s1">Timestamp</span><span class="s2">(</span><span class="s4">&quot;2019-12-31&quot;</span><span class="s2">), </span><span class="s1">Timestamp</span><span class="s2">(</span><span class="s4">&quot;2020-12-31&quot;</span><span class="s2">)]),</span>
+        <span class="s1">PeriodIndex</span><span class="s2">([</span><span class="s1">Period</span><span class="s2">(</span><span class="s4">&quot;2019-12-31&quot;</span><span class="s2">), </span><span class="s1">Period</span><span class="s2">(</span><span class="s4">&quot;2020-12-31&quot;</span><span class="s2">)]),</span>
+        <span class="s1">TimedeltaIndex</span><span class="s2">([</span><span class="s1">Timedelta</span><span class="s2">(</span><span class="s4">&quot;1 days&quot;</span><span class="s2">), </span><span class="s1">Timedelta</span><span class="s2">(</span><span class="s4">&quot;2 days&quot;</span><span class="s2">)]),</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_series_from_index</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">):</span>
+    <span class="s1">ser </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">)</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">idx</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">(</span><span class="s1">deep</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">), </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">))</span>
+    <span class="s0">assert not </span><span class="s1">ser</span><span class="s2">.</span><span class="s1">_mgr</span><span class="s2">.</span><span class="s1">_has_no_reference</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)</span>
+    <span class="s1">ser</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] = </span><span class="s1">ser</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">1</span><span class="s2">]</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s3"># forcing copy=False still gives a CoW shallow copy</span>
+    <span class="s1">ser </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">), </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">))</span>
+    <span class="s0">assert not </span><span class="s1">ser</span><span class="s2">.</span><span class="s1">_mgr</span><span class="s2">.</span><span class="s1">_has_no_reference</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)</span>
+    <span class="s1">ser</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] = </span><span class="s1">ser</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">1</span><span class="s2">]</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+    <span class="s3"># forcing copy=True still results in a copy</span>
+    <span class="s1">ser </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">), </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">))</span>
+    <span class="s0">assert </span><span class="s1">ser</span><span class="s2">.</span><span class="s1">_mgr</span><span class="s2">.</span><span class="s1">_has_no_reference</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;copy&quot;</span><span class="s2">, [</span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">, </span><span class="s0">None</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_series_from_index_different_dtypes</span><span class="s2">(</span><span class="s1">copy</span><span class="s2">):</span>
+    <span class="s1">idx </span><span class="s2">= </span><span class="s1">Index</span><span class="s2">([</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s4">&quot;int64&quot;</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s1">copy</span><span class="s2">)</span>
+    <span class="s1">ser </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s4">&quot;int32&quot;</span><span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">), </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">))</span>
+    <span class="s0">assert </span><span class="s1">ser</span><span class="s2">.</span><span class="s1">_mgr</span><span class="s2">.</span><span class="s1">_has_no_reference</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_series_from_block_manager_different_dtype</span><span class="s2">():</span>
+    <span class="s1">ser </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">([</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s4">&quot;int64&quot;</span><span class="s2">)</span>
+    <span class="s1">msg </span><span class="s2">= </span><span class="s4">&quot;Passing a SingleBlockManager to Series&quot;</span>
+    <span class="s0">with </span><span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_produces_warning</span><span class="s2">(</span><span class="s1">DeprecationWarning</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">msg</span><span class="s2">):</span>
+        <span class="s1">ser2 </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">.</span><span class="s1">_mgr</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s4">&quot;int32&quot;</span><span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">), </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">ser2</span><span class="s2">))</span>
+    <span class="s0">assert </span><span class="s1">ser2</span><span class="s2">.</span><span class="s1">_mgr</span><span class="s2">.</span><span class="s1">_has_no_reference</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;use_mgr&quot;</span><span class="s2">, [</span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">])</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;columns&quot;</span><span class="s2">, [</span><span class="s0">None</span><span class="s2">, [</span><span class="s4">&quot;a&quot;</span><span class="s2">]])</span>
+<span class="s0">def </span><span class="s1">test_dataframe_constructor_mgr_or_df</span><span class="s2">(</span><span class="s1">columns</span><span class="s2">, </span><span class="s1">use_mgr</span><span class="s2">):</span>
+    <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">({</span><span class="s4">&quot;a&quot;</span><span class="s2">: [</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">]})</span>
+    <span class="s1">df_orig </span><span class="s2">= </span><span class="s1">df</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+
+    <span class="s0">if </span><span class="s1">use_mgr</span><span class="s2">:</span>
+        <span class="s1">data </span><span class="s2">= </span><span class="s1">df</span><span class="s2">.</span><span class="s1">_mgr</span>
+        <span class="s1">warn </span><span class="s2">= </span><span class="s1">DeprecationWarning</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">data </span><span class="s2">= </span><span class="s1">df</span>
+        <span class="s1">warn </span><span class="s2">= </span><span class="s0">None</span>
+    <span class="s1">msg </span><span class="s2">= </span><span class="s4">&quot;Passing a BlockManager to DataFrame&quot;</span>
+    <span class="s0">with </span><span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_produces_warning</span><span class="s2">(</span><span class="s1">warn</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s1">msg</span><span class="s2">, </span><span class="s1">check_stacklevel</span><span class="s2">=</span><span class="s0">False</span><span class="s2">):</span>
+        <span class="s1">new_df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+
+    <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">), </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">new_df</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">))</span>
+    <span class="s1">new_df</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] = </span><span class="s5">100</span>
+
+    <span class="s0">assert not </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">), </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">new_df</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">))</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_frame_equal</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s1">df_orig</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;dtype&quot;</span><span class="s2">, [</span><span class="s0">None</span><span class="s2">, </span><span class="s4">&quot;int64&quot;</span><span class="s2">, </span><span class="s4">&quot;Int64&quot;</span><span class="s2">])</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;index&quot;</span><span class="s2">, [</span><span class="s0">None</span><span class="s2">, [</span><span class="s5">0</span><span class="s2">, </span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">]])</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;columns&quot;</span><span class="s2">, [</span><span class="s0">None</span><span class="s2">, [</span><span class="s4">&quot;a&quot;</span><span class="s2">, </span><span class="s4">&quot;b&quot;</span><span class="s2">], [</span><span class="s4">&quot;a&quot;</span><span class="s2">, </span><span class="s4">&quot;b&quot;</span><span class="s2">, </span><span class="s4">&quot;c&quot;</span><span class="s2">]])</span>
+<span class="s0">def </span><span class="s1">test_dataframe_from_dict_of_series</span><span class="s2">(</span><span class="s1">columns</span><span class="s2">, </span><span class="s1">index</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">):</span>
+    <span class="s3"># Case: constructing a DataFrame from Series objects with copy=False</span>
+    <span class="s3"># has to do a lazy following CoW rules</span>
+    <span class="s3"># (the default for DataFrame(dict) is still to copy to ensure consolidation)</span>
+    <span class="s1">s1 </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">([</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">])</span>
+    <span class="s1">s2 </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">([</span><span class="s5">4</span><span class="s2">, </span><span class="s5">5</span><span class="s2">, </span><span class="s5">6</span><span class="s2">])</span>
+    <span class="s1">s1_orig </span><span class="s2">= </span><span class="s1">s1</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span>
+        <span class="s2">{</span><span class="s4">&quot;a&quot;</span><span class="s2">: [</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">], </span><span class="s4">&quot;b&quot;</span><span class="s2">: [</span><span class="s5">4</span><span class="s2">, </span><span class="s5">5</span><span class="s2">, </span><span class="s5">6</span><span class="s2">]}, </span><span class="s1">index</span><span class="s2">=</span><span class="s1">index</span><span class="s2">, </span><span class="s1">columns</span><span class="s2">=</span><span class="s1">columns</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span>
+    <span class="s2">)</span>
+
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span>
+        <span class="s2">{</span><span class="s4">&quot;a&quot;</span><span class="s2">: </span><span class="s1">s1</span><span class="s2">, </span><span class="s4">&quot;b&quot;</span><span class="s2">: </span><span class="s1">s2</span><span class="s2">}, </span><span class="s1">index</span><span class="s2">=</span><span class="s1">index</span><span class="s2">, </span><span class="s1">columns</span><span class="s2">=</span><span class="s1">columns</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">False</span>
+    <span class="s2">)</span>
+
+    <span class="s3"># the shallow copy still shares memory</span>
+    <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">), </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">s1</span><span class="s2">))</span>
+
+    <span class="s3"># mutating the new dataframe doesn't mutate original</span>
+    <span class="s1">result</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">, </span><span class="s5">0</span><span class="s2">] = </span><span class="s5">10</span>
+    <span class="s0">assert not </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">), </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">s1</span><span class="s2">))</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_series_equal</span><span class="s2">(</span><span class="s1">s1</span><span class="s2">, </span><span class="s1">s1_orig</span><span class="s2">)</span>
+
+    <span class="s3"># the same when modifying the parent series</span>
+    <span class="s1">s1 </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">([</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">])</span>
+    <span class="s1">s2 </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">([</span><span class="s5">4</span><span class="s2">, </span><span class="s5">5</span><span class="s2">, </span><span class="s5">6</span><span class="s2">])</span>
+    <span class="s1">result </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span>
+        <span class="s2">{</span><span class="s4">&quot;a&quot;</span><span class="s2">: </span><span class="s1">s1</span><span class="s2">, </span><span class="s4">&quot;b&quot;</span><span class="s2">: </span><span class="s1">s2</span><span class="s2">}, </span><span class="s1">index</span><span class="s2">=</span><span class="s1">index</span><span class="s2">, </span><span class="s1">columns</span><span class="s2">=</span><span class="s1">columns</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">False</span>
+    <span class="s2">)</span>
+    <span class="s1">s1</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] = </span><span class="s5">10</span>
+    <span class="s0">assert not </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">), </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">s1</span><span class="s2">))</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_frame_equal</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;dtype&quot;</span><span class="s2">, [</span><span class="s0">None</span><span class="s2">, </span><span class="s4">&quot;int64&quot;</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_dataframe_from_dict_of_series_with_reindex</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">):</span>
+    <span class="s3"># Case: constructing a DataFrame from Series objects with copy=False</span>
+    <span class="s3"># and passing an index that requires an actual (no-view) reindex -&gt; need</span>
+    <span class="s3"># to ensure the result doesn't have refs set up to unnecessarily trigger</span>
+    <span class="s3"># a copy on write</span>
+    <span class="s1">s1 </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">([</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">])</span>
+    <span class="s1">s2 </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">([</span><span class="s5">4</span><span class="s2">, </span><span class="s5">5</span><span class="s2">, </span><span class="s5">6</span><span class="s2">])</span>
+    <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">({</span><span class="s4">&quot;a&quot;</span><span class="s2">: </span><span class="s1">s1</span><span class="s2">, </span><span class="s4">&quot;b&quot;</span><span class="s2">: </span><span class="s1">s2</span><span class="s2">}, </span><span class="s1">index</span><span class="s2">=[</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+
+    <span class="s3"># df should own its memory, so mutating shouldn't trigger a copy</span>
+    <span class="s1">arr_before </span><span class="s2">= </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">arr_before</span><span class="s2">, </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">s1</span><span class="s2">))</span>
+    <span class="s1">df</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">, </span><span class="s5">0</span><span class="s2">] = </span><span class="s5">100</span>
+    <span class="s1">arr_after </span><span class="s2">= </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">arr_before</span><span class="s2">, </span><span class="s1">arr_after</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s4">&quot;data, dtype&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s2">([</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">], </span><span class="s4">&quot;int64&quot;</span><span class="s2">),</span>
+        <span class="s3"># 1D-only EA</span>
+        <span class="s2">([</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">], </span><span class="s4">&quot;Int64&quot;</span><span class="s2">),</span>
+        <span class="s1">pytest</span><span class="s2">.</span><span class="s1">param</span><span class="s2">(</span>
+            <span class="s2">[</span><span class="s4">&quot;a&quot;</span><span class="s2">, </span><span class="s4">&quot;b&quot;</span><span class="s2">],</span>
+            <span class="s4">&quot;str&quot;</span><span class="s2">,</span>
+            <span class="s1">marks</span><span class="s2">=</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">xfail</span><span class="s2">(</span>
+                <span class="s1">reason</span><span class="s2">=</span><span class="s4">&quot;TODO bug with infer_string=False and specifying dtype='str'&quot;</span>
+            <span class="s2">)</span>
+            <span class="s0">if not </span><span class="s1">using_string_dtype</span><span class="s2">()</span>
+            <span class="s0">else </span><span class="s2">[],</span>
+        <span class="s2">),</span>
+        <span class="s2">([</span><span class="s4">&quot;a&quot;</span><span class="s2">, </span><span class="s4">&quot;b&quot;</span><span class="s2">], </span><span class="s1">object</span><span class="s2">),</span>
+        <span class="s3"># 2D EA</span>
+        <span class="s2">(</span>
+            <span class="s2">[</span><span class="s1">Timestamp</span><span class="s2">(</span><span class="s4">&quot;2020&quot;</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">=</span><span class="s4">&quot;UTC&quot;</span><span class="s2">), </span><span class="s1">Timestamp</span><span class="s2">(</span><span class="s4">&quot;2021&quot;</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">=</span><span class="s4">&quot;UTC&quot;</span><span class="s2">)],</span>
+            <span class="s4">&quot;datetime64[ns, UTC]&quot;</span><span class="s2">,</span>
+        <span class="s2">),</span>
+    <span class="s2">],</span>
+    <span class="s1">ids</span><span class="s2">=[</span><span class="s4">&quot;int&quot;</span><span class="s2">, </span><span class="s4">&quot;int-ea&quot;</span><span class="s2">, </span><span class="s4">&quot;str&quot;</span><span class="s2">, </span><span class="s4">&quot;object&quot;</span><span class="s2">, </span><span class="s4">&quot;datetime64tz&quot;</span><span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_dataframe_from_series_or_index</span><span class="s2">(</span><span class="s1">data</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">index_or_series</span><span class="s2">):</span>
+    <span class="s1">obj </span><span class="s2">= </span><span class="s1">index_or_series</span><span class="s2">(</span><span class="s1">data</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+    <span class="s1">obj_orig </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">(</span><span class="s1">deep</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)  </span><span class="s3"># deep=True needed for Index</span>
+
+    <span class="s3"># default is copy=False -&gt; DataFrame holds a shallow copy of original Index/Series</span>
+    <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">tm</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">), </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s5">0</span><span class="s2">))</span>
+    <span class="s0">assert not </span><span class="s1">df</span><span class="s2">.</span><span class="s1">_mgr</span><span class="s2">.</span><span class="s1">_has_no_reference</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)</span>
+
+    <span class="s1">df</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">, </span><span class="s5">0</span><span class="s2">] = </span><span class="s1">data</span><span class="s2">[-</span><span class="s5">1</span><span class="s2">]</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">obj_orig</span><span class="s2">)</span>
+
+    <span class="s3"># with passing the (identical) dtype -&gt; same</span>
+    <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">tm</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">), </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s5">0</span><span class="s2">))</span>
+    <span class="s0">assert not </span><span class="s1">df</span><span class="s2">.</span><span class="s1">_mgr</span><span class="s2">.</span><span class="s1">_has_no_reference</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)</span>
+
+    <span class="s1">df</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">, </span><span class="s5">0</span><span class="s2">] = </span><span class="s1">data</span><span class="s2">[-</span><span class="s5">1</span><span class="s2">]</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">obj_orig</span><span class="s2">)</span>
+
+    <span class="s3"># forcing copy=True still results in an actual hard copy up front</span>
+    <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s0">if not </span><span class="s2">(</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">dtype </span><span class="s2">== </span><span class="s4">&quot;str&quot; </span><span class="s0">and </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">storage </span><span class="s2">== </span><span class="s4">&quot;pyarrow&quot;</span><span class="s2">):</span>
+        <span class="s3"># ArrowExtensionArray deep copy still points to the same underlying data</span>
+        <span class="s0">assert not </span><span class="s1">tm</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">), </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s5">0</span><span class="s2">))</span>
+        <span class="s0">assert </span><span class="s1">df</span><span class="s2">.</span><span class="s1">_mgr</span><span class="s2">.</span><span class="s1">_has_no_reference</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)</span>
+
+    <span class="s1">df</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">, </span><span class="s5">0</span><span class="s2">] = </span><span class="s1">data</span><span class="s2">[-</span><span class="s5">1</span><span class="s2">]</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">obj_orig</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_dataframe_from_series_or_index_different_dtype</span><span class="s2">(</span><span class="s1">index_or_series</span><span class="s2">):</span>
+    <span class="s1">obj </span><span class="s2">= </span><span class="s1">index_or_series</span><span class="s2">([</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s4">&quot;int64&quot;</span><span class="s2">)</span>
+    <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s4">&quot;int32&quot;</span><span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">), </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s5">0</span><span class="s2">))</span>
+    <span class="s0">assert </span><span class="s1">df</span><span class="s2">.</span><span class="s1">_mgr</span><span class="s2">.</span><span class="s1">_has_no_reference</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_dataframe_from_series_dont_infer_datetime</span><span class="s2">():</span>
+    <span class="s1">ser </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">([</span><span class="s1">Timestamp</span><span class="s2">(</span><span class="s4">&quot;2019-12-31&quot;</span><span class="s2">), </span><span class="s1">Timestamp</span><span class="s2">(</span><span class="s4">&quot;2020-12-31&quot;</span><span class="s2">)], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">object</span><span class="s2">)</span>
+    <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">df</span><span class="s2">.</span><span class="s1">dtypes</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] == </span><span class="s1">np</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">(</span><span class="s1">object</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">ser</span><span class="s2">), </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s5">0</span><span class="s2">))</span>
+    <span class="s0">assert not </span><span class="s1">df</span><span class="s2">.</span><span class="s1">_mgr</span><span class="s2">.</span><span class="s1">_has_no_reference</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;index&quot;</span><span class="s2">, [</span><span class="s0">None</span><span class="s2">, [</span><span class="s5">0</span><span class="s2">, </span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">]])</span>
+<span class="s0">def </span><span class="s1">test_dataframe_from_dict_of_series_with_dtype</span><span class="s2">(</span><span class="s1">index</span><span class="s2">):</span>
+    <span class="s3"># Variant of above, but now passing a dtype that causes a copy</span>
+    <span class="s3"># -&gt; need to ensure the result doesn't have refs set up to unnecessarily</span>
+    <span class="s3"># trigger a copy on write</span>
+    <span class="s1">s1 </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">([</span><span class="s5">1.0</span><span class="s2">, </span><span class="s5">2.0</span><span class="s2">, </span><span class="s5">3.0</span><span class="s2">])</span>
+    <span class="s1">s2 </span><span class="s2">= </span><span class="s1">Series</span><span class="s2">([</span><span class="s5">4</span><span class="s2">, </span><span class="s5">5</span><span class="s2">, </span><span class="s5">6</span><span class="s2">])</span>
+    <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">({</span><span class="s4">&quot;a&quot;</span><span class="s2">: </span><span class="s1">s1</span><span class="s2">, </span><span class="s4">&quot;b&quot;</span><span class="s2">: </span><span class="s1">s2</span><span class="s2">}, </span><span class="s1">index</span><span class="s2">=</span><span class="s1">index</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s4">&quot;int64&quot;</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+
+    <span class="s3"># df should own its memory, so mutating shouldn't trigger a copy</span>
+    <span class="s1">arr_before </span><span class="s2">= </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">arr_before</span><span class="s2">, </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">s1</span><span class="s2">))</span>
+    <span class="s1">df</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">, </span><span class="s5">0</span><span class="s2">] = </span><span class="s5">100</span>
+    <span class="s1">arr_after </span><span class="s2">= </span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">arr_before</span><span class="s2">, </span><span class="s1">arr_after</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;copy&quot;</span><span class="s2">, [</span><span class="s0">False</span><span class="s2">, </span><span class="s0">None</span><span class="s2">, </span><span class="s0">True</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_dataframe_from_numpy_array</span><span class="s2">(</span><span class="s1">copy</span><span class="s2">):</span>
+    <span class="s1">arr </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([[</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">], [</span><span class="s5">3</span><span class="s2">, </span><span class="s5">4</span><span class="s2">]])</span>
+    <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s1">copy</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">copy </span><span class="s0">is not False or </span><span class="s1">copy </span><span class="s0">is True</span><span class="s2">:</span>
+        <span class="s0">assert not </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s5">0</span><span class="s2">), </span><span class="s1">arr</span><span class="s2">)</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s5">0</span><span class="s2">), </span><span class="s1">arr</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s4">&quot;data, dtype&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s3"># 1D-only EA</span>
+        <span class="s2">([</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">], </span><span class="s4">&quot;Int64&quot;</span><span class="s2">),</span>
+        <span class="s3"># 2D EA</span>
+        <span class="s2">(</span>
+            <span class="s2">[</span><span class="s1">Timestamp</span><span class="s2">(</span><span class="s4">&quot;2020&quot;</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">=</span><span class="s4">&quot;UTC&quot;</span><span class="s2">), </span><span class="s1">Timestamp</span><span class="s2">(</span><span class="s4">&quot;2021&quot;</span><span class="s2">, </span><span class="s1">tz</span><span class="s2">=</span><span class="s4">&quot;UTC&quot;</span><span class="s2">)],</span>
+            <span class="s4">&quot;datetime64[ns, UTC]&quot;</span><span class="s2">,</span>
+        <span class="s2">),</span>
+    <span class="s2">],</span>
+    <span class="s1">ids</span><span class="s2">=[</span><span class="s4">&quot;int-ea&quot;</span><span class="s2">, </span><span class="s4">&quot;datetime64tz&quot;</span><span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s4">&quot;copy&quot;</span><span class="s2">, [</span><span class="s0">False</span><span class="s2">, </span><span class="s0">None</span><span class="s2">, </span><span class="s0">True</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_dataframe_from_extension_array</span><span class="s2">(</span><span class="s1">copy</span><span class="s2">, </span><span class="s1">data</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">):</span>
+    <span class="s1">arr </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">data</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">dtype</span><span class="s2">)</span>
+    <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s1">copy</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">arr</span><span class="s2">.</span><span class="s1">dtype </span><span class="s2">== </span><span class="s4">&quot;Int64&quot;</span><span class="s2">:</span>
+        <span class="s3"># to ensure tm.shares_memory works correctly</span>
+        <span class="s3"># TODO fix in tm.shares_memory or get_array?</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">arr</span><span class="s2">.</span><span class="s1">_data</span>
+
+    <span class="s0">if </span><span class="s1">copy </span><span class="s0">is None or </span><span class="s1">copy </span><span class="s0">is True</span><span class="s2">:</span>
+        <span class="s0">assert not </span><span class="s1">tm</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s5">0</span><span class="s2">), </span><span class="s1">arr</span><span class="s2">)</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">assert </span><span class="s1">tm</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s5">0</span><span class="s2">), </span><span class="s1">arr</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_frame_from_dict_of_index</span><span class="s2">():</span>
+    <span class="s1">idx </span><span class="s2">= </span><span class="s1">Index</span><span class="s2">([</span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">])</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">idx</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">(</span><span class="s1">deep</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">({</span><span class="s4">&quot;a&quot;</span><span class="s2">: </span><span class="s1">idx</span><span class="s2">}, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">np</span><span class="s2">.</span><span class="s1">shares_memory</span><span class="s2">(</span><span class="s1">get_array</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">), </span><span class="s1">idx</span><span class="s2">.</span><span class="s1">_values</span><span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s1">df</span><span class="s2">.</span><span class="s1">_mgr</span><span class="s2">.</span><span class="s1">_has_no_reference</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)</span>
+
+    <span class="s1">df</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s5">0</span><span class="s2">, </span><span class="s5">0</span><span class="s2">] = </span><span class="s5">100</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_index_equal</span><span class="s2">(</span><span class="s1">idx</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

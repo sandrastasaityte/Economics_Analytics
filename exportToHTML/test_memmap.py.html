@@ -1,0 +1,310 @@
+<html>
+<head>
+<title>test_memmap.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #2aacb8;}
+.s5 { color: #7a7e85;}
+.s6 { color: #a5c261;}
+.s7 { color: #5f826b; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_memmap.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">mmap</span>
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">import </span><span class="s1">warnings</span>
+<span class="s0">from </span><span class="s1">pathlib </span><span class="s0">import </span><span class="s1">Path</span>
+<span class="s0">from </span><span class="s1">tempfile </span><span class="s0">import </span><span class="s1">NamedTemporaryFile</span><span class="s2">, </span><span class="s1">TemporaryFile</span>
+
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">from </span><span class="s1">numpy </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">add</span><span class="s2">,</span>
+    <span class="s1">allclose</span><span class="s2">,</span>
+    <span class="s1">arange</span><span class="s2">,</span>
+    <span class="s1">asarray</span><span class="s2">,</span>
+    <span class="s1">average</span><span class="s2">,</span>
+    <span class="s1">isscalar</span><span class="s2">,</span>
+    <span class="s1">memmap</span><span class="s2">,</span>
+    <span class="s1">multiply</span><span class="s2">,</span>
+    <span class="s1">ndarray</span><span class="s2">,</span>
+    <span class="s1">prod</span><span class="s2">,</span>
+    <span class="s1">subtract</span><span class="s2">,</span>
+    <span class="s1">sum</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">testing </span><span class="s0">import </span><span class="s1">assert_</span><span class="s2">, </span><span class="s1">assert_array_equal</span><span class="s2">, </span><span class="s1">assert_equal</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">thread_unsafe</span><span class="s2">(</span><span class="s1">reason</span><span class="s2">=</span><span class="s3">&quot;setup &amp; memmap is thread-unsafe (gh-29126)&quot;</span><span class="s2">)</span>
+<span class="s0">class </span><span class="s1">TestMemmap</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">setup_method</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp </span><span class="s2">= </span><span class="s1">NamedTemporaryFile</span><span class="s2">(</span><span class="s1">prefix</span><span class="s2">=</span><span class="s3">'mmap'</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">shape </span><span class="s2">= (</span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">dtype </span><span class="s2">= </span><span class="s3">'float32'</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s1">arange</span><span class="s2">(</span><span class="s4">12</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">).</span><span class="s1">reshape</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">teardown_method</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s0">None</span>
+
+    <span class="s0">def </span><span class="s1">test_roundtrip</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># Write data to file</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">,</span>
+                    <span class="s1">shape</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s1">fp</span><span class="s2">[:] = </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">[:]</span>
+        <span class="s0">del </span><span class="s1">fp  </span><span class="s5"># Test __del__ machinery, which handles cleanup</span>
+
+        <span class="s5"># Read data back from file</span>
+        <span class="s1">newfp </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'r'</span><span class="s2">,</span>
+                       <span class="s1">shape</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">allclose</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">, </span><span class="s1">newfp</span><span class="s2">))</span>
+        <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">, </span><span class="s1">newfp</span><span class="s2">)</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">newfp</span><span class="s2">.</span><span class="s1">flags</span><span class="s2">.</span><span class="s1">writeable</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_open_with_filename</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">tmpname </span><span class="s2">= </span><span class="s1">tmp_path </span><span class="s2">/ </span><span class="s3">'mmap'</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">tmpname</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">,</span>
+                       <span class="s1">shape</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s1">fp</span><span class="s2">[:] = </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">[:]</span>
+        <span class="s0">del </span><span class="s1">fp</span>
+
+    <span class="s0">def </span><span class="s1">test_unnamed_file</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">TemporaryFile</span><span class="s2">() </span><span class="s0">as </span><span class="s1">f</span><span class="s2">:</span>
+            <span class="s1">fp </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">f</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+            <span class="s0">del </span><span class="s1">fp</span>
+
+    <span class="s0">def </span><span class="s1">test_attributes</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">offset </span><span class="s2">= </span><span class="s4">1</span>
+        <span class="s1">mode </span><span class="s2">= </span><span class="s3">&quot;w+&quot;</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s1">mode</span><span class="s2">,</span>
+                    <span class="s1">shape</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">, </span><span class="s1">offset</span><span class="s2">=</span><span class="s1">offset</span><span class="s2">)</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">offset</span><span class="s2">, </span><span class="s1">fp</span><span class="s2">.</span><span class="s1">offset</span><span class="s2">)</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">mode</span><span class="s2">, </span><span class="s1">fp</span><span class="s2">.</span><span class="s1">mode</span><span class="s2">)</span>
+        <span class="s0">del </span><span class="s1">fp</span>
+
+    <span class="s0">def </span><span class="s1">test_filename</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">tmpname </span><span class="s2">= </span><span class="s1">tmp_path </span><span class="s2">/ </span><span class="s3">&quot;mmap&quot;</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">tmpname</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">,</span>
+                       <span class="s1">shape</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s1">abspath </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">abspath</span><span class="s2">(</span><span class="s1">tmpname</span><span class="s2">))</span>
+        <span class="s1">fp</span><span class="s2">[:] = </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">[:]</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">abspath</span><span class="s2">, </span><span class="s1">fp</span><span class="s2">.</span><span class="s1">filename</span><span class="s2">)</span>
+        <span class="s1">b </span><span class="s2">= </span><span class="s1">fp</span><span class="s2">[:</span><span class="s4">1</span><span class="s2">]</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">abspath</span><span class="s2">, </span><span class="s1">b</span><span class="s2">.</span><span class="s1">filename</span><span class="s2">)</span>
+        <span class="s0">del </span><span class="s1">b</span>
+        <span class="s0">del </span><span class="s1">fp</span>
+
+    <span class="s0">def </span><span class="s1">test_path</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">tmpname </span><span class="s2">= </span><span class="s1">tmp_path </span><span class="s2">/ </span><span class="s3">&quot;mmap&quot;</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">Path</span><span class="s2">(</span><span class="s1">tmpname</span><span class="s2">), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">,</span>
+                       <span class="s1">shape</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s5"># os.path.realpath does not resolve symlinks on Windows</span>
+        <span class="s5"># see: https://bugs.python.org/issue9949</span>
+        <span class="s5"># use Path.resolve, just as memmap class does internally</span>
+        <span class="s1">abspath </span><span class="s2">= </span><span class="s1">str</span><span class="s2">(</span><span class="s1">Path</span><span class="s2">(</span><span class="s1">tmpname</span><span class="s2">).</span><span class="s1">resolve</span><span class="s2">())</span>
+        <span class="s1">fp</span><span class="s2">[:] = </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">[:]</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">abspath</span><span class="s2">, </span><span class="s1">str</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">.</span><span class="s1">filename</span><span class="s2">.</span><span class="s1">resolve</span><span class="s2">()))</span>
+        <span class="s1">b </span><span class="s2">= </span><span class="s1">fp</span><span class="s2">[:</span><span class="s4">1</span><span class="s2">]</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">abspath</span><span class="s2">, </span><span class="s1">str</span><span class="s2">(</span><span class="s1">b</span><span class="s2">.</span><span class="s1">filename</span><span class="s2">.</span><span class="s1">resolve</span><span class="s2">()))</span>
+        <span class="s0">del </span><span class="s1">b</span>
+        <span class="s0">del </span><span class="s1">fp</span>
+
+    <span class="s0">def </span><span class="s1">test_filename_fileobj</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">&quot;w+&quot;</span><span class="s2">,</span>
+                    <span class="s1">shape</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">.</span><span class="s1">filename</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">.</span><span class="s1">name</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">skipif</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">platform </span><span class="s2">== </span><span class="s3">'gnu0'</span><span class="s2">,</span>
+                        <span class="s1">reason</span><span class="s2">=</span><span class="s3">&quot;Known to fail on hurd&quot;</span><span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_flush</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">,</span>
+                    <span class="s1">shape</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s1">fp</span><span class="s2">[:] = </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">[:]</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">[</span><span class="s4">0</span><span class="s2">], </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">[</span><span class="s4">0</span><span class="s2">])</span>
+        <span class="s1">fp</span><span class="s2">.</span><span class="s1">flush</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">test_del</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># Make sure a view does not delete the underlying mmap</span>
+        <span class="s1">fp_base </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">,</span>
+                    <span class="s1">shape</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s1">fp_base</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] = </span><span class="s4">5</span>
+        <span class="s1">fp_view </span><span class="s2">= </span><span class="s1">fp_base</span><span class="s2">[</span><span class="s4">0</span><span class="s2">:</span><span class="s4">1</span><span class="s2">]</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">fp_view</span><span class="s2">[</span><span class="s4">0</span><span class="s2">], </span><span class="s4">5</span><span class="s2">)</span>
+        <span class="s0">del </span><span class="s1">fp_view</span>
+        <span class="s5"># Should still be able to access and assign values after</span>
+        <span class="s5"># deleting the view</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">fp_base</span><span class="s2">[</span><span class="s4">0</span><span class="s2">], </span><span class="s4">5</span><span class="s2">)</span>
+        <span class="s1">fp_base</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] = </span><span class="s4">6</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">fp_base</span><span class="s2">[</span><span class="s4">0</span><span class="s2">], </span><span class="s4">6</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_arithmetic_drops_references</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">,</span>
+                    <span class="s1">shape</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s1">tmp </span><span class="s2">= (</span><span class="s1">fp </span><span class="s2">+ </span><span class="s4">10</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">tmp</span><span class="s2">, </span><span class="s1">memmap</span><span class="s2">):</span>
+            <span class="s1">assert_</span><span class="s2">(</span><span class="s1">tmp</span><span class="s2">.</span><span class="s1">_mmap </span><span class="s0">is not </span><span class="s1">fp</span><span class="s2">.</span><span class="s1">_mmap</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_indexing_drops_references</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">,</span>
+                    <span class="s1">shape</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s1">tmp </span><span class="s2">= </span><span class="s1">fp</span><span class="s2">[(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">), (</span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">)]</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">tmp</span><span class="s2">, </span><span class="s1">memmap</span><span class="s2">):</span>
+            <span class="s1">assert_</span><span class="s2">(</span><span class="s1">tmp</span><span class="s2">.</span><span class="s1">_mmap </span><span class="s0">is not </span><span class="s1">fp</span><span class="s2">.</span><span class="s1">_mmap</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_slicing_keeps_references</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">,</span>
+                    <span class="s1">shape</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">[:</span><span class="s4">2</span><span class="s2">, :</span><span class="s4">2</span><span class="s2">].</span><span class="s1">_mmap </span><span class="s0">is </span><span class="s1">fp</span><span class="s2">.</span><span class="s1">_mmap</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_view</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s1">new1 </span><span class="s2">= </span><span class="s1">fp</span><span class="s2">.</span><span class="s1">view</span><span class="s2">()</span>
+        <span class="s1">new2 </span><span class="s2">= </span><span class="s1">new1</span><span class="s2">.</span><span class="s1">view</span><span class="s2">()</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">new1</span><span class="s2">.</span><span class="s1">base </span><span class="s0">is </span><span class="s1">fp</span><span class="s2">)</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">new2</span><span class="s2">.</span><span class="s1">base </span><span class="s0">is </span><span class="s1">fp</span><span class="s2">)</span>
+        <span class="s1">new_array </span><span class="s2">= </span><span class="s1">asarray</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">)</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">new_array</span><span class="s2">.</span><span class="s1">base </span><span class="s0">is </span><span class="s1">fp</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_ufunc_return_ndarray</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s1">fp</span><span class="s2">[:] = </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span>
+
+        <span class="s0">with </span><span class="s1">warnings</span><span class="s2">.</span><span class="s1">catch_warnings</span><span class="s2">():</span>
+            <span class="s1">warnings</span><span class="s2">.</span><span class="s1">filterwarnings</span><span class="s2">(</span>
+                <span class="s3">'ignore'</span><span class="s2">, </span><span class="s3">&quot;np.average currently does not preserve&quot;</span><span class="s2">, </span><span class="s1">FutureWarning</span><span class="s2">)</span>
+            <span class="s0">for </span><span class="s1">unary_op </span><span class="s0">in </span><span class="s2">[</span><span class="s1">sum</span><span class="s2">, </span><span class="s1">average</span><span class="s2">, </span><span class="s1">prod</span><span class="s2">]:</span>
+                <span class="s1">result </span><span class="s2">= </span><span class="s1">unary_op</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">)</span>
+                <span class="s1">assert_</span><span class="s2">(</span><span class="s1">isscalar</span><span class="s2">(</span><span class="s1">result</span><span class="s2">))</span>
+                <span class="s1">assert_</span><span class="s2">(</span><span class="s1">result</span><span class="s2">.</span><span class="s1">__class__ </span><span class="s0">is </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">[</span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s2">].</span><span class="s1">__class__</span><span class="s2">)</span>
+
+                <span class="s1">assert_</span><span class="s2">(</span><span class="s1">unary_op</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">, </span><span class="s1">axis</span><span class="s2">=</span><span class="s4">0</span><span class="s2">).</span><span class="s1">__class__ </span><span class="s0">is </span><span class="s1">ndarray</span><span class="s2">)</span>
+                <span class="s1">assert_</span><span class="s2">(</span><span class="s1">unary_op</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">, </span><span class="s1">axis</span><span class="s2">=</span><span class="s4">1</span><span class="s2">).</span><span class="s1">__class__ </span><span class="s0">is </span><span class="s1">ndarray</span><span class="s2">)</span>
+
+        <span class="s0">for </span><span class="s1">binary_op </span><span class="s0">in </span><span class="s2">[</span><span class="s1">add</span><span class="s2">, </span><span class="s1">subtract</span><span class="s2">, </span><span class="s1">multiply</span><span class="s2">]:</span>
+            <span class="s1">assert_</span><span class="s2">(</span><span class="s1">binary_op</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">).</span><span class="s1">__class__ </span><span class="s0">is </span><span class="s1">ndarray</span><span class="s2">)</span>
+            <span class="s1">assert_</span><span class="s2">(</span><span class="s1">binary_op</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">, </span><span class="s1">fp</span><span class="s2">).</span><span class="s1">__class__ </span><span class="s0">is </span><span class="s1">ndarray</span><span class="s2">)</span>
+            <span class="s1">assert_</span><span class="s2">(</span><span class="s1">binary_op</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">, </span><span class="s1">fp</span><span class="s2">).</span><span class="s1">__class__ </span><span class="s0">is </span><span class="s1">ndarray</span><span class="s2">)</span>
+
+        <span class="s1">fp </span><span class="s2">+= </span><span class="s4">1</span>
+        <span class="s0">assert </span><span class="s1">fp</span><span class="s2">.</span><span class="s1">__class__ </span><span class="s0">is </span><span class="s1">memmap</span>
+        <span class="s1">add</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s1">out</span><span class="s2">=</span><span class="s1">fp</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">fp</span><span class="s2">.</span><span class="s1">__class__ </span><span class="s0">is </span><span class="s1">memmap</span>
+
+    <span class="s0">def </span><span class="s1">test_getitem</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s1">fp</span><span class="s2">[:] = </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span>
+
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">[</span><span class="s4">1</span><span class="s2">:, :-</span><span class="s4">1</span><span class="s2">].</span><span class="s1">__class__ </span><span class="s0">is </span><span class="s1">memmap</span><span class="s2">)</span>
+        <span class="s5"># Fancy indexing returns a copy that is not memmapped</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">[[</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">]].</span><span class="s1">__class__ </span><span class="s0">is </span><span class="s1">ndarray</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_memmap_subclass</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">class </span><span class="s1">MemmapSubClass</span><span class="s2">(</span><span class="s1">memmap</span><span class="s2">):</span>
+            <span class="s0">pass</span>
+
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">MemmapSubClass</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">)</span>
+        <span class="s1">fp</span><span class="s2">[:] = </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span>
+
+        <span class="s5"># We keep previous behavior for subclasses of memmap, i.e. the</span>
+        <span class="s5"># ufunc and __getitem__ output is never turned into an ndarray</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">sum</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">, </span><span class="s1">axis</span><span class="s2">=</span><span class="s4">0</span><span class="s2">).</span><span class="s1">__class__ </span><span class="s0">is </span><span class="s1">MemmapSubClass</span><span class="s2">)</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">sum</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">).</span><span class="s1">__class__ </span><span class="s0">is </span><span class="s1">MemmapSubClass</span><span class="s2">)</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">[</span><span class="s4">1</span><span class="s2">:, :-</span><span class="s4">1</span><span class="s2">].</span><span class="s1">__class__ </span><span class="s0">is </span><span class="s1">MemmapSubClass</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">fp</span><span class="s2">[[</span><span class="s4">0</span><span class="s2">, </span><span class="s4">1</span><span class="s2">]].</span><span class="s1">__class__ </span><span class="s0">is </span><span class="s1">MemmapSubClass</span>
+
+    <span class="s0">def </span><span class="s1">test_mmap_offset_greater_than_allocation_granularity</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">size </span><span class="s2">= </span><span class="s4">5 </span><span class="s2">* </span><span class="s1">mmap</span><span class="s2">.</span><span class="s1">ALLOCATIONGRANULARITY</span>
+        <span class="s1">offset </span><span class="s2">= </span><span class="s1">mmap</span><span class="s2">.</span><span class="s1">ALLOCATIONGRANULARITY </span><span class="s2">+ </span><span class="s4">1</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=</span><span class="s1">size</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">, </span><span class="s1">offset</span><span class="s2">=</span><span class="s1">offset</span><span class="s2">)</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">.</span><span class="s1">offset </span><span class="s2">== </span><span class="s1">offset</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_empty_array_with_offset_multiple_of_allocation_granularity</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s6">b'a' </span><span class="s2">* </span><span class="s1">mmap</span><span class="s2">.</span><span class="s1">ALLOCATIONGRANULARITY</span><span class="s2">)</span>
+        <span class="s1">size </span><span class="s2">= </span><span class="s4">0</span>
+        <span class="s1">offset </span><span class="s2">= </span><span class="s1">mmap</span><span class="s2">.</span><span class="s1">ALLOCATIONGRANULARITY</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=</span><span class="s1">size</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">, </span><span class="s1">offset</span><span class="s2">=</span><span class="s1">offset</span><span class="s2">)</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">.</span><span class="s1">offset</span><span class="s2">, </span><span class="s1">offset</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_no_shape</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s6">b'a' </span><span class="s2">* </span><span class="s4">16</span><span class="s2">)</span>
+        <span class="s1">mm </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">'float64'</span><span class="s2">)</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">mm</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">, (</span><span class="s4">2</span><span class="s2">,))</span>
+
+    <span class="s0">def </span><span class="s1">test_empty_array</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># gh-12653</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">match</span><span class="s2">=</span><span class="s3">'empty file'</span><span class="s2">):</span>
+            <span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">0</span><span class="s2">, </span><span class="s4">4</span><span class="s2">), </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'r'</span><span class="s2">)</span>
+
+        <span class="s5"># gh-27723</span>
+        <span class="s5"># empty memmap works with mode in ('w+','r+')</span>
+        <span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">0</span><span class="s2">, </span><span class="s4">4</span><span class="s2">), </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">)</span>
+
+        <span class="s5"># ok now the file is not empty</span>
+        <span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">0</span><span class="s2">, </span><span class="s4">4</span><span class="s2">), </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_shape_type</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=</span><span class="s4">3</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">)</span>
+        <span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">)</span>
+        <span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=</span><span class="s1">list</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">), </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">)</span>
+        <span class="s1">memmap</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">tmpfp</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=</span><span class="s1">asarray</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">shape</span><span class="s2">), </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">TestPatternMatching</span><span class="s2">:</span>
+    <span class="s7">&quot;&quot;&quot;Tests for structural pattern matching support (PEP 634).&quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">test_match_sequence_pattern_1d</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">NamedTemporaryFile</span><span class="s2">() </span><span class="s0">as </span><span class="s1">f</span><span class="s2">:</span>
+            <span class="s1">arr </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">f</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">'int64'</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">3</span><span class="s2">,))</span>
+            <span class="s1">arr</span><span class="s2">[:] = [</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">]</span>
+            <span class="s1">match arr</span><span class="s2">:</span>
+                <span class="s1">case </span><span class="s2">[</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">, </span><span class="s1">c</span><span class="s2">]:</span>
+                    <span class="s0">assert </span><span class="s1">a </span><span class="s2">== </span><span class="s4">1</span>
+                    <span class="s0">assert </span><span class="s1">b </span><span class="s2">== </span><span class="s4">2</span>
+                    <span class="s0">assert </span><span class="s1">c </span><span class="s2">== </span><span class="s4">3</span>
+                <span class="s1">case _</span><span class="s2">:</span>
+                    <span class="s0">raise </span><span class="s1">AssertionError</span><span class="s2">(</span><span class="s3">&quot;1D memmap did not match sequence pattern&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_match_sequence_pattern_2d</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">NamedTemporaryFile</span><span class="s2">() </span><span class="s0">as </span><span class="s1">f</span><span class="s2">:</span>
+            <span class="s1">arr </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">f</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">'int64'</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">2</span><span class="s2">, </span><span class="s4">2</span><span class="s2">))</span>
+            <span class="s1">arr</span><span class="s2">[:] = [[</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">], [</span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">]]</span>
+            <span class="s1">match arr</span><span class="s2">:</span>
+                <span class="s1">case </span><span class="s2">[</span><span class="s1">row1</span><span class="s2">, </span><span class="s1">row2</span><span class="s2">]:</span>
+                    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">row1</span><span class="s2">, [</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">])</span>
+                    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">row2</span><span class="s2">, [</span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">])</span>
+                <span class="s1">case _</span><span class="s2">:</span>
+                    <span class="s0">raise </span><span class="s1">AssertionError</span><span class="s2">(</span><span class="s3">&quot;2D memmap did not match sequence pattern&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_match_sequence_pattern_3d</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">NamedTemporaryFile</span><span class="s2">() </span><span class="s0">as </span><span class="s1">f</span><span class="s2">:</span>
+            <span class="s1">arr </span><span class="s2">= </span><span class="s1">memmap</span><span class="s2">(</span><span class="s1">f</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">'int64'</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">'w+'</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s4">2</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">2</span><span class="s2">))</span>
+            <span class="s1">arr</span><span class="s2">[:] = [[[</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">], [</span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">]], [[</span><span class="s4">5</span><span class="s2">, </span><span class="s4">6</span><span class="s2">], [</span><span class="s4">7</span><span class="s2">, </span><span class="s4">8</span><span class="s2">]]]</span>
+            <span class="s5"># outer matching</span>
+            <span class="s1">match arr</span><span class="s2">:</span>
+                <span class="s1">case </span><span class="s2">[</span><span class="s1">plane1</span><span class="s2">, </span><span class="s1">plane2</span><span class="s2">]:</span>
+                    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">plane1</span><span class="s2">, [[</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">], [</span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">]])</span>
+                    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">plane2</span><span class="s2">, [[</span><span class="s4">5</span><span class="s2">, </span><span class="s4">6</span><span class="s2">], [</span><span class="s4">7</span><span class="s2">, </span><span class="s4">8</span><span class="s2">]])</span>
+                <span class="s1">case _</span><span class="s2">:</span>
+                    <span class="s0">raise </span><span class="s1">AssertionError</span><span class="s2">(</span><span class="s3">&quot;3D memmap did not match sequence pattern&quot;</span><span class="s2">)</span>
+            <span class="s5"># inner matching</span>
+            <span class="s1">match arr</span><span class="s2">:</span>
+                <span class="s1">case </span><span class="s2">[[</span><span class="s1">row1</span><span class="s2">, </span><span class="s1">row2</span><span class="s2">], [</span><span class="s1">row3</span><span class="s2">, </span><span class="s1">row4</span><span class="s2">]]:</span>
+                    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">row1</span><span class="s2">, [</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">])</span>
+                    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">row2</span><span class="s2">, [</span><span class="s4">3</span><span class="s2">, </span><span class="s4">4</span><span class="s2">])</span>
+                    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">row3</span><span class="s2">, [</span><span class="s4">5</span><span class="s2">, </span><span class="s4">6</span><span class="s2">])</span>
+                    <span class="s1">assert_array_equal</span><span class="s2">(</span><span class="s1">row4</span><span class="s2">, [</span><span class="s4">7</span><span class="s2">, </span><span class="s4">8</span><span class="s2">])</span>
+                <span class="s1">case _</span><span class="s2">:</span>
+                    <span class="s0">raise </span><span class="s1">AssertionError</span><span class="s2">(</span><span class="s3">&quot;3D memmap did not match sequence pattern&quot;</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

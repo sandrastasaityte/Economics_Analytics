@@ -1,0 +1,704 @@
+<html>
+<head>
+<title>pytables.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+pytables.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;manage PyTables query interface via Expressions&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">import </span><span class="s1">ast</span>
+<span class="s2">from </span><span class="s1">decimal </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">Decimal</span><span class="s3">,</span>
+    <span class="s1">InvalidOperation</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">functools </span><span class="s2">import </span><span class="s1">partial</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s3">,</span>
+    <span class="s1">Any</span><span class="s3">,</span>
+    <span class="s1">ClassVar</span><span class="s3">,</span>
+    <span class="s1">Self</span><span class="s3">,</span>
+    <span class="s1">cast</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs </span><span class="s2">import </span><span class="s1">lib</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs</span><span class="s3">.</span><span class="s1">tslibs </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">Timedelta</span><span class="s3">,</span>
+    <span class="s1">Timestamp</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">errors </span><span class="s2">import </span><span class="s1">UndefinedVariableError</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">common </span><span class="s2">import </span><span class="s1">is_list_like</span>
+
+<span class="s2">import </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">common </span><span class="s2">as </span><span class="s1">com</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">computation </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">expr</span><span class="s3">,</span>
+    <span class="s1">ops</span><span class="s3">,</span>
+    <span class="s1">scope </span><span class="s2">as </span><span class="s1">_scope</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">computation</span><span class="s3">.</span><span class="s1">common </span><span class="s2">import </span><span class="s1">ensure_decoded</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">computation</span><span class="s3">.</span><span class="s1">expr </span><span class="s2">import </span><span class="s1">BaseExprVisitor</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">computation</span><span class="s3">.</span><span class="s1">ops </span><span class="s2">import </span><span class="s1">is_term</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">construction </span><span class="s2">import </span><span class="s1">extract_array</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">indexes</span><span class="s3">.</span><span class="s1">base </span><span class="s2">import </span><span class="s1">Index</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">formats</span><span class="s3">.</span><span class="s1">printing </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">pprint_thing</span><span class="s3">,</span>
+    <span class="s1">pprint_thing_encoded</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_typing </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">TimeUnit</span><span class="s3">,</span>
+        <span class="s1">npt</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">PyTablesScope</span><span class="s3">(</span><span class="s1">_scope</span><span class="s3">.</span><span class="s1">Scope</span><span class="s3">):</span>
+    <span class="s1">__slots__ </span><span class="s3">= (</span><span class="s4">&quot;queryables&quot;</span><span class="s3">,)</span>
+
+    <span class="s1">queryables</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">]</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">level</span><span class="s3">: </span><span class="s1">int</span><span class="s3">,</span>
+        <span class="s1">global_dict</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">local_dict</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">queryables</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">super</span><span class="s3">().</span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">level </span><span class="s3">+ </span><span class="s5">1</span><span class="s3">, </span><span class="s1">global_dict</span><span class="s3">=</span><span class="s1">global_dict</span><span class="s3">, </span><span class="s1">local_dict</span><span class="s3">=</span><span class="s1">local_dict</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">queryables </span><span class="s3">= </span><span class="s1">queryables </span><span class="s2">or </span><span class="s3">{}</span>
+
+
+<span class="s2">class </span><span class="s1">Term</span><span class="s3">(</span><span class="s1">ops</span><span class="s3">.</span><span class="s1">Term</span><span class="s3">):</span>
+    <span class="s1">env</span><span class="s3">: </span><span class="s1">PyTablesScope</span>
+
+    <span class="s2">def </span><span class="s1">__new__</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">name</span><span class="s3">, </span><span class="s1">env</span><span class="s3">, </span><span class="s1">side</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">name</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+            <span class="s1">klass </span><span class="s3">= </span><span class="s1">cls</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">klass </span><span class="s3">= </span><span class="s1">Constant</span>
+        <span class="s2">return </span><span class="s1">object</span><span class="s3">.</span><span class="s1">__new__</span><span class="s3">(</span><span class="s1">klass</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">name</span><span class="s3">, </span><span class="s1">env</span><span class="s3">: </span><span class="s1">PyTablesScope</span><span class="s3">, </span><span class="s1">side</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">=</span><span class="s2">None</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">super</span><span class="s3">().</span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">name</span><span class="s3">, </span><span class="s1">env</span><span class="s3">, </span><span class="s1">side</span><span class="s3">=</span><span class="s1">side</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">=</span><span class="s1">encoding</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_resolve_name</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s6"># must be a queryables</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">side </span><span class="s3">== </span><span class="s4">&quot;left&quot;</span><span class="s3">:</span>
+            <span class="s6"># Note: The behavior of __new__ ensures that self.name is a str here</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">name </span><span class="s2">not in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">env</span><span class="s3">.</span><span class="s1">queryables</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">NameError</span><span class="s3">(</span><span class="s4">f&quot;name </span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">name</span><span class="s2">!r} </span><span class="s4">is not defined&quot;</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">name</span>
+
+        <span class="s6"># resolve the rhs (and allow it to be None)</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">env</span><span class="s3">.</span><span class="s1">resolve</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">name</span><span class="s3">, </span><span class="s1">is_local</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s1">UndefinedVariableError</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">name</span>
+
+    <span class="s6"># read-only property overwriting read/write property</span>
+    <span class="s3">@</span><span class="s1">property  </span><span class="s6"># type: ignore[misc]</span>
+    <span class="s2">def </span><span class="s1">value</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_value</span>
+
+
+<span class="s2">class </span><span class="s1">Constant</span><span class="s3">(</span><span class="s1">Term</span><span class="s3">):</span>
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">name</span><span class="s3">, </span><span class="s1">env</span><span class="s3">: </span><span class="s1">PyTablesScope</span><span class="s3">, </span><span class="s1">side</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">=</span><span class="s2">None</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s2">assert </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">env</span><span class="s3">, </span><span class="s1">PyTablesScope</span><span class="s3">), </span><span class="s1">type</span><span class="s3">(</span><span class="s1">env</span><span class="s3">)</span>
+        <span class="s1">super</span><span class="s3">().</span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">name</span><span class="s3">, </span><span class="s1">env</span><span class="s3">, </span><span class="s1">side</span><span class="s3">=</span><span class="s1">side</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">=</span><span class="s1">encoding</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_resolve_name</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_name</span>
+
+
+<span class="s2">class </span><span class="s1">BinOp</span><span class="s3">(</span><span class="s1">ops</span><span class="s3">.</span><span class="s1">BinOp</span><span class="s3">):</span>
+    <span class="s1">_max_selectors </span><span class="s3">= </span><span class="s5">31</span>
+
+    <span class="s1">op</span><span class="s3">: </span><span class="s1">str</span>
+    <span class="s1">queryables</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">]</span>
+    <span class="s1">condition</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">op</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">lhs</span><span class="s3">, </span><span class="s1">rhs</span><span class="s3">, </span><span class="s1">queryables</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">], </span><span class="s1">encoding</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">super</span><span class="s3">().</span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">op</span><span class="s3">, </span><span class="s1">lhs</span><span class="s3">, </span><span class="s1">rhs</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">queryables </span><span class="s3">= </span><span class="s1">queryables</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">encoding </span><span class="s3">= </span><span class="s1">encoding</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">condition </span><span class="s3">= </span><span class="s2">None</span>
+
+    <span class="s2">def </span><span class="s1">_disallow_scalar_only_bool_ops</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s2">pass</span>
+
+    <span class="s2">def </span><span class="s1">prune</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">klass</span><span class="s3">):</span>
+        <span class="s2">def </span><span class="s1">pr</span><span class="s3">(</span><span class="s1">left</span><span class="s3">, </span><span class="s1">right</span><span class="s3">):</span>
+            <span class="s0">&quot;&quot;&quot;create and return a new specialized BinOp from myself&quot;&quot;&quot;</span>
+            <span class="s2">if </span><span class="s1">left </span><span class="s2">is None</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">right</span>
+            <span class="s2">elif </span><span class="s1">right </span><span class="s2">is None</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">left</span>
+
+            <span class="s1">k </span><span class="s3">= </span><span class="s1">klass</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">left</span><span class="s3">, </span><span class="s1">ConditionBinOp</span><span class="s3">):</span>
+                <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">right</span><span class="s3">, </span><span class="s1">ConditionBinOp</span><span class="s3">):</span>
+                    <span class="s1">k </span><span class="s3">= </span><span class="s1">JointConditionBinOp</span>
+                <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">left</span><span class="s3">, </span><span class="s1">k</span><span class="s3">):</span>
+                    <span class="s2">return </span><span class="s1">left</span>
+                <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">right</span><span class="s3">, </span><span class="s1">k</span><span class="s3">):</span>
+                    <span class="s2">return </span><span class="s1">right</span>
+
+            <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">left</span><span class="s3">, </span><span class="s1">FilterBinOp</span><span class="s3">):</span>
+                <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">right</span><span class="s3">, </span><span class="s1">FilterBinOp</span><span class="s3">):</span>
+                    <span class="s1">k </span><span class="s3">= </span><span class="s1">JointFilterBinOp</span>
+                <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">left</span><span class="s3">, </span><span class="s1">k</span><span class="s3">):</span>
+                    <span class="s2">return </span><span class="s1">left</span>
+                <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">right</span><span class="s3">, </span><span class="s1">k</span><span class="s3">):</span>
+                    <span class="s2">return </span><span class="s1">right</span>
+
+            <span class="s2">return </span><span class="s1">k</span><span class="s3">(</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">op</span><span class="s3">, </span><span class="s1">left</span><span class="s3">, </span><span class="s1">right</span><span class="s3">, </span><span class="s1">queryables</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">queryables</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">encoding</span>
+            <span class="s3">).</span><span class="s1">evaluate</span><span class="s3">()</span>
+
+        <span class="s1">left</span><span class="s3">, </span><span class="s1">right </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">lhs</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">rhs</span>
+
+        <span class="s2">if </span><span class="s1">is_term</span><span class="s3">(</span><span class="s1">left</span><span class="s3">) </span><span class="s2">and </span><span class="s1">is_term</span><span class="s3">(</span><span class="s1">right</span><span class="s3">):</span>
+            <span class="s1">res </span><span class="s3">= </span><span class="s1">pr</span><span class="s3">(</span><span class="s1">left</span><span class="s3">.</span><span class="s1">value</span><span class="s3">, </span><span class="s1">right</span><span class="s3">.</span><span class="s1">value</span><span class="s3">)</span>
+        <span class="s2">elif not </span><span class="s1">is_term</span><span class="s3">(</span><span class="s1">left</span><span class="s3">) </span><span class="s2">and </span><span class="s1">is_term</span><span class="s3">(</span><span class="s1">right</span><span class="s3">):</span>
+            <span class="s1">res </span><span class="s3">= </span><span class="s1">pr</span><span class="s3">(</span><span class="s1">left</span><span class="s3">.</span><span class="s1">prune</span><span class="s3">(</span><span class="s1">klass</span><span class="s3">), </span><span class="s1">right</span><span class="s3">.</span><span class="s1">value</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">is_term</span><span class="s3">(</span><span class="s1">left</span><span class="s3">) </span><span class="s2">and not </span><span class="s1">is_term</span><span class="s3">(</span><span class="s1">right</span><span class="s3">):</span>
+            <span class="s1">res </span><span class="s3">= </span><span class="s1">pr</span><span class="s3">(</span><span class="s1">left</span><span class="s3">.</span><span class="s1">value</span><span class="s3">, </span><span class="s1">right</span><span class="s3">.</span><span class="s1">prune</span><span class="s3">(</span><span class="s1">klass</span><span class="s3">))</span>
+        <span class="s2">elif not </span><span class="s3">(</span><span class="s1">is_term</span><span class="s3">(</span><span class="s1">left</span><span class="s3">) </span><span class="s2">or </span><span class="s1">is_term</span><span class="s3">(</span><span class="s1">right</span><span class="s3">)):</span>
+            <span class="s1">res </span><span class="s3">= </span><span class="s1">pr</span><span class="s3">(</span><span class="s1">left</span><span class="s3">.</span><span class="s1">prune</span><span class="s3">(</span><span class="s1">klass</span><span class="s3">), </span><span class="s1">right</span><span class="s3">.</span><span class="s1">prune</span><span class="s3">(</span><span class="s1">klass</span><span class="s3">))</span>
+
+        <span class="s2">return </span><span class="s1">res</span>
+
+    <span class="s2">def </span><span class="s1">conform</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">rhs</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;inplace conform rhs&quot;&quot;&quot;</span>
+        <span class="s2">if not </span><span class="s1">is_list_like</span><span class="s3">(</span><span class="s1">rhs</span><span class="s3">):</span>
+            <span class="s1">rhs </span><span class="s3">= [</span><span class="s1">rhs</span><span class="s3">]</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">rhs</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">):</span>
+            <span class="s1">rhs </span><span class="s3">= </span><span class="s1">rhs</span><span class="s3">.</span><span class="s1">ravel</span><span class="s3">()</span>
+        <span class="s2">return </span><span class="s1">rhs</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">is_valid</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot;return True if this is a valid field&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">lhs </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">queryables</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">is_in_table</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        return True if this is a valid column name for generation (e.g. an 
+        actual column in the table) 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">queryables</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">lhs</span><span class="s3">) </span><span class="s2">is not None</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">kind</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;the kind of my field&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">queryables</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">lhs</span><span class="s3">), </span><span class="s4">&quot;kind&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">meta</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;the meta of my field&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">queryables</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">lhs</span><span class="s3">), </span><span class="s4">&quot;meta&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">metadata</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;the metadata of my field&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">queryables</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">lhs</span><span class="s3">), </span><span class="s4">&quot;metadata&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">generate</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">v</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot;create and return the op string for this TermValue&quot;&quot;&quot;</span>
+        <span class="s1">val </span><span class="s3">= </span><span class="s1">v</span><span class="s3">.</span><span class="s1">tostring</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">encoding</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s4">f&quot;(</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">lhs</span><span class="s2">} {</span><span class="s1">self</span><span class="s3">.</span><span class="s1">op</span><span class="s2">} {</span><span class="s1">val</span><span class="s2">}</span><span class="s4">)&quot;</span>
+
+    <span class="s2">def </span><span class="s1">convert_value</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">conv_val</span><span class="s3">) </span><span class="s1">-&gt; TermValue</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        convert the expression that is in the term to something that is 
+        accepted by pytables 
+        &quot;&quot;&quot;</span>
+
+        <span class="s2">def </span><span class="s1">stringify</span><span class="s3">(</span><span class="s1">value</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">encoding </span><span class="s2">is not None</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">pprint_thing_encoded</span><span class="s3">(</span><span class="s1">value</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">encoding</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">pprint_thing</span><span class="s3">(</span><span class="s1">value</span><span class="s3">)</span>
+
+        <span class="s1">kind </span><span class="s3">= </span><span class="s1">ensure_decoded</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">kind</span><span class="s3">)</span>
+        <span class="s1">meta </span><span class="s3">= </span><span class="s1">ensure_decoded</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">meta</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">kind </span><span class="s3">== </span><span class="s4">&quot;datetime&quot; </span><span class="s2">or </span><span class="s3">(</span><span class="s1">kind </span><span class="s2">and </span><span class="s1">kind</span><span class="s3">.</span><span class="s1">startswith</span><span class="s3">(</span><span class="s4">&quot;datetime64&quot;</span><span class="s3">)):</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">, (</span><span class="s1">int</span><span class="s3">, </span><span class="s1">float</span><span class="s3">)):</span>
+                <span class="s1">conv_val </span><span class="s3">= </span><span class="s1">stringify</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">)</span>
+            <span class="s1">conv_val </span><span class="s3">= </span><span class="s1">ensure_decoded</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">)</span>
+            <span class="s1">unit</span><span class="s3">: </span><span class="s1">TimeUnit </span><span class="s3">= </span><span class="s4">&quot;ns&quot;</span>
+            <span class="s2">if </span><span class="s4">&quot;[&quot; </span><span class="s2">in </span><span class="s1">kind</span><span class="s3">:</span>
+                <span class="s1">unit </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s4">&quot;TimeUnit&quot;</span><span class="s3">, </span><span class="s1">kind</span><span class="s3">.</span><span class="s1">split</span><span class="s3">(</span><span class="s4">&quot;[&quot;</span><span class="s3">)[-</span><span class="s5">1</span><span class="s3">][:-</span><span class="s5">1</span><span class="s3">])</span>
+            <span class="s1">conv_val </span><span class="s3">= </span><span class="s1">Timestamp</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">).</span><span class="s1">as_unit</span><span class="s3">(</span><span class="s1">unit</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">conv_val</span><span class="s3">.</span><span class="s1">tz </span><span class="s2">is not None</span><span class="s3">:</span>
+                <span class="s1">conv_val </span><span class="s3">= </span><span class="s1">conv_val</span><span class="s3">.</span><span class="s1">tz_convert</span><span class="s3">(</span><span class="s4">&quot;UTC&quot;</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">TermValue</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">, </span><span class="s1">conv_val</span><span class="s3">.</span><span class="s1">_value</span><span class="s3">, </span><span class="s1">kind</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">kind</span><span class="s3">.</span><span class="s1">startswith</span><span class="s3">(</span><span class="s4">&quot;timedelta&quot;</span><span class="s3">):</span>
+            <span class="s1">unit </span><span class="s3">= </span><span class="s4">&quot;ns&quot;</span>
+            <span class="s2">if </span><span class="s4">&quot;[&quot; </span><span class="s2">in </span><span class="s1">kind</span><span class="s3">:</span>
+                <span class="s1">unit </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s4">&quot;TimeUnit&quot;</span><span class="s3">, </span><span class="s1">kind</span><span class="s3">.</span><span class="s1">split</span><span class="s3">(</span><span class="s4">&quot;[&quot;</span><span class="s3">)[-</span><span class="s5">1</span><span class="s3">][:-</span><span class="s5">1</span><span class="s3">])</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+                <span class="s1">conv_val </span><span class="s3">= </span><span class="s1">Timedelta</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">)</span>
+            <span class="s2">elif </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">is_integer</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">) </span><span class="s2">or </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">is_float</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">):</span>
+                <span class="s1">conv_val </span><span class="s3">= </span><span class="s1">Timedelta</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">, </span><span class="s1">unit</span><span class="s3">=</span><span class="s4">&quot;s&quot;</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">conv_val </span><span class="s3">= </span><span class="s1">Timedelta</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">)</span>
+            <span class="s1">conv_val </span><span class="s3">= </span><span class="s1">conv_val</span><span class="s3">.</span><span class="s1">as_unit</span><span class="s3">(</span><span class="s1">unit</span><span class="s3">).</span><span class="s1">_value</span>
+            <span class="s2">return </span><span class="s1">TermValue</span><span class="s3">(</span><span class="s1">int</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">), </span><span class="s1">conv_val</span><span class="s3">, </span><span class="s1">kind</span><span class="s3">)</span>
+
+        <span class="s2">elif </span><span class="s1">meta </span><span class="s3">== </span><span class="s4">&quot;category&quot;</span><span class="s3">:</span>
+            <span class="s1">metadata </span><span class="s3">= </span><span class="s1">extract_array</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">metadata</span><span class="s3">, </span><span class="s1">extract_numpy</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+            <span class="s1">result</span><span class="s3">: </span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp</span><span class="s3">] | </span><span class="s1">np</span><span class="s3">.</span><span class="s1">intp </span><span class="s3">| </span><span class="s1">int</span>
+            <span class="s2">if </span><span class="s1">conv_val </span><span class="s2">not in </span><span class="s1">metadata</span><span class="s3">:</span>
+                <span class="s1">result </span><span class="s3">= -</span><span class="s5">1</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s6"># Find the index of the first match of conv_val in metadata</span>
+                <span class="s1">result </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">flatnonzero</span><span class="s3">(</span><span class="s1">metadata </span><span class="s3">== </span><span class="s1">conv_val</span><span class="s3">)[</span><span class="s5">0</span><span class="s3">]</span>
+            <span class="s2">return </span><span class="s1">TermValue</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">result</span><span class="s3">, </span><span class="s4">&quot;integer&quot;</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">kind </span><span class="s3">== </span><span class="s4">&quot;integer&quot;</span><span class="s3">:</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">v_dec </span><span class="s3">= </span><span class="s1">Decimal</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">)</span>
+            <span class="s2">except </span><span class="s1">InvalidOperation</span><span class="s3">:</span>
+                <span class="s6"># GH 54186</span>
+                <span class="s6"># convert v to float to raise float's ValueError</span>
+                <span class="s1">float</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">conv_val </span><span class="s3">= </span><span class="s1">int</span><span class="s3">(</span><span class="s1">v_dec</span><span class="s3">.</span><span class="s1">to_integral_exact</span><span class="s3">(</span><span class="s1">rounding</span><span class="s3">=</span><span class="s4">&quot;ROUND_HALF_EVEN&quot;</span><span class="s3">))</span>
+            <span class="s2">return </span><span class="s1">TermValue</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">, </span><span class="s1">conv_val</span><span class="s3">, </span><span class="s1">kind</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">kind </span><span class="s3">== </span><span class="s4">&quot;float&quot;</span><span class="s3">:</span>
+            <span class="s1">conv_val </span><span class="s3">= </span><span class="s1">float</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">TermValue</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">, </span><span class="s1">conv_val</span><span class="s3">, </span><span class="s1">kind</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">kind </span><span class="s3">== </span><span class="s4">&quot;bool&quot;</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+                <span class="s1">conv_val </span><span class="s3">= </span><span class="s1">conv_val</span><span class="s3">.</span><span class="s1">strip</span><span class="s3">().</span><span class="s1">lower</span><span class="s3">() </span><span class="s2">not in </span><span class="s3">[</span>
+                    <span class="s4">&quot;false&quot;</span><span class="s3">,</span>
+                    <span class="s4">&quot;f&quot;</span><span class="s3">,</span>
+                    <span class="s4">&quot;no&quot;</span><span class="s3">,</span>
+                    <span class="s4">&quot;n&quot;</span><span class="s3">,</span>
+                    <span class="s4">&quot;none&quot;</span><span class="s3">,</span>
+                    <span class="s4">&quot;0&quot;</span><span class="s3">,</span>
+                    <span class="s4">&quot;[]&quot;</span><span class="s3">,</span>
+                    <span class="s4">&quot;{}&quot;</span><span class="s3">,</span>
+                    <span class="s4">&quot;&quot;</span><span class="s3">,</span>
+                <span class="s3">]</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">conv_val </span><span class="s3">= </span><span class="s1">bool</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">TermValue</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">, </span><span class="s1">conv_val</span><span class="s3">, </span><span class="s1">kind</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+            <span class="s6"># string quoting</span>
+            <span class="s2">return </span><span class="s1">TermValue</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">, </span><span class="s1">stringify</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">), </span><span class="s4">&quot;string&quot;</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span>
+                <span class="s4">f&quot;Cannot compare </span><span class="s2">{</span><span class="s1">conv_val</span><span class="s2">} </span><span class="s4">of type </span><span class="s2">{</span><span class="s1">type</span><span class="s3">(</span><span class="s1">conv_val</span><span class="s3">)</span><span class="s2">} </span><span class="s4">to </span><span class="s2">{</span><span class="s1">kind</span><span class="s2">} </span><span class="s4">column&quot;</span>
+            <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">convert_values</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s2">pass</span>
+
+
+<span class="s2">class </span><span class="s1">FilterBinOp</span><span class="s3">(</span><span class="s1">BinOp</span><span class="s3">):</span>
+    <span class="s1">filter</span><span class="s3">: </span><span class="s1">tuple</span><span class="s3">[</span><span class="s1">Any</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">, </span><span class="s1">Index</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span>
+
+    <span class="s2">def </span><span class="s1">__repr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">filter </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s4">&quot;Filter: Not Initialized&quot;</span>
+        <span class="s2">return </span><span class="s1">pprint_thing</span><span class="s3">(</span><span class="s4">f&quot;[Filter : [</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">filter</span><span class="s3">[</span><span class="s5">0</span><span class="s3">]</span><span class="s2">}</span><span class="s4">] -&gt; [</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">filter</span><span class="s3">[</span><span class="s5">1</span><span class="s3">]</span><span class="s2">}</span><span class="s4">]&quot;</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">invert</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; Self</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot;invert the filter&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">filter </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">filter </span><span class="s3">= (</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">filter</span><span class="s3">[</span><span class="s5">0</span><span class="s3">],</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">generate_filter_op</span><span class="s3">(</span><span class="s1">invert</span><span class="s3">=</span><span class="s2">True</span><span class="s3">),</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">filter</span><span class="s3">[</span><span class="s5">2</span><span class="s3">],</span>
+            <span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">self</span>
+
+    <span class="s2">def </span><span class="s1">format</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;return the actual filter format&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">filter</span><span class="s3">]</span>
+
+    <span class="s6"># error: Signature of &quot;evaluate&quot; incompatible with supertype &quot;BinOp&quot;</span>
+    <span class="s2">def </span><span class="s1">evaluate</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; Self </span><span class="s3">| </span><span class="s2">None</span><span class="s3">:  </span><span class="s6"># type: ignore[override]</span>
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">is_valid</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">f&quot;query term is not valid [</span><span class="s2">{</span><span class="s1">self</span><span class="s2">}</span><span class="s4">]&quot;</span><span class="s3">)</span>
+
+        <span class="s1">rhs </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">conform</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">rhs</span><span class="s3">)</span>
+        <span class="s1">values </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">rhs</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">is_in_table</span><span class="s3">:</span>
+            <span class="s6"># if too many values to create the expression, use a filter instead</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">op </span><span class="s2">in </span><span class="s3">[</span><span class="s4">&quot;==&quot;</span><span class="s3">, </span><span class="s4">&quot;!=&quot;</span><span class="s3">] </span><span class="s2">and </span><span class="s1">len</span><span class="s3">(</span><span class="s1">values</span><span class="s3">) &gt; </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_max_selectors</span><span class="s3">:</span>
+                <span class="s1">filter_op </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">generate_filter_op</span><span class="s3">()</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">filter </span><span class="s3">= (</span><span class="s1">self</span><span class="s3">.</span><span class="s1">lhs</span><span class="s3">, </span><span class="s1">filter_op</span><span class="s3">, </span><span class="s1">Index</span><span class="s3">(</span><span class="s1">values</span><span class="s3">))</span>
+
+                <span class="s2">return </span><span class="s1">self</span>
+            <span class="s2">return None</span>
+
+        <span class="s6"># equality conditions</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">op </span><span class="s2">in </span><span class="s3">[</span><span class="s4">&quot;==&quot;</span><span class="s3">, </span><span class="s4">&quot;!=&quot;</span><span class="s3">]:</span>
+            <span class="s1">filter_op </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">generate_filter_op</span><span class="s3">()</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">filter </span><span class="s3">= (</span><span class="s1">self</span><span class="s3">.</span><span class="s1">lhs</span><span class="s3">, </span><span class="s1">filter_op</span><span class="s3">, </span><span class="s1">Index</span><span class="s3">(</span><span class="s1">values</span><span class="s3">))</span>
+
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span>
+                <span class="s4">f&quot;passing a filterable condition to a non-table indexer [</span><span class="s2">{</span><span class="s1">self</span><span class="s2">}</span><span class="s4">]&quot;</span>
+            <span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">self</span>
+
+    <span class="s2">def </span><span class="s1">generate_filter_op</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">invert</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">op </span><span class="s3">== </span><span class="s4">&quot;!=&quot; </span><span class="s2">and not </span><span class="s1">invert</span><span class="s3">) </span><span class="s2">or </span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">op </span><span class="s3">== </span><span class="s4">&quot;==&quot; </span><span class="s2">and </span><span class="s1">invert</span><span class="s3">):</span>
+            <span class="s2">return lambda </span><span class="s1">axis</span><span class="s3">, </span><span class="s1">vals</span><span class="s3">: ~</span><span class="s1">axis</span><span class="s3">.</span><span class="s1">isin</span><span class="s3">(</span><span class="s1">vals</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">return lambda </span><span class="s1">axis</span><span class="s3">, </span><span class="s1">vals</span><span class="s3">: </span><span class="s1">axis</span><span class="s3">.</span><span class="s1">isin</span><span class="s3">(</span><span class="s1">vals</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">JointFilterBinOp</span><span class="s3">(</span><span class="s1">FilterBinOp</span><span class="s3">):</span>
+    <span class="s2">def </span><span class="s1">format</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">NotImplementedError</span><span class="s3">(</span><span class="s4">&quot;unable to collapse Joint Filters&quot;</span><span class="s3">)</span>
+
+    <span class="s6"># error: Signature of &quot;evaluate&quot; incompatible with supertype &quot;BinOp&quot;</span>
+    <span class="s2">def </span><span class="s1">evaluate</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; Self</span><span class="s3">:  </span><span class="s6"># type: ignore[override]</span>
+        <span class="s2">return </span><span class="s1">self</span>
+
+
+<span class="s2">class </span><span class="s1">ConditionBinOp</span><span class="s3">(</span><span class="s1">BinOp</span><span class="s3">):</span>
+    <span class="s2">def </span><span class="s1">__repr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">pprint_thing</span><span class="s3">(</span><span class="s4">f&quot;[Condition : [</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">condition</span><span class="s2">}</span><span class="s4">]]&quot;</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">invert</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;invert the condition&quot;&quot;&quot;</span>
+        <span class="s6"># if self.condition is not None:</span>
+        <span class="s6">#    self.condition = &quot;~(%s)&quot; % self.condition</span>
+        <span class="s6"># return self</span>
+        <span class="s2">raise </span><span class="s1">NotImplementedError</span><span class="s3">(</span>
+            <span class="s4">&quot;cannot use an invert condition when passing to numexpr&quot;</span>
+        <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">format</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;return the actual ne format&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">condition</span>
+
+    <span class="s6"># error: Signature of &quot;evaluate&quot; incompatible with supertype &quot;BinOp&quot;</span>
+    <span class="s2">def </span><span class="s1">evaluate</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; Self </span><span class="s3">| </span><span class="s2">None</span><span class="s3">:  </span><span class="s6"># type: ignore[override]</span>
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">is_valid</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">f&quot;query term is not valid [</span><span class="s2">{</span><span class="s1">self</span><span class="s2">}</span><span class="s4">]&quot;</span><span class="s3">)</span>
+
+        <span class="s6"># convert values if we are in the table</span>
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">is_in_table</span><span class="s3">:</span>
+            <span class="s2">return None</span>
+
+        <span class="s1">rhs </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">conform</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">rhs</span><span class="s3">)</span>
+        <span class="s1">values </span><span class="s3">= [</span><span class="s1">self</span><span class="s3">.</span><span class="s1">convert_value</span><span class="s3">(</span><span class="s1">v</span><span class="s3">) </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">rhs</span><span class="s3">]</span>
+
+        <span class="s6"># equality conditions</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">op </span><span class="s2">in </span><span class="s3">[</span><span class="s4">&quot;==&quot;</span><span class="s3">, </span><span class="s4">&quot;!=&quot;</span><span class="s3">]:</span>
+            <span class="s6"># too many values to create the expression?</span>
+            <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">values</span><span class="s3">) &lt;= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_max_selectors</span><span class="s3">:</span>
+                <span class="s1">vs </span><span class="s3">= [</span><span class="s1">self</span><span class="s3">.</span><span class="s1">generate</span><span class="s3">(</span><span class="s1">v</span><span class="s3">) </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">values</span><span class="s3">]</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">condition </span><span class="s3">= </span><span class="s4">f&quot;(</span><span class="s2">{</span><span class="s4">' | '</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">vs</span><span class="s3">)</span><span class="s2">}</span><span class="s4">)&quot;</span>
+
+            <span class="s6"># use a filter after reading</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s2">return None</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">condition </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">generate</span><span class="s3">(</span><span class="s1">values</span><span class="s3">[</span><span class="s5">0</span><span class="s3">])</span>
+
+        <span class="s2">return </span><span class="s1">self</span>
+
+
+<span class="s2">class </span><span class="s1">JointConditionBinOp</span><span class="s3">(</span><span class="s1">ConditionBinOp</span><span class="s3">):</span>
+    <span class="s6"># error: Signature of &quot;evaluate&quot; incompatible with supertype &quot;BinOp&quot;</span>
+    <span class="s2">def </span><span class="s1">evaluate</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; Self</span><span class="s3">:  </span><span class="s6"># type: ignore[override]</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">condition </span><span class="s3">= </span><span class="s4">f&quot;(</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">lhs</span><span class="s3">.</span><span class="s1">condition</span><span class="s2">} {</span><span class="s1">self</span><span class="s3">.</span><span class="s1">op</span><span class="s2">} {</span><span class="s1">self</span><span class="s3">.</span><span class="s1">rhs</span><span class="s3">.</span><span class="s1">condition</span><span class="s2">}</span><span class="s4">)&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span>
+
+
+<span class="s2">class </span><span class="s1">UnaryOp</span><span class="s3">(</span><span class="s1">ops</span><span class="s3">.</span><span class="s1">UnaryOp</span><span class="s3">):</span>
+    <span class="s2">def </span><span class="s1">prune</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">klass</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">op </span><span class="s3">!= </span><span class="s4">&quot;~&quot;</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">NotImplementedError</span><span class="s3">(</span><span class="s4">&quot;UnaryOp only support invert type ops&quot;</span><span class="s3">)</span>
+
+        <span class="s1">operand </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">operand</span>
+        <span class="s1">operand </span><span class="s3">= </span><span class="s1">operand</span><span class="s3">.</span><span class="s1">prune</span><span class="s3">(</span><span class="s1">klass</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">operand </span><span class="s2">is not None and </span><span class="s3">(</span>
+            <span class="s3">(</span><span class="s1">issubclass</span><span class="s3">(</span><span class="s1">klass</span><span class="s3">, </span><span class="s1">ConditionBinOp</span><span class="s3">) </span><span class="s2">and </span><span class="s1">operand</span><span class="s3">.</span><span class="s1">condition </span><span class="s2">is not None</span><span class="s3">)</span>
+            <span class="s2">or </span><span class="s3">(</span>
+                <span class="s2">not </span><span class="s1">issubclass</span><span class="s3">(</span><span class="s1">klass</span><span class="s3">, </span><span class="s1">ConditionBinOp</span><span class="s3">)</span>
+                <span class="s2">and </span><span class="s1">issubclass</span><span class="s3">(</span><span class="s1">klass</span><span class="s3">, </span><span class="s1">FilterBinOp</span><span class="s3">)</span>
+                <span class="s2">and </span><span class="s1">operand</span><span class="s3">.</span><span class="s1">filter </span><span class="s2">is not None</span>
+            <span class="s3">)</span>
+        <span class="s3">):</span>
+            <span class="s2">return </span><span class="s1">operand</span><span class="s3">.</span><span class="s1">invert</span><span class="s3">()</span>
+        <span class="s2">return None</span>
+
+
+<span class="s2">class </span><span class="s1">PyTablesExprVisitor</span><span class="s3">(</span><span class="s1">BaseExprVisitor</span><span class="s3">):</span>
+    <span class="s1">const_type</span><span class="s3">: </span><span class="s1">ClassVar</span><span class="s3">[</span><span class="s1">type</span><span class="s3">[</span><span class="s1">ops</span><span class="s3">.</span><span class="s1">Term</span><span class="s3">]] = </span><span class="s1">Constant</span>
+    <span class="s1">term_type</span><span class="s3">: </span><span class="s1">ClassVar</span><span class="s3">[</span><span class="s1">type</span><span class="s3">[</span><span class="s1">Term</span><span class="s3">]] = </span><span class="s1">Term</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">env</span><span class="s3">, </span><span class="s1">engine</span><span class="s3">, </span><span class="s1">parser</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">super</span><span class="s3">().</span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">env</span><span class="s3">, </span><span class="s1">engine</span><span class="s3">, </span><span class="s1">parser</span><span class="s3">)</span>
+        <span class="s2">for </span><span class="s1">bin_op </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">binary_ops</span><span class="s3">:</span>
+            <span class="s1">bin_node </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">binary_op_nodes_map</span><span class="s3">[</span><span class="s1">bin_op</span><span class="s3">]</span>
+            <span class="s1">setattr</span><span class="s3">(</span>
+                <span class="s1">self</span><span class="s3">,</span>
+                <span class="s4">f&quot;visit_</span><span class="s2">{</span><span class="s1">bin_node</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">,</span>
+                <span class="s2">lambda </span><span class="s1">node</span><span class="s3">, </span><span class="s1">bin_op</span><span class="s3">=</span><span class="s1">bin_op</span><span class="s3">: </span><span class="s1">partial</span><span class="s3">(</span><span class="s1">BinOp</span><span class="s3">, </span><span class="s1">bin_op</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">),</span>
+            <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">visit_UnaryOp</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">node</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">) </span><span class="s1">-&gt; ops</span><span class="s3">.</span><span class="s1">Term </span><span class="s3">| </span><span class="s1">UnaryOp </span><span class="s3">| </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">node</span><span class="s3">.</span><span class="s1">op</span><span class="s3">, (</span><span class="s1">ast</span><span class="s3">.</span><span class="s1">Not</span><span class="s3">, </span><span class="s1">ast</span><span class="s3">.</span><span class="s1">Invert</span><span class="s3">)):</span>
+            <span class="s2">return </span><span class="s1">UnaryOp</span><span class="s3">(</span><span class="s4">&quot;~&quot;</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">visit</span><span class="s3">(</span><span class="s1">node</span><span class="s3">.</span><span class="s1">operand</span><span class="s3">))</span>
+        <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">node</span><span class="s3">.</span><span class="s1">op</span><span class="s3">, </span><span class="s1">ast</span><span class="s3">.</span><span class="s1">USub</span><span class="s3">):</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">const_type</span><span class="s3">(-</span><span class="s1">self</span><span class="s3">.</span><span class="s1">visit</span><span class="s3">(</span><span class="s1">node</span><span class="s3">.</span><span class="s1">operand</span><span class="s3">).</span><span class="s1">value</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">env</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">node</span><span class="s3">.</span><span class="s1">op</span><span class="s3">, </span><span class="s1">ast</span><span class="s3">.</span><span class="s1">UAdd</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">NotImplementedError</span><span class="s3">(</span><span class="s4">&quot;Unary addition not supported&quot;</span><span class="s3">)</span>
+        <span class="s6"># TODO: return None might never be reached</span>
+        <span class="s2">return None</span>
+
+    <span class="s2">def </span><span class="s1">visit_Index</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">node</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">visit</span><span class="s3">(</span><span class="s1">node</span><span class="s3">.</span><span class="s1">value</span><span class="s3">).</span><span class="s1">value</span>
+
+    <span class="s2">def </span><span class="s1">visit_Assign</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">node</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">):</span>
+        <span class="s1">cmpr </span><span class="s3">= </span><span class="s1">ast</span><span class="s3">.</span><span class="s1">Compare</span><span class="s3">(</span>
+            <span class="s1">ops</span><span class="s3">=[</span><span class="s1">ast</span><span class="s3">.</span><span class="s1">Eq</span><span class="s3">()], </span><span class="s1">left</span><span class="s3">=</span><span class="s1">node</span><span class="s3">.</span><span class="s1">targets</span><span class="s3">[</span><span class="s5">0</span><span class="s3">], </span><span class="s1">comparators</span><span class="s3">=[</span><span class="s1">node</span><span class="s3">.</span><span class="s1">value</span><span class="s3">]</span>
+        <span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">visit</span><span class="s3">(</span><span class="s1">cmpr</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">visit_Subscript</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">node</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">) </span><span class="s1">-&gt; ops</span><span class="s3">.</span><span class="s1">Term</span><span class="s3">:</span>
+        <span class="s6"># only allow simple subscripts</span>
+
+        <span class="s1">value </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">visit</span><span class="s3">(</span><span class="s1">node</span><span class="s3">.</span><span class="s1">value</span><span class="s3">)</span>
+        <span class="s1">slobj </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">visit</span><span class="s3">(</span><span class="s1">node</span><span class="s3">.</span><span class="s1">slice</span><span class="s3">)</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">value </span><span class="s3">= </span><span class="s1">value</span><span class="s3">.</span><span class="s1">value</span>
+        <span class="s2">except </span><span class="s1">AttributeError</span><span class="s3">:</span>
+            <span class="s2">pass</span>
+
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">slobj</span><span class="s3">, </span><span class="s1">Term</span><span class="s3">):</span>
+            <span class="s6"># In py39 np.ndarray lookups with Term containing int raise</span>
+            <span class="s1">slobj </span><span class="s3">= </span><span class="s1">slobj</span><span class="s3">.</span><span class="s1">value</span>
+
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">const_type</span><span class="s3">(</span><span class="s1">value</span><span class="s3">[</span><span class="s1">slobj</span><span class="s3">], </span><span class="s1">self</span><span class="s3">.</span><span class="s1">env</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s1">TypeError </span><span class="s2">as </span><span class="s1">err</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">f&quot;cannot subscript </span><span class="s2">{</span><span class="s1">value</span><span class="s2">!r} </span><span class="s4">with </span><span class="s2">{</span><span class="s1">slobj</span><span class="s2">!r}</span><span class="s4">&quot;</span><span class="s3">) </span><span class="s2">from </span><span class="s1">err</span>
+
+    <span class="s2">def </span><span class="s1">visit_Attribute</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">node</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">):</span>
+        <span class="s1">attr </span><span class="s3">= </span><span class="s1">node</span><span class="s3">.</span><span class="s1">attr</span>
+        <span class="s1">value </span><span class="s3">= </span><span class="s1">node</span><span class="s3">.</span><span class="s1">value</span>
+
+        <span class="s1">ctx </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">node</span><span class="s3">.</span><span class="s1">ctx</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">ctx </span><span class="s3">== </span><span class="s1">ast</span><span class="s3">.</span><span class="s1">Load</span><span class="s3">:</span>
+            <span class="s6"># resolve the value</span>
+            <span class="s1">resolved </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">visit</span><span class="s3">(</span><span class="s1">value</span><span class="s3">)</span>
+
+            <span class="s6"># try to get the value to see if we are another expression</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">resolved </span><span class="s3">= </span><span class="s1">resolved</span><span class="s3">.</span><span class="s1">value</span>
+            <span class="s2">except </span><span class="s1">AttributeError</span><span class="s3">:</span>
+                <span class="s2">pass</span>
+
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">term_type</span><span class="s3">(</span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">resolved</span><span class="s3">, </span><span class="s1">attr</span><span class="s3">), </span><span class="s1">self</span><span class="s3">.</span><span class="s1">env</span><span class="s3">)</span>
+            <span class="s2">except </span><span class="s1">AttributeError</span><span class="s3">:</span>
+                <span class="s6"># something like datetime.datetime where scope is overridden</span>
+                <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">value</span><span class="s3">, </span><span class="s1">ast</span><span class="s3">.</span><span class="s1">Name</span><span class="s3">) </span><span class="s2">and </span><span class="s1">value</span><span class="s3">.</span><span class="s1">id </span><span class="s3">== </span><span class="s1">attr</span><span class="s3">:</span>
+                    <span class="s2">return </span><span class="s1">resolved</span>
+
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">f&quot;Invalid Attribute context </span><span class="s2">{</span><span class="s1">ctx</span><span class="s3">.</span><span class="s1">__name__</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">translate_In</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">op</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">ast</span><span class="s3">.</span><span class="s1">Eq</span><span class="s3">() </span><span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">op</span><span class="s3">, </span><span class="s1">ast</span><span class="s3">.</span><span class="s1">In</span><span class="s3">) </span><span class="s2">else </span><span class="s1">op</span>
+
+    <span class="s2">def </span><span class="s1">_rewrite_membership_op</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">node</span><span class="s3">, </span><span class="s1">left</span><span class="s3">, </span><span class="s1">right</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">visit</span><span class="s3">(</span><span class="s1">node</span><span class="s3">.</span><span class="s1">op</span><span class="s3">), </span><span class="s1">node</span><span class="s3">.</span><span class="s1">op</span><span class="s3">, </span><span class="s1">left</span><span class="s3">, </span><span class="s1">right</span>
+
+
+<span class="s2">def </span><span class="s1">_validate_where</span><span class="s3">(</span><span class="s1">w</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Validate that the where statement is of the right type. 
+ 
+    The type may either be String, Expr, or list-like of Exprs. 
+ 
+    Parameters 
+    ---------- 
+    w : String term expression, Expr, or list-like of Exprs. 
+ 
+    Returns 
+    ------- 
+    where : The original where clause if the check was successful. 
+ 
+    Raises 
+    ------ 
+    TypeError : An invalid data type was passed in for w (e.g. dict). 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if not </span><span class="s3">(</span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">w</span><span class="s3">, (</span><span class="s1">PyTablesExpr</span><span class="s3">, </span><span class="s1">str</span><span class="s3">)) </span><span class="s2">or </span><span class="s1">is_list_like</span><span class="s3">(</span><span class="s1">w</span><span class="s3">)):</span>
+        <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span>
+            <span class="s4">&quot;where must be passed as a string, PyTablesExpr, &quot;</span>
+            <span class="s4">&quot;or list-like of PyTablesExpr&quot;</span>
+        <span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">w</span>
+
+
+<span class="s2">class </span><span class="s1">PyTablesExpr</span><span class="s3">(</span><span class="s1">expr</span><span class="s3">.</span><span class="s1">Expr</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Hold a pytables-like expression, comprised of possibly multiple 'terms'. 
+ 
+    Parameters 
+    ---------- 
+    where : string term expression, PyTablesExpr, or list-like of PyTablesExprs 
+    queryables : a &quot;kinds&quot; map (dict of column name -&gt; kind), or None if column 
+        is non-indexable 
+    encoding : an encoding that will encode the query terms 
+ 
+    Returns 
+    ------- 
+    a PyTablesExpr object 
+ 
+    Examples 
+    -------- 
+    'index&gt;=date' 
+    &quot;columns=['A', 'D']&quot; 
+    'columns=A' 
+    'columns==A' 
+    &quot;~(columns=['A','B'])&quot; 
+    'index&gt;df.index[3] &amp; string=&quot;bar&quot;' 
+    '(index&gt;df.index[3] &amp; index&lt;=df.index[6]) | string=&quot;bar&quot;' 
+    &quot;ts&gt;=Timestamp('2012-02-01')&quot; 
+    &quot;major_axis&gt;=20130101&quot; 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">_visitor</span><span class="s3">: </span><span class="s1">PyTablesExprVisitor </span><span class="s3">| </span><span class="s2">None</span>
+    <span class="s1">env</span><span class="s3">: </span><span class="s1">PyTablesScope</span>
+    <span class="s1">expr</span><span class="s3">: </span><span class="s1">str</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">where</span><span class="s3">,</span>
+        <span class="s1">queryables</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">encoding</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">scope_level</span><span class="s3">: </span><span class="s1">int </span><span class="s3">= </span><span class="s5">0</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">where </span><span class="s3">= </span><span class="s1">_validate_where</span><span class="s3">(</span><span class="s1">where</span><span class="s3">)</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">encoding </span><span class="s3">= </span><span class="s1">encoding</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">condition </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">filter </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">terms </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_visitor </span><span class="s3">= </span><span class="s2">None</span>
+
+        <span class="s6"># capture the environment if needed</span>
+        <span class="s1">local_dict</span><span class="s3">: </span><span class="s1">_scope</span><span class="s3">.</span><span class="s1">DeepChainMap</span><span class="s3">[</span><span class="s1">Any</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span>
+
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">where</span><span class="s3">, </span><span class="s1">PyTablesExpr</span><span class="s3">):</span>
+            <span class="s1">local_dict </span><span class="s3">= </span><span class="s1">where</span><span class="s3">.</span><span class="s1">env</span><span class="s3">.</span><span class="s1">scope</span>
+            <span class="s1">_where </span><span class="s3">= </span><span class="s1">where</span><span class="s3">.</span><span class="s1">expr</span>
+
+        <span class="s2">elif </span><span class="s1">is_list_like</span><span class="s3">(</span><span class="s1">where</span><span class="s3">):</span>
+            <span class="s1">where </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">where</span><span class="s3">)</span>
+            <span class="s2">for </span><span class="s1">idx</span><span class="s3">, </span><span class="s1">w </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">where</span><span class="s3">):</span>
+                <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">w</span><span class="s3">, </span><span class="s1">PyTablesExpr</span><span class="s3">):</span>
+                    <span class="s1">local_dict </span><span class="s3">= </span><span class="s1">w</span><span class="s3">.</span><span class="s1">env</span><span class="s3">.</span><span class="s1">scope</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s1">where</span><span class="s3">[</span><span class="s1">idx</span><span class="s3">] = </span><span class="s1">_validate_where</span><span class="s3">(</span><span class="s1">w</span><span class="s3">)</span>
+            <span class="s1">_where </span><span class="s3">= </span><span class="s4">&quot; &amp; &quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">([</span><span class="s4">f&quot;(</span><span class="s2">{</span><span class="s1">w</span><span class="s2">}</span><span class="s4">)&quot; </span><span class="s2">for </span><span class="s1">w </span><span class="s2">in </span><span class="s1">com</span><span class="s3">.</span><span class="s1">flatten</span><span class="s3">(</span><span class="s1">where</span><span class="s3">)])</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s6"># _validate_where ensures we otherwise have a string</span>
+            <span class="s1">_where </span><span class="s3">= </span><span class="s1">where</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">expr </span><span class="s3">= </span><span class="s1">_where</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">env </span><span class="s3">= </span><span class="s1">PyTablesScope</span><span class="s3">(</span><span class="s1">scope_level </span><span class="s3">+ </span><span class="s5">1</span><span class="s3">, </span><span class="s1">local_dict</span><span class="s3">=</span><span class="s1">local_dict</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">queryables </span><span class="s2">is not None and </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">expr</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">env</span><span class="s3">.</span><span class="s1">queryables</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">queryables</span><span class="s3">)</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_visitor </span><span class="s3">= </span><span class="s1">PyTablesExprVisitor</span><span class="s3">(</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">env</span><span class="s3">,</span>
+                <span class="s1">queryables</span><span class="s3">=</span><span class="s1">queryables</span><span class="s3">,</span>
+                <span class="s1">parser</span><span class="s3">=</span><span class="s4">&quot;pytables&quot;</span><span class="s3">,</span>
+                <span class="s1">engine</span><span class="s3">=</span><span class="s4">&quot;pytables&quot;</span><span class="s3">,</span>
+                <span class="s1">encoding</span><span class="s3">=</span><span class="s1">encoding</span><span class="s3">,</span>
+            <span class="s3">)</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">terms </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">parse</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">__repr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">terms </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">pprint_thing</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">terms</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">pprint_thing</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">expr</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">evaluate</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;create and return the numexpr condition and filter&quot;&quot;&quot;</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">condition </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">terms</span><span class="s3">.</span><span class="s1">prune</span><span class="s3">(</span><span class="s1">ConditionBinOp</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s1">AttributeError </span><span class="s2">as </span><span class="s1">err</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                <span class="s4">f&quot;cannot process expression [</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">expr</span><span class="s2">}</span><span class="s4">], [</span><span class="s2">{</span><span class="s1">self</span><span class="s2">}</span><span class="s4">] &quot;</span>
+                <span class="s4">&quot;is not a valid condition&quot;</span>
+            <span class="s3">) </span><span class="s2">from </span><span class="s1">err</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">filter </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">terms</span><span class="s3">.</span><span class="s1">prune</span><span class="s3">(</span><span class="s1">FilterBinOp</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s1">AttributeError </span><span class="s2">as </span><span class="s1">err</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                <span class="s4">f&quot;cannot process expression [</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">expr</span><span class="s2">}</span><span class="s4">], [</span><span class="s2">{</span><span class="s1">self</span><span class="s2">}</span><span class="s4">] &quot;</span>
+                <span class="s4">&quot;is not a valid filter&quot;</span>
+            <span class="s3">) </span><span class="s2">from </span><span class="s1">err</span>
+
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">condition</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">filter</span>
+
+
+<span class="s2">class </span><span class="s1">TermValue</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot;hold a term value the we use to construct a condition/filter&quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">value</span><span class="s3">, </span><span class="s1">converted</span><span class="s3">, </span><span class="s1">kind</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s2">assert </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">kind</span><span class="s3">, </span><span class="s1">str</span><span class="s3">), </span><span class="s1">kind</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">value </span><span class="s3">= </span><span class="s1">value</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">converted </span><span class="s3">= </span><span class="s1">converted</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">= </span><span class="s1">kind</span>
+
+    <span class="s2">def </span><span class="s1">tostring</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot;quote the string if not encoded else encode and return&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">== </span><span class="s4">&quot;string&quot;</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">encoding </span><span class="s2">is not None</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">str</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">converted</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s4">f'&quot;</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">converted</span><span class="s2">}</span><span class="s4">&quot;'</span>
+        <span class="s2">elif </span><span class="s1">self</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">== </span><span class="s4">&quot;float&quot;</span><span class="s3">:</span>
+            <span class="s6"># python 2 str(float) is not always</span>
+            <span class="s6"># round-trippable so use repr()</span>
+            <span class="s2">return </span><span class="s1">repr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">converted</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">str</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">converted</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">maybe_expression</span><span class="s3">(</span><span class="s1">s</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot;loose checking if s is a pytables-acceptable expression&quot;&quot;&quot;</span>
+    <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">s</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+        <span class="s2">return False</span>
+    <span class="s1">operations </span><span class="s3">= </span><span class="s1">PyTablesExprVisitor</span><span class="s3">.</span><span class="s1">binary_ops </span><span class="s3">+ </span><span class="s1">PyTablesExprVisitor</span><span class="s3">.</span><span class="s1">unary_ops </span><span class="s3">+ (</span><span class="s4">&quot;=&quot;</span><span class="s3">,)</span>
+
+    <span class="s6"># make sure we have an op at least</span>
+    <span class="s2">return </span><span class="s1">any</span><span class="s3">(</span><span class="s1">op </span><span class="s2">in </span><span class="s1">s </span><span class="s2">for </span><span class="s1">op </span><span class="s2">in </span><span class="s1">operations</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

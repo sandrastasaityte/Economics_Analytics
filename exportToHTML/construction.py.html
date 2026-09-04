@@ -1,0 +1,1078 @@
+<html>
+<head>
+<title>construction.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+construction.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Functions for preparing various inputs passed to the DataFrame or Series 
+constructors before passing them to a BlockManager. 
+&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">from </span><span class="s1">collections </span><span class="s2">import </span><span class="s1">abc</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s3">,</span>
+    <span class="s1">Any</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+<span class="s2">from </span><span class="s1">numpy </span><span class="s2">import </span><span class="s1">ma</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_config </span><span class="s2">import </span><span class="s1">using_string_dtype</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs </span><span class="s2">import </span><span class="s1">lib</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">astype </span><span class="s2">import </span><span class="s1">astype_is_view</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">cast </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">construct_1d_arraylike_from_scalar</span><span class="s3">,</span>
+    <span class="s1">dict_compat</span><span class="s3">,</span>
+    <span class="s1">maybe_cast_to_datetime</span><span class="s3">,</span>
+    <span class="s1">maybe_convert_platform</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">common </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">is_1d_only_ea_dtype</span><span class="s3">,</span>
+    <span class="s1">is_integer_dtype</span><span class="s3">,</span>
+    <span class="s1">is_list_like</span><span class="s3">,</span>
+    <span class="s1">is_named_tuple</span><span class="s3">,</span>
+    <span class="s1">is_object_dtype</span><span class="s3">,</span>
+    <span class="s1">is_scalar</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">dtypes </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">BaseMaskedDtype</span><span class="s3">,</span>
+    <span class="s1">ExtensionDtype</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">generic </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">ABCDataFrame</span><span class="s3">,</span>
+    <span class="s1">ABCSeries</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">missing </span><span class="s2">import </span><span class="s1">isna</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">algorithms</span><span class="s3">,</span>
+    <span class="s1">common </span><span class="s2">as </span><span class="s1">com</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">arrays </span><span class="s2">import </span><span class="s1">ExtensionArray</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">arrays</span><span class="s3">.</span><span class="s1">string_ </span><span class="s2">import </span><span class="s1">StringDtype</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">construction </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">array </span><span class="s2">as </span><span class="s1">pd_array</span><span class="s3">,</span>
+    <span class="s1">extract_array</span><span class="s3">,</span>
+    <span class="s1">range_to_ndarray</span><span class="s3">,</span>
+    <span class="s1">sanitize_array</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">indexes</span><span class="s3">.</span><span class="s1">api </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">DatetimeIndex</span><span class="s3">,</span>
+    <span class="s1">Index</span><span class="s3">,</span>
+    <span class="s1">MultiIndex</span><span class="s3">,</span>
+    <span class="s1">TimedeltaIndex</span><span class="s3">,</span>
+    <span class="s1">default_index</span><span class="s3">,</span>
+    <span class="s1">ensure_index</span><span class="s3">,</span>
+    <span class="s1">get_objs_combined_axis</span><span class="s3">,</span>
+    <span class="s1">maybe_sequence_to_range</span><span class="s3">,</span>
+    <span class="s1">union_indexes</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">internals</span><span class="s3">.</span><span class="s1">blocks </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">BlockPlacement</span><span class="s3">,</span>
+    <span class="s1">ensure_block_shape</span><span class="s3">,</span>
+    <span class="s1">new_block</span><span class="s3">,</span>
+    <span class="s1">new_block_2d</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">internals</span><span class="s3">.</span><span class="s1">managers </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">create_block_manager_from_blocks</span><span class="s3">,</span>
+    <span class="s1">create_block_manager_from_column_arrays</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">collections</span><span class="s3">.</span><span class="s1">abc </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">Hashable</span><span class="s3">,</span>
+        <span class="s1">Sequence</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_typing </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">ArrayLike</span><span class="s3">,</span>
+        <span class="s1">DtypeObj</span><span class="s3">,</span>
+        <span class="s1">Manager</span><span class="s3">,</span>
+        <span class="s1">npt</span><span class="s3">,</span>
+    <span class="s3">)</span>
+<span class="s4"># ---------------------------------------------------------------------</span>
+<span class="s4"># BlockManager Interface</span>
+
+
+<span class="s2">def </span><span class="s1">arrays_to_mgr</span><span class="s3">(</span>
+    <span class="s1">arrays</span><span class="s3">,</span>
+    <span class="s1">columns</span><span class="s3">: </span><span class="s1">Index</span><span class="s3">,</span>
+    <span class="s1">index</span><span class="s3">,</span>
+    <span class="s3">*,</span>
+    <span class="s1">dtype</span><span class="s3">: </span><span class="s1">DtypeObj </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">verify_integrity</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">consolidate</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; Manager</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Segregate Series based on type and coerce into matrices. 
+ 
+    Needs to handle a lot of exceptional cases. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">verify_integrity</span><span class="s3">:</span>
+        <span class="s4"># figure out the index, if necessary</span>
+        <span class="s2">if </span><span class="s1">index </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">index </span><span class="s3">= </span><span class="s1">_extract_index</span><span class="s3">(</span><span class="s1">arrays</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">index </span><span class="s3">= </span><span class="s1">ensure_index</span><span class="s3">(</span><span class="s1">index</span><span class="s3">)</span>
+
+        <span class="s4"># don't force copy because getting jammed in an ndarray anyway</span>
+        <span class="s1">arrays</span><span class="s3">, </span><span class="s1">refs </span><span class="s3">= </span><span class="s1">_homogenize</span><span class="s3">(</span><span class="s1">arrays</span><span class="s3">, </span><span class="s1">index</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s4"># _homogenize ensures</span>
+        <span class="s4">#  - all(len(x) == len(index) for x in arrays)</span>
+        <span class="s4">#  - all(x.ndim == 1 for x in arrays)</span>
+        <span class="s4">#  - all(isinstance(x, (np.ndarray, ExtensionArray)) for x in arrays)</span>
+        <span class="s4">#  - all(type(x) is not NumpyExtensionArray for x in arrays)</span>
+
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">index </span><span class="s3">= </span><span class="s1">ensure_index</span><span class="s3">(</span><span class="s1">index</span><span class="s3">)</span>
+        <span class="s1">arrays </span><span class="s3">= [</span><span class="s1">extract_array</span><span class="s3">(</span><span class="s1">x</span><span class="s3">, </span><span class="s1">extract_numpy</span><span class="s3">=</span><span class="s2">True</span><span class="s3">) </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">arrays</span><span class="s3">]</span>
+        <span class="s4"># with _from_arrays, the passed arrays should never be Series objects</span>
+        <span class="s1">refs </span><span class="s3">= [</span><span class="s2">None</span><span class="s3">] * </span><span class="s1">len</span><span class="s3">(</span><span class="s1">arrays</span><span class="s3">)</span>
+
+        <span class="s4"># Reached via DataFrame._from_arrays; we do minimal validation here</span>
+        <span class="s2">for </span><span class="s1">arr </span><span class="s2">in </span><span class="s1">arrays</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s3">(</span>
+                <span class="s2">not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, (</span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">, </span><span class="s1">ExtensionArray</span><span class="s3">))</span>
+                <span class="s2">or </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">ndim </span><span class="s3">!= </span><span class="s5">1</span>
+                <span class="s2">or </span><span class="s1">len</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">) != </span><span class="s1">len</span><span class="s3">(</span><span class="s1">index</span><span class="s3">)</span>
+            <span class="s3">):</span>
+                <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                    <span class="s6">&quot;Arrays must be 1-dimensional np.ndarray or ExtensionArray &quot;</span>
+                    <span class="s6">&quot;with length matching len(index)&quot;</span>
+                <span class="s3">)</span>
+
+    <span class="s1">columns </span><span class="s3">= </span><span class="s1">ensure_index</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">) != </span><span class="s1">len</span><span class="s3">(</span><span class="s1">arrays</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s6">&quot;len(arrays) must match len(columns)&quot;</span><span class="s3">)</span>
+
+    <span class="s4"># from BlockManager perspective</span>
+    <span class="s1">axes </span><span class="s3">= [</span><span class="s1">columns</span><span class="s3">, </span><span class="s1">index</span><span class="s3">]</span>
+
+    <span class="s2">return </span><span class="s1">create_block_manager_from_column_arrays</span><span class="s3">(</span>
+        <span class="s1">arrays</span><span class="s3">, </span><span class="s1">axes</span><span class="s3">, </span><span class="s1">consolidate</span><span class="s3">=</span><span class="s1">consolidate</span><span class="s3">, </span><span class="s1">refs</span><span class="s3">=</span><span class="s1">refs</span>
+    <span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">rec_array_to_mgr</span><span class="s3">(</span>
+    <span class="s1">data</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">rec</span><span class="s3">.</span><span class="s1">recarray </span><span class="s3">| </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">,</span>
+    <span class="s1">index</span><span class="s3">,</span>
+    <span class="s1">columns</span><span class="s3">,</span>
+    <span class="s1">dtype</span><span class="s3">: </span><span class="s1">DtypeObj </span><span class="s3">| </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">copy</span><span class="s3">: </span><span class="s1">bool</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; Manager</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Extract from a masked rec array and create the manager. 
+    &quot;&quot;&quot;</span>
+    <span class="s4"># essentially process a record array then fill it</span>
+    <span class="s1">fdata </span><span class="s3">= </span><span class="s1">ma</span><span class="s3">.</span><span class="s1">getdata</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">index </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">index </span><span class="s3">= </span><span class="s1">default_index</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">fdata</span><span class="s3">))</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">index </span><span class="s3">= </span><span class="s1">ensure_index</span><span class="s3">(</span><span class="s1">index</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">columns </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s1">columns </span><span class="s3">= </span><span class="s1">ensure_index</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">)</span>
+    <span class="s1">arrays</span><span class="s3">, </span><span class="s1">arr_columns </span><span class="s3">= </span><span class="s1">to_arrays</span><span class="s3">(</span><span class="s1">fdata</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">)</span>
+
+    <span class="s4"># create the manager</span>
+
+    <span class="s1">arrays</span><span class="s3">, </span><span class="s1">arr_columns </span><span class="s3">= </span><span class="s1">reorder_arrays</span><span class="s3">(</span><span class="s1">arrays</span><span class="s3">, </span><span class="s1">arr_columns</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">, </span><span class="s1">len</span><span class="s3">(</span><span class="s1">index</span><span class="s3">))</span>
+    <span class="s2">if </span><span class="s1">columns </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">columns </span><span class="s3">= </span><span class="s1">arr_columns</span>
+
+    <span class="s1">mgr </span><span class="s3">= </span><span class="s1">arrays_to_mgr</span><span class="s3">(</span><span class="s1">arrays</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">, </span><span class="s1">index</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">copy</span><span class="s3">:</span>
+        <span class="s1">mgr </span><span class="s3">= </span><span class="s1">mgr</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">(</span><span class="s1">deep</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">mgr</span>
+
+
+<span class="s4"># ---------------------------------------------------------------------</span>
+<span class="s4"># DataFrame Constructor Interface</span>
+
+
+<span class="s2">def </span><span class="s1">ndarray_to_mgr</span><span class="s3">(</span>
+    <span class="s1">values</span><span class="s3">, </span><span class="s1">index</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">: </span><span class="s1">DtypeObj </span><span class="s3">| </span><span class="s2">None</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">: </span><span class="s1">bool</span>
+<span class="s3">) </span><span class="s1">-&gt; Manager</span><span class="s3">:</span>
+    <span class="s4"># used in DataFrame.__init__</span>
+    <span class="s4"># input must be an ndarray, list, Series, Index, ExtensionArray</span>
+    <span class="s1">infer_object </span><span class="s3">= </span><span class="s2">not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, (</span><span class="s1">ABCSeries</span><span class="s3">, </span><span class="s1">Index</span><span class="s3">, </span><span class="s1">ExtensionArray</span><span class="s3">))</span>
+
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, </span><span class="s1">ABCSeries</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">columns </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">values</span><span class="s3">.</span><span class="s1">name </span><span class="s2">is not None</span><span class="s3">:</span>
+                <span class="s1">columns </span><span class="s3">= </span><span class="s1">Index</span><span class="s3">([</span><span class="s1">values</span><span class="s3">.</span><span class="s1">name</span><span class="s3">])</span>
+        <span class="s2">if </span><span class="s1">index </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">index </span><span class="s3">= </span><span class="s1">values</span><span class="s3">.</span><span class="s1">index</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">values </span><span class="s3">= </span><span class="s1">values</span><span class="s3">.</span><span class="s1">reindex</span><span class="s3">(</span><span class="s1">index</span><span class="s3">)</span>
+
+        <span class="s4"># zero len case (GH #2234)</span>
+        <span class="s2">if not </span><span class="s1">len</span><span class="s3">(</span><span class="s1">values</span><span class="s3">) </span><span class="s2">and </span><span class="s1">columns </span><span class="s2">is not None and </span><span class="s1">len</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">):</span>
+            <span class="s1">values </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty</span><span class="s3">((</span><span class="s5">0</span><span class="s3">, </span><span class="s5">1</span><span class="s3">), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">object</span><span class="s3">)</span>
+
+    <span class="s1">vdtype </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, </span><span class="s6">&quot;dtype&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+    <span class="s1">refs </span><span class="s3">= </span><span class="s2">None</span>
+    <span class="s2">if </span><span class="s1">is_1d_only_ea_dtype</span><span class="s3">(</span><span class="s1">vdtype</span><span class="s3">) </span><span class="s2">or </span><span class="s1">is_1d_only_ea_dtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">):</span>
+        <span class="s4"># GH#19157</span>
+
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, (</span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">, </span><span class="s1">ExtensionArray</span><span class="s3">)) </span><span class="s2">and </span><span class="s1">values</span><span class="s3">.</span><span class="s1">ndim </span><span class="s3">&gt; </span><span class="s5">1</span><span class="s3">:</span>
+            <span class="s4"># GH#12513 an EA dtype passed with a 2D array, split into</span>
+            <span class="s4">#  multiple EAs that view the values</span>
+            <span class="s4"># error: No overload variant of &quot;__getitem__&quot; of &quot;ExtensionArray&quot;</span>
+            <span class="s4"># matches argument type &quot;Tuple[slice, int]&quot;</span>
+            <span class="s1">values </span><span class="s3">= [</span>
+                <span class="s1">values</span><span class="s3">[:, </span><span class="s1">n</span><span class="s3">]  </span><span class="s4"># type: ignore[call-overload]</span>
+                <span class="s2">for </span><span class="s1">n </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">values</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">[</span><span class="s5">1</span><span class="s3">])</span>
+            <span class="s3">]</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">values </span><span class="s3">= [</span><span class="s1">values</span><span class="s3">]</span>
+
+        <span class="s4"># Handle copy semantics: already copy 1d-only EA. Other arrays will</span>
+        <span class="s4"># be copied when consolidating the blocks</span>
+        <span class="s2">if </span><span class="s1">copy</span><span class="s3">:</span>
+            <span class="s1">values </span><span class="s3">= [</span>
+                <span class="s3">(</span><span class="s1">x</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">(</span><span class="s1">deep</span><span class="s3">=</span><span class="s2">True</span><span class="s3">) </span><span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">x</span><span class="s3">, </span><span class="s1">Index</span><span class="s3">) </span><span class="s2">else </span><span class="s1">x</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">())</span>
+                <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">x</span><span class="s3">, (</span><span class="s1">ExtensionArray</span><span class="s3">, </span><span class="s1">Index</span><span class="s3">, </span><span class="s1">ABCSeries</span><span class="s3">))</span>
+                <span class="s2">and </span><span class="s1">is_1d_only_ea_dtype</span><span class="s3">(</span><span class="s1">x</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">)</span>
+                <span class="s2">else </span><span class="s1">x</span>
+                <span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">values</span>
+            <span class="s3">]</span>
+
+        <span class="s2">if </span><span class="s1">columns </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">columns </span><span class="s3">= </span><span class="s1">Index</span><span class="s3">(</span><span class="s1">range</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">values</span><span class="s3">)))</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">columns </span><span class="s3">= </span><span class="s1">ensure_index</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">arrays_to_mgr</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">, </span><span class="s1">index</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">consolidate</span><span class="s3">=</span><span class="s1">copy</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, (</span><span class="s1">ABCSeries</span><span class="s3">, </span><span class="s1">Index</span><span class="s3">)):</span>
+        <span class="s2">if not </span><span class="s1">copy </span><span class="s2">and </span><span class="s3">(</span><span class="s1">dtype </span><span class="s2">is None or </span><span class="s1">astype_is_view</span><span class="s3">(</span><span class="s1">values</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">)):</span>
+            <span class="s1">refs </span><span class="s3">= </span><span class="s1">values</span><span class="s3">.</span><span class="s1">_references</span>
+
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">vdtype</span><span class="s3">, </span><span class="s1">ExtensionDtype</span><span class="s3">):</span>
+        <span class="s4"># i.e. Datetime64TZ, PeriodDtype; cases with is_1d_only_ea_dtype(vdtype)</span>
+        <span class="s4">#  are already caught above</span>
+        <span class="s1">values </span><span class="s3">= </span><span class="s1">extract_array</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, </span><span class="s1">extract_numpy</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">copy</span><span class="s3">:</span>
+            <span class="s1">values </span><span class="s3">= </span><span class="s1">values</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+        <span class="s2">if </span><span class="s1">values</span><span class="s3">.</span><span class="s1">ndim </span><span class="s3">== </span><span class="s5">1</span><span class="s3">:</span>
+            <span class="s1">values </span><span class="s3">= </span><span class="s1">values</span><span class="s3">.</span><span class="s1">reshape</span><span class="s3">(-</span><span class="s5">1</span><span class="s3">, </span><span class="s5">1</span><span class="s3">)</span>
+
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, (</span><span class="s1">ABCSeries</span><span class="s3">, </span><span class="s1">Index</span><span class="s3">)):</span>
+        <span class="s2">if </span><span class="s1">copy</span><span class="s3">:</span>
+            <span class="s1">values </span><span class="s3">= </span><span class="s1">values</span><span class="s3">.</span><span class="s1">_values</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">values </span><span class="s3">= </span><span class="s1">values</span><span class="s3">.</span><span class="s1">_values</span>
+
+        <span class="s1">values </span><span class="s3">= </span><span class="s1">_ensure_2d</span><span class="s3">(</span><span class="s1">values</span><span class="s3">)</span>
+
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, (</span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">, </span><span class="s1">ExtensionArray</span><span class="s3">)):</span>
+        <span class="s4"># drop subclass info</span>
+        <span class="s2">if </span><span class="s1">copy </span><span class="s2">and </span><span class="s3">(</span><span class="s1">dtype </span><span class="s2">is None or </span><span class="s1">astype_is_view</span><span class="s3">(</span><span class="s1">values</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">)):</span>
+            <span class="s4"># only force a copy now if copy=True was requested</span>
+            <span class="s4"># and a subsequent `astype` will not already result in a copy</span>
+            <span class="s1">values </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">order</span><span class="s3">=</span><span class="s6">&quot;F&quot;</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">values </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">asarray</span><span class="s3">(</span><span class="s1">values</span><span class="s3">)</span>
+        <span class="s1">values </span><span class="s3">= </span><span class="s1">_ensure_2d</span><span class="s3">(</span><span class="s1">values</span><span class="s3">)</span>
+
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s4"># by definition an array here</span>
+        <span class="s4"># the dtypes will be coerced to a single dtype</span>
+        <span class="s1">values </span><span class="s3">= </span><span class="s1">_prep_ndarraylike</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s1">copy</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">dtype </span><span class="s2">is not None and </span><span class="s1">values</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">!= </span><span class="s1">dtype</span><span class="s3">:</span>
+        <span class="s4"># GH#40110 see similar check inside sanitize_array</span>
+        <span class="s1">values </span><span class="s3">= </span><span class="s1">sanitize_array</span><span class="s3">(</span>
+            <span class="s1">values</span><span class="s3">,</span>
+            <span class="s2">None</span><span class="s3">,</span>
+            <span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">,</span>
+            <span class="s1">copy</span><span class="s3">=</span><span class="s1">copy</span><span class="s3">,</span>
+            <span class="s1">allow_2d</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+        <span class="s3">)</span>
+
+    <span class="s4"># _prep_ndarraylike ensures that values.ndim == 2 at this point</span>
+    <span class="s1">index</span><span class="s3">, </span><span class="s1">columns </span><span class="s3">= </span><span class="s1">_get_axes</span><span class="s3">(</span>
+        <span class="s1">values</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">[</span><span class="s5">0</span><span class="s3">], </span><span class="s1">values</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">[</span><span class="s5">1</span><span class="s3">], </span><span class="s1">index</span><span class="s3">=</span><span class="s1">index</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">=</span><span class="s1">columns</span>
+    <span class="s3">)</span>
+
+    <span class="s1">_check_values_indices_shape_match</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, </span><span class="s1">index</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">)</span>
+
+    <span class="s1">values </span><span class="s3">= </span><span class="s1">values</span><span class="s3">.</span><span class="s1">T</span>
+
+    <span class="s4"># if we don't have a dtype specified, then try to convert objects</span>
+    <span class="s4"># on the entire block; this is to convert if we have datetimelike's</span>
+    <span class="s4"># embedded in an object type</span>
+    <span class="s2">if </span><span class="s1">dtype </span><span class="s2">is None and </span><span class="s1">infer_object </span><span class="s2">and </span><span class="s1">is_object_dtype</span><span class="s3">(</span><span class="s1">values</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">):</span>
+        <span class="s1">obj_columns </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">values</span><span class="s3">)</span>
+        <span class="s1">maybe_datetime </span><span class="s3">= [</span>
+            <span class="s1">lib</span><span class="s3">.</span><span class="s1">maybe_convert_objects</span><span class="s3">(</span>
+                <span class="s1">x</span><span class="s3">,</span>
+                <span class="s4"># Here we do not convert numeric dtypes, as if we wanted that,</span>
+                <span class="s4">#  numpy would have done it for us.</span>
+                <span class="s1">convert_numeric</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+                <span class="s1">convert_non_numeric</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+                <span class="s1">convert_to_nullable_dtype</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+                <span class="s1">dtype_if_all_nat</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s6">&quot;M8[s]&quot;</span><span class="s3">),</span>
+            <span class="s3">)</span>
+            <span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">obj_columns</span>
+        <span class="s3">]</span>
+        <span class="s4"># don't convert (and copy) the objects if no type inference occurs</span>
+        <span class="s2">if </span><span class="s1">any</span><span class="s3">(</span><span class="s1">x </span><span class="s2">is not </span><span class="s1">y </span><span class="s2">for </span><span class="s1">x</span><span class="s3">, </span><span class="s1">y </span><span class="s2">in </span><span class="s1">zip</span><span class="s3">(</span><span class="s1">obj_columns</span><span class="s3">, </span><span class="s1">maybe_datetime</span><span class="s3">, </span><span class="s1">strict</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)):</span>
+            <span class="s1">block_values </span><span class="s3">= [</span>
+                <span class="s1">new_block_2d</span><span class="s3">(</span><span class="s1">ensure_block_shape</span><span class="s3">(</span><span class="s1">dval</span><span class="s3">, </span><span class="s5">2</span><span class="s3">), </span><span class="s1">placement</span><span class="s3">=</span><span class="s1">BlockPlacement</span><span class="s3">(</span><span class="s1">n</span><span class="s3">))</span>
+                <span class="s2">for </span><span class="s1">n</span><span class="s3">, </span><span class="s1">dval </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">maybe_datetime</span><span class="s3">)</span>
+            <span class="s3">]</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">bp </span><span class="s3">= </span><span class="s1">BlockPlacement</span><span class="s3">(</span><span class="s1">slice</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">)))</span>
+            <span class="s1">nb </span><span class="s3">= </span><span class="s1">new_block_2d</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, </span><span class="s1">placement</span><span class="s3">=</span><span class="s1">bp</span><span class="s3">, </span><span class="s1">refs</span><span class="s3">=</span><span class="s1">refs</span><span class="s3">)</span>
+            <span class="s1">block_values </span><span class="s3">= [</span><span class="s1">nb</span><span class="s3">]</span>
+    <span class="s2">elif </span><span class="s1">dtype </span><span class="s2">is None and </span><span class="s1">values</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">== </span><span class="s6">&quot;U&quot; </span><span class="s2">and </span><span class="s1">using_string_dtype</span><span class="s3">():</span>
+        <span class="s1">dtype </span><span class="s3">= </span><span class="s1">StringDtype</span><span class="s3">(</span><span class="s1">na_value</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">nan</span><span class="s3">)</span>
+
+        <span class="s1">obj_columns </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">values</span><span class="s3">)</span>
+        <span class="s1">block_values </span><span class="s3">= [</span>
+            <span class="s1">new_block</span><span class="s3">(</span>
+                <span class="s1">dtype</span><span class="s3">.</span><span class="s1">construct_array_type</span><span class="s3">().</span><span class="s1">_from_sequence</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">),</span>
+                <span class="s1">BlockPlacement</span><span class="s3">(</span><span class="s1">slice</span><span class="s3">(</span><span class="s1">i</span><span class="s3">, </span><span class="s1">i </span><span class="s3">+ </span><span class="s5">1</span><span class="s3">)),</span>
+                <span class="s1">ndim</span><span class="s3">=</span><span class="s5">2</span><span class="s3">,</span>
+            <span class="s3">)</span>
+            <span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">data </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">obj_columns</span><span class="s3">)</span>
+        <span class="s3">]</span>
+
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">bp </span><span class="s3">= </span><span class="s1">BlockPlacement</span><span class="s3">(</span><span class="s1">slice</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">)))</span>
+        <span class="s1">nb </span><span class="s3">= </span><span class="s1">new_block_2d</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, </span><span class="s1">placement</span><span class="s3">=</span><span class="s1">bp</span><span class="s3">, </span><span class="s1">refs</span><span class="s3">=</span><span class="s1">refs</span><span class="s3">)</span>
+        <span class="s1">block_values </span><span class="s3">= [</span><span class="s1">nb</span><span class="s3">]</span>
+
+    <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">) == </span><span class="s5">0</span><span class="s3">:</span>
+        <span class="s4"># TODO: check len(values) == 0?</span>
+        <span class="s1">block_values </span><span class="s3">= []</span>
+
+    <span class="s2">return </span><span class="s1">create_block_manager_from_blocks</span><span class="s3">(</span>
+        <span class="s1">block_values</span><span class="s3">, [</span><span class="s1">columns</span><span class="s3">, </span><span class="s1">index</span><span class="s3">], </span><span class="s1">verify_integrity</span><span class="s3">=</span><span class="s2">False</span>
+    <span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_check_values_indices_shape_match</span><span class="s3">(</span>
+    <span class="s1">values</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">, </span><span class="s1">index</span><span class="s3">: </span><span class="s1">Index</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">: </span><span class="s1">Index</span>
+<span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Check that the shape implied by our axes matches the actual shape of the 
+    data. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">values</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">[</span><span class="s5">1</span><span class="s3">] != </span><span class="s1">len</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">) </span><span class="s2">or </span><span class="s1">values</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">[</span><span class="s5">0</span><span class="s3">] != </span><span class="s1">len</span><span class="s3">(</span><span class="s1">index</span><span class="s3">):</span>
+        <span class="s4"># Could let this raise in Block constructor, but we get a more</span>
+        <span class="s4">#  helpful exception message this way.</span>
+        <span class="s2">if </span><span class="s1">values</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">[</span><span class="s5">0</span><span class="s3">] == </span><span class="s5">0 </span><span class="s3">&lt; </span><span class="s1">len</span><span class="s3">(</span><span class="s1">index</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s6">&quot;Empty data passed with indices specified.&quot;</span><span class="s3">)</span>
+
+        <span class="s1">passed </span><span class="s3">= </span><span class="s1">values</span><span class="s3">.</span><span class="s1">shape</span>
+        <span class="s1">implied </span><span class="s3">= (</span><span class="s1">len</span><span class="s3">(</span><span class="s1">index</span><span class="s3">), </span><span class="s1">len</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">))</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s6">f&quot;Shape of passed values is </span><span class="s2">{</span><span class="s1">passed</span><span class="s2">}</span><span class="s6">, indices imply </span><span class="s2">{</span><span class="s1">implied</span><span class="s2">}</span><span class="s6">&quot;</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">dict_to_mgr</span><span class="s3">(</span>
+    <span class="s1">data</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">,</span>
+    <span class="s1">index</span><span class="s3">,</span>
+    <span class="s1">columns</span><span class="s3">,</span>
+    <span class="s3">*,</span>
+    <span class="s1">dtype</span><span class="s3">: </span><span class="s1">DtypeObj </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">copy</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; Manager</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Segregate Series based on type and coerce into matrices. 
+    Needs to handle a lot of exceptional cases. 
+ 
+    Used in DataFrame.__init__ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">arrays</span><span class="s3">: </span><span class="s1">Sequence</span><span class="s3">[</span><span class="s1">Any</span><span class="s3">]</span>
+
+    <span class="s2">if </span><span class="s1">columns </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s1">columns </span><span class="s3">= </span><span class="s1">ensure_index</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">dtype </span><span class="s2">is not None and not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">):</span>
+            <span class="s4"># e.g. test_dataframe_from_dict_of_series</span>
+            <span class="s1">arrays </span><span class="s3">= [</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">na_value</span><span class="s3">] * </span><span class="s1">len</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">arrays </span><span class="s3">= [</span><span class="s1">np</span><span class="s3">.</span><span class="s1">nan</span><span class="s3">] * </span><span class="s1">len</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">)</span>
+        <span class="s1">midxs </span><span class="s3">= </span><span class="s1">set</span><span class="s3">()</span>
+        <span class="s1">data_keys </span><span class="s3">= </span><span class="s1">ensure_index</span><span class="s3">(</span><span class="s1">data</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">())  </span><span class="s4"># type: ignore[arg-type]</span>
+        <span class="s1">data_values </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">data</span><span class="s3">.</span><span class="s1">values</span><span class="s3">())</span>
+
+        <span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">column </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">):</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">idx </span><span class="s3">= </span><span class="s1">data_keys</span><span class="s3">.</span><span class="s1">get_loc</span><span class="s3">(</span><span class="s1">column</span><span class="s3">)</span>
+            <span class="s2">except </span><span class="s1">KeyError</span><span class="s3">:</span>
+                <span class="s1">midxs</span><span class="s3">.</span><span class="s1">add</span><span class="s3">(</span><span class="s1">i</span><span class="s3">)</span>
+                <span class="s2">continue</span>
+            <span class="s1">array </span><span class="s3">= </span><span class="s1">data_values</span><span class="s3">[</span><span class="s1">idx</span><span class="s3">]</span>
+            <span class="s1">arrays</span><span class="s3">[</span><span class="s1">i</span><span class="s3">] = </span><span class="s1">array</span>
+            <span class="s2">if </span><span class="s1">is_scalar</span><span class="s3">(</span><span class="s1">array</span><span class="s3">) </span><span class="s2">and </span><span class="s1">isna</span><span class="s3">(</span><span class="s1">array</span><span class="s3">):</span>
+                <span class="s1">midxs</span><span class="s3">.</span><span class="s1">add</span><span class="s3">(</span><span class="s1">i</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">index </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s4"># GH10856</span>
+            <span class="s4"># raise ValueError if only scalars in dict</span>
+            <span class="s2">if </span><span class="s1">midxs</span><span class="s3">:</span>
+                <span class="s1">index </span><span class="s3">= </span><span class="s1">_extract_index</span><span class="s3">(</span>
+                    <span class="s3">[</span><span class="s1">array </span><span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">array </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">arrays</span><span class="s3">) </span><span class="s2">if </span><span class="s1">i </span><span class="s2">not in </span><span class="s1">midxs</span><span class="s3">]</span>
+                <span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">index </span><span class="s3">= </span><span class="s1">_extract_index</span><span class="s3">(</span><span class="s1">arrays</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">index </span><span class="s3">= </span><span class="s1">ensure_index</span><span class="s3">(</span><span class="s1">index</span><span class="s3">)</span>
+
+        <span class="s4"># no obvious &quot;empty&quot; int column</span>
+        <span class="s2">if </span><span class="s1">midxs </span><span class="s2">and not </span><span class="s1">is_integer_dtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">):</span>
+            <span class="s4"># GH#1783</span>
+            <span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">midxs</span><span class="s3">:</span>
+                <span class="s1">arr </span><span class="s3">= </span><span class="s1">construct_1d_arraylike_from_scalar</span><span class="s3">(</span>
+                    <span class="s1">arrays</span><span class="s3">[</span><span class="s1">i</span><span class="s3">],</span>
+                    <span class="s1">len</span><span class="s3">(</span><span class="s1">index</span><span class="s3">),</span>
+                    <span class="s1">dtype </span><span class="s2">if </span><span class="s1">dtype </span><span class="s2">is not None else </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s6">&quot;object&quot;</span><span class="s3">),</span>
+                <span class="s3">)</span>
+                <span class="s1">arrays</span><span class="s3">[</span><span class="s1">i</span><span class="s3">] = </span><span class="s1">arr</span>
+
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">keys </span><span class="s3">= </span><span class="s1">maybe_sequence_to_range</span><span class="s3">(</span><span class="s1">list</span><span class="s3">(</span><span class="s1">data</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">()))</span>
+        <span class="s1">columns </span><span class="s3">= </span><span class="s1">Index</span><span class="s3">(</span><span class="s1">keys</span><span class="s3">) </span><span class="s2">if </span><span class="s1">keys </span><span class="s2">else </span><span class="s1">default_index</span><span class="s3">(</span><span class="s5">0</span><span class="s3">)</span>
+        <span class="s1">arrays </span><span class="s3">= [</span><span class="s1">com</span><span class="s3">.</span><span class="s1">maybe_iterable_to_list</span><span class="s3">(</span><span class="s1">data</span><span class="s3">[</span><span class="s1">k</span><span class="s3">]) </span><span class="s2">for </span><span class="s1">k </span><span class="s2">in </span><span class="s1">keys</span><span class="s3">]</span>
+
+    <span class="s2">if </span><span class="s1">copy</span><span class="s3">:</span>
+        <span class="s4"># We only need to copy arrays that will not get consolidated, i.e.</span>
+        <span class="s4">#  only EA arrays</span>
+        <span class="s1">arrays </span><span class="s3">= [</span>
+            <span class="s3">(</span>
+                <span class="s1">x</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+                <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">x</span><span class="s3">, </span><span class="s1">ExtensionArray</span><span class="s3">)</span>
+                <span class="s2">else </span><span class="s3">(</span>
+                    <span class="s1">x</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">(</span><span class="s1">deep</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+                    <span class="s2">if </span><span class="s3">(</span>
+                        <span class="s1">isinstance</span><span class="s3">(</span><span class="s1">x</span><span class="s3">, </span><span class="s1">Index</span><span class="s3">)</span>
+                        <span class="s2">or </span><span class="s3">(</span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">x</span><span class="s3">, </span><span class="s1">ABCSeries</span><span class="s3">) </span><span class="s2">and </span><span class="s1">is_1d_only_ea_dtype</span><span class="s3">(</span><span class="s1">x</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">))</span>
+                    <span class="s3">)</span>
+                    <span class="s2">else </span><span class="s1">x</span>
+                <span class="s3">)</span>
+            <span class="s3">)</span>
+            <span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">arrays</span>
+        <span class="s3">]</span>
+
+    <span class="s2">return </span><span class="s1">arrays_to_mgr</span><span class="s3">(</span><span class="s1">arrays</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">, </span><span class="s1">index</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">consolidate</span><span class="s3">=</span><span class="s1">copy</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">nested_data_to_arrays</span><span class="s3">(</span>
+    <span class="s1">data</span><span class="s3">: </span><span class="s1">Sequence</span><span class="s3">,</span>
+    <span class="s1">columns</span><span class="s3">: </span><span class="s1">Index </span><span class="s3">| </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">index</span><span class="s3">: </span><span class="s1">Index </span><span class="s3">| </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">dtype</span><span class="s3">: </span><span class="s1">DtypeObj </span><span class="s3">| </span><span class="s2">None</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">list</span><span class="s3">[</span><span class="s1">ArrayLike</span><span class="s3">], </span><span class="s1">Index</span><span class="s3">, </span><span class="s1">Index</span><span class="s3">]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Convert a single sequence of arrays to multiple arrays. 
+    &quot;&quot;&quot;</span>
+    <span class="s4"># By the time we get here we have already checked treat_as_nested(data)</span>
+
+    <span class="s2">if </span><span class="s1">is_named_tuple</span><span class="s3">(</span><span class="s1">data</span><span class="s3">[</span><span class="s5">0</span><span class="s3">]) </span><span class="s2">and </span><span class="s1">columns </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">columns </span><span class="s3">= </span><span class="s1">ensure_index</span><span class="s3">(</span><span class="s1">data</span><span class="s3">[</span><span class="s5">0</span><span class="s3">].</span><span class="s1">_fields</span><span class="s3">)</span>
+
+    <span class="s1">arrays</span><span class="s3">, </span><span class="s1">columns </span><span class="s3">= </span><span class="s1">to_arrays</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+    <span class="s1">columns </span><span class="s3">= </span><span class="s1">ensure_index</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">index </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">data</span><span class="s3">[</span><span class="s5">0</span><span class="s3">], </span><span class="s1">ABCSeries</span><span class="s3">):</span>
+            <span class="s1">index </span><span class="s3">= </span><span class="s1">_get_names_from_index</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">index </span><span class="s3">= </span><span class="s1">default_index</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">data</span><span class="s3">))</span>
+
+    <span class="s2">return </span><span class="s1">arrays</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">, </span><span class="s1">index</span>
+
+
+<span class="s2">def </span><span class="s1">treat_as_nested</span><span class="s3">(</span><span class="s1">data</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Check if we should use nested_data_to_arrays. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">return </span><span class="s3">(</span>
+        <span class="s1">len</span><span class="s3">(</span><span class="s1">data</span><span class="s3">) &gt; </span><span class="s5">0</span>
+        <span class="s2">and </span><span class="s1">is_list_like</span><span class="s3">(</span><span class="s1">data</span><span class="s3">[</span><span class="s5">0</span><span class="s3">])</span>
+        <span class="s2">and </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">data</span><span class="s3">[</span><span class="s5">0</span><span class="s3">], </span><span class="s6">&quot;ndim&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">) == </span><span class="s5">1</span>
+        <span class="s2">and not </span><span class="s3">(</span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">ExtensionArray</span><span class="s3">) </span><span class="s2">and </span><span class="s1">data</span><span class="s3">.</span><span class="s1">ndim </span><span class="s3">== </span><span class="s5">2</span><span class="s3">)</span>
+    <span class="s3">)</span>
+
+
+<span class="s4"># ---------------------------------------------------------------------</span>
+
+
+<span class="s2">def </span><span class="s1">_prep_ndarraylike</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">) </span><span class="s1">-&gt; np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">:</span>
+    <span class="s4"># values is specifically _not_ ndarray, EA, Index, or Series</span>
+    <span class="s4"># We only get here with `not treat_as_nested(values)`</span>
+
+    <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">values</span><span class="s3">) == </span><span class="s5">0</span><span class="s3">:</span>
+        <span class="s4"># TODO: check for length-zero range, in which case return int64 dtype?</span>
+        <span class="s4"># TODO: reuse anything in try_cast?</span>
+        <span class="s2">return </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty</span><span class="s3">((</span><span class="s5">0</span><span class="s3">, </span><span class="s5">0</span><span class="s3">), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">object</span><span class="s3">)</span>
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, </span><span class="s1">range</span><span class="s3">):</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">range_to_ndarray</span><span class="s3">(</span><span class="s1">values</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">arr</span><span class="s3">[..., </span><span class="s1">np</span><span class="s3">.</span><span class="s1">newaxis</span><span class="s3">]</span>
+
+    <span class="s2">def </span><span class="s1">convert</span><span class="s3">(</span><span class="s1">v</span><span class="s3">):</span>
+        <span class="s2">if not </span><span class="s1">is_list_like</span><span class="s3">(</span><span class="s1">v</span><span class="s3">) </span><span class="s2">or </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">v</span><span class="s3">, </span><span class="s1">ABCDataFrame</span><span class="s3">):</span>
+            <span class="s2">return </span><span class="s1">v</span>
+
+        <span class="s1">v </span><span class="s3">= </span><span class="s1">extract_array</span><span class="s3">(</span><span class="s1">v</span><span class="s3">, </span><span class="s1">extract_numpy</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+        <span class="s1">res </span><span class="s3">= </span><span class="s1">maybe_convert_platform</span><span class="s3">(</span><span class="s1">v</span><span class="s3">)</span>
+        <span class="s4"># We don't do maybe_infer_objects here bc we will end up doing</span>
+        <span class="s4">#  it column-by-column in ndarray_to_mgr</span>
+        <span class="s2">return </span><span class="s1">res</span>
+
+    <span class="s4"># we could have a 1-dim or 2-dim list here</span>
+    <span class="s4"># this is equiv of np.asarray, but does object conversion</span>
+    <span class="s4"># and platform dtype preservation</span>
+    <span class="s4"># does not convert e.g. [1, &quot;a&quot;, True] to [&quot;1&quot;, &quot;a&quot;, &quot;True&quot;] like</span>
+    <span class="s4">#  np.asarray would</span>
+    <span class="s2">if </span><span class="s1">is_list_like</span><span class="s3">(</span><span class="s1">values</span><span class="s3">[</span><span class="s5">0</span><span class="s3">]):</span>
+        <span class="s1">values </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">convert</span><span class="s3">(</span><span class="s1">v</span><span class="s3">) </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">values</span><span class="s3">])</span>
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">values</span><span class="s3">[</span><span class="s5">0</span><span class="s3">], </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">) </span><span class="s2">and </span><span class="s1">values</span><span class="s3">[</span><span class="s5">0</span><span class="s3">].</span><span class="s1">ndim </span><span class="s3">== </span><span class="s5">0</span><span class="s3">:</span>
+        <span class="s4"># GH#21861 see test_constructor_list_of_lists</span>
+        <span class="s1">values </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">convert</span><span class="s3">(</span><span class="s1">v</span><span class="s3">) </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">values</span><span class="s3">])</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">values </span><span class="s3">= </span><span class="s1">convert</span><span class="s3">(</span><span class="s1">values</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">_ensure_2d</span><span class="s3">(</span><span class="s1">values</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_ensure_2d</span><span class="s3">(</span><span class="s1">values</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">) </span><span class="s1">-&gt; np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Reshape 1D values, raise on anything else other than 2D. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">values</span><span class="s3">.</span><span class="s1">ndim </span><span class="s3">== </span><span class="s5">1</span><span class="s3">:</span>
+        <span class="s1">values </span><span class="s3">= </span><span class="s1">values</span><span class="s3">.</span><span class="s1">reshape</span><span class="s3">((</span><span class="s1">values</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">[</span><span class="s5">0</span><span class="s3">], </span><span class="s5">1</span><span class="s3">))</span>
+    <span class="s2">elif </span><span class="s1">values</span><span class="s3">.</span><span class="s1">ndim </span><span class="s3">!= </span><span class="s5">2</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s6">f&quot;Must pass 2-d input. shape=</span><span class="s2">{</span><span class="s1">values</span><span class="s3">.</span><span class="s1">shape</span><span class="s2">}</span><span class="s6">&quot;</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">values</span>
+
+
+<span class="s2">def </span><span class="s1">_homogenize</span><span class="s3">(</span>
+    <span class="s1">data</span><span class="s3">, </span><span class="s1">index</span><span class="s3">: </span><span class="s1">Index</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">: </span><span class="s1">DtypeObj </span><span class="s3">| </span><span class="s2">None</span>
+<span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">list</span><span class="s3">[</span><span class="s1">ArrayLike</span><span class="s3">], </span><span class="s1">list</span><span class="s3">[</span><span class="s1">Any</span><span class="s3">]]:</span>
+    <span class="s1">oindex </span><span class="s3">= </span><span class="s2">None</span>
+    <span class="s1">homogenized </span><span class="s3">= []</span>
+    <span class="s4"># if the original array-like in `data` is a Series, keep track of this Series' refs</span>
+    <span class="s1">refs</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">Any</span><span class="s3">] = []</span>
+
+    <span class="s2">for </span><span class="s1">val </span><span class="s2">in </span><span class="s1">data</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">val</span><span class="s3">, (</span><span class="s1">ABCSeries</span><span class="s3">, </span><span class="s1">Index</span><span class="s3">)):</span>
+            <span class="s2">if </span><span class="s1">dtype </span><span class="s2">is not None</span><span class="s3">:</span>
+                <span class="s1">val </span><span class="s3">= </span><span class="s1">val</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">val</span><span class="s3">, </span><span class="s1">ABCSeries</span><span class="s3">) </span><span class="s2">and </span><span class="s1">val</span><span class="s3">.</span><span class="s1">index </span><span class="s2">is not </span><span class="s1">index</span><span class="s3">:</span>
+                <span class="s4"># Forces alignment. No need to copy data since we</span>
+                <span class="s4"># are putting it into an ndarray later</span>
+                <span class="s1">val </span><span class="s3">= </span><span class="s1">val</span><span class="s3">.</span><span class="s1">reindex</span><span class="s3">(</span><span class="s1">index</span><span class="s3">)</span>
+            <span class="s1">refs</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">val</span><span class="s3">.</span><span class="s1">_references</span><span class="s3">)</span>
+            <span class="s1">val </span><span class="s3">= </span><span class="s1">val</span><span class="s3">.</span><span class="s1">_values</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">val</span><span class="s3">, </span><span class="s1">dict</span><span class="s3">):</span>
+                <span class="s4"># GH#41785 this _should_ be equivalent to (but faster than)</span>
+                <span class="s4">#  val = Series(val, index=index)._values</span>
+                <span class="s2">if </span><span class="s1">oindex </span><span class="s2">is None</span><span class="s3">:</span>
+                    <span class="s1">oindex </span><span class="s3">= </span><span class="s1">index</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s6">&quot;O&quot;</span><span class="s3">)</span>
+
+                <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">index</span><span class="s3">, (</span><span class="s1">DatetimeIndex</span><span class="s3">, </span><span class="s1">TimedeltaIndex</span><span class="s3">)):</span>
+                    <span class="s4"># see test_constructor_dict_datetime64_index</span>
+                    <span class="s1">val </span><span class="s3">= </span><span class="s1">dict_compat</span><span class="s3">(</span><span class="s1">val</span><span class="s3">)</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s4"># see test_constructor_subclass_dict</span>
+                    <span class="s1">val </span><span class="s3">= </span><span class="s1">dict</span><span class="s3">(</span><span class="s1">val</span><span class="s3">)</span>
+
+                <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">index</span><span class="s3">, </span><span class="s1">MultiIndex</span><span class="s3">) </span><span class="s2">and </span><span class="s1">index</span><span class="s3">.</span><span class="s1">hasnans</span><span class="s3">:</span>
+                    <span class="s4"># GH#63889 Check if dict has missing value keys that need special</span>
+                    <span class="s4"># handling (i.e. None/np.nan/pd.NA might no longer be matched</span>
+                    <span class="s4"># when using fast_multiget with processed object index values)</span>
+                    <span class="s2">from </span><span class="s1">pandas </span><span class="s2">import </span><span class="s1">Series</span>
+
+                    <span class="s1">val </span><span class="s3">= </span><span class="s1">Series</span><span class="s3">(</span><span class="s1">val</span><span class="s3">).</span><span class="s1">reindex</span><span class="s3">(</span><span class="s1">index</span><span class="s3">).</span><span class="s1">_values</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s4"># Fast path: use lib.fast_multiget for dicts without missing keys</span>
+                    <span class="s1">val </span><span class="s3">= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">fast_multiget</span><span class="s3">(</span><span class="s1">val</span><span class="s3">, </span><span class="s1">oindex</span><span class="s3">.</span><span class="s1">_values</span><span class="s3">, </span><span class="s1">default</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">nan</span><span class="s3">)</span>
+
+            <span class="s1">val </span><span class="s3">= </span><span class="s1">sanitize_array</span><span class="s3">(</span><span class="s1">val</span><span class="s3">, </span><span class="s1">index</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+            <span class="s1">com</span><span class="s3">.</span><span class="s1">require_length_match</span><span class="s3">(</span><span class="s1">val</span><span class="s3">, </span><span class="s1">index</span><span class="s3">)</span>
+            <span class="s1">refs</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s2">None</span><span class="s3">)</span>
+
+        <span class="s1">homogenized</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">val</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">homogenized</span><span class="s3">, </span><span class="s1">refs</span>
+
+
+<span class="s2">def </span><span class="s1">_extract_index</span><span class="s3">(</span><span class="s1">data</span><span class="s3">) </span><span class="s1">-&gt; Index</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Try to infer an Index from the passed data, raise ValueError on failure. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">index</span><span class="s3">: </span><span class="s1">Index</span>
+    <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">data</span><span class="s3">) == </span><span class="s5">0</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">default_index</span><span class="s3">(</span><span class="s5">0</span><span class="s3">)</span>
+
+    <span class="s1">raw_lengths </span><span class="s3">= </span><span class="s1">set</span><span class="s3">()</span>
+    <span class="s1">indexes</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">list</span><span class="s3">[</span><span class="s1">Hashable</span><span class="s3">] | </span><span class="s1">Index</span><span class="s3">] = []</span>
+
+    <span class="s1">have_raw_arrays </span><span class="s3">= </span><span class="s2">False</span>
+    <span class="s1">have_series </span><span class="s3">= </span><span class="s2">False</span>
+    <span class="s1">have_dicts </span><span class="s3">= </span><span class="s2">False</span>
+
+    <span class="s2">for </span><span class="s1">val </span><span class="s2">in </span><span class="s1">data</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">val</span><span class="s3">, </span><span class="s1">ABCSeries</span><span class="s3">):</span>
+            <span class="s1">have_series </span><span class="s3">= </span><span class="s2">True</span>
+            <span class="s1">indexes</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">val</span><span class="s3">.</span><span class="s1">index</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">val</span><span class="s3">, </span><span class="s1">dict</span><span class="s3">):</span>
+            <span class="s1">have_dicts </span><span class="s3">= </span><span class="s2">True</span>
+            <span class="s1">indexes</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">list</span><span class="s3">(</span><span class="s1">val</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">()))</span>
+        <span class="s2">elif </span><span class="s1">is_list_like</span><span class="s3">(</span><span class="s1">val</span><span class="s3">) </span><span class="s2">and </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">val</span><span class="s3">, </span><span class="s6">&quot;ndim&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">) == </span><span class="s5">1</span><span class="s3">:</span>
+            <span class="s1">have_raw_arrays </span><span class="s3">= </span><span class="s2">True</span>
+            <span class="s1">raw_lengths</span><span class="s3">.</span><span class="s1">add</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">val</span><span class="s3">))</span>
+        <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">val</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">) </span><span class="s2">and </span><span class="s1">val</span><span class="s3">.</span><span class="s1">ndim </span><span class="s3">&gt; </span><span class="s5">1</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s6">&quot;Per-column arrays must each be 1-dimensional&quot;</span><span class="s3">)</span>
+
+    <span class="s2">if not </span><span class="s1">indexes </span><span class="s2">and not </span><span class="s1">raw_lengths</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s6">&quot;If using all scalar values, you must pass an index&quot;</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">have_series</span><span class="s3">:</span>
+        <span class="s1">index </span><span class="s3">= </span><span class="s1">union_indexes</span><span class="s3">(</span><span class="s1">indexes</span><span class="s3">)</span>
+    <span class="s2">elif </span><span class="s1">have_dicts</span><span class="s3">:</span>
+        <span class="s1">index </span><span class="s3">= </span><span class="s1">union_indexes</span><span class="s3">(</span><span class="s1">indexes</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">have_raw_arrays</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">raw_lengths</span><span class="s3">) &gt; </span><span class="s5">1</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s6">&quot;All arrays must be of the same length&quot;</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">have_dicts</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                <span class="s6">&quot;Mixing dicts with non-Series may lead to ambiguous ordering.&quot;</span>
+            <span class="s3">)</span>
+        <span class="s1">raw_length </span><span class="s3">= </span><span class="s1">raw_lengths</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">()</span>
+        <span class="s2">if </span><span class="s1">have_series</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">raw_length </span><span class="s3">!= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">index</span><span class="s3">):</span>
+                <span class="s1">msg </span><span class="s3">= (</span>
+                    <span class="s6">f&quot;array length </span><span class="s2">{</span><span class="s1">raw_length</span><span class="s2">} </span><span class="s6">does not match index &quot;</span>
+                    <span class="s6">f&quot;length </span><span class="s2">{</span><span class="s1">len</span><span class="s3">(</span><span class="s1">index</span><span class="s3">)</span><span class="s2">}</span><span class="s6">&quot;</span>
+                <span class="s3">)</span>
+                <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s1">msg</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">index </span><span class="s3">= </span><span class="s1">default_index</span><span class="s3">(</span><span class="s1">raw_length</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">ensure_index</span><span class="s3">(</span><span class="s1">index</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">reorder_arrays</span><span class="s3">(</span>
+    <span class="s1">arrays</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">ArrayLike</span><span class="s3">], </span><span class="s1">arr_columns</span><span class="s3">: </span><span class="s1">Index</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">: </span><span class="s1">Index </span><span class="s3">| </span><span class="s2">None</span><span class="s3">, </span><span class="s1">length</span><span class="s3">: </span><span class="s1">int</span>
+<span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">list</span><span class="s3">[</span><span class="s1">ArrayLike</span><span class="s3">], </span><span class="s1">Index</span><span class="s3">]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Preemptively (cheaply) reindex arrays with new columns. 
+    &quot;&quot;&quot;</span>
+    <span class="s4"># reorder according to the columns</span>
+    <span class="s2">if </span><span class="s1">columns </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s2">if not </span><span class="s1">columns</span><span class="s3">.</span><span class="s1">equals</span><span class="s3">(</span><span class="s1">arr_columns</span><span class="s3">):</span>
+            <span class="s4"># if they are equal, there is nothing to do</span>
+            <span class="s1">new_arrays</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">ArrayLike</span><span class="s3">] = []</span>
+            <span class="s1">indexer </span><span class="s3">= </span><span class="s1">arr_columns</span><span class="s3">.</span><span class="s1">get_indexer</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">)</span>
+            <span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">k </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">indexer</span><span class="s3">):</span>
+                <span class="s2">if </span><span class="s1">k </span><span class="s3">== -</span><span class="s5">1</span><span class="s3">:</span>
+                    <span class="s4"># by convention default is all-NaN object dtype</span>
+                    <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty</span><span class="s3">(</span><span class="s1">length</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">object</span><span class="s3">)</span>
+                    <span class="s1">arr</span><span class="s3">.</span><span class="s1">fill</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">nan</span><span class="s3">)</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s1">arr </span><span class="s3">= </span><span class="s1">arrays</span><span class="s3">[</span><span class="s1">k</span><span class="s3">]</span>
+                <span class="s1">new_arrays</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">)</span>
+
+            <span class="s1">arrays </span><span class="s3">= </span><span class="s1">new_arrays</span>
+            <span class="s1">arr_columns </span><span class="s3">= </span><span class="s1">columns</span>
+
+    <span class="s2">return </span><span class="s1">arrays</span><span class="s3">, </span><span class="s1">arr_columns</span>
+
+
+<span class="s2">def </span><span class="s1">_get_names_from_index</span><span class="s3">(</span><span class="s1">data</span><span class="s3">) </span><span class="s1">-&gt; Index</span><span class="s3">:</span>
+    <span class="s1">has_some_name </span><span class="s3">= </span><span class="s1">any</span><span class="s3">(</span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">s</span><span class="s3">, </span><span class="s6">&quot;name&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">) </span><span class="s2">is not None for </span><span class="s1">s </span><span class="s2">in </span><span class="s1">data</span><span class="s3">)</span>
+    <span class="s2">if not </span><span class="s1">has_some_name</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">default_index</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">data</span><span class="s3">))</span>
+
+    <span class="s1">index</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">Hashable</span><span class="s3">] = </span><span class="s1">list</span><span class="s3">(</span><span class="s1">range</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)))</span>
+    <span class="s1">count </span><span class="s3">= </span><span class="s5">0</span>
+    <span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">s </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">data</span><span class="s3">):</span>
+        <span class="s1">n </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">s</span><span class="s3">, </span><span class="s6">&quot;name&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">n </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">index</span><span class="s3">[</span><span class="s1">i</span><span class="s3">] = </span><span class="s1">n</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">index</span><span class="s3">[</span><span class="s1">i</span><span class="s3">] = </span><span class="s6">f&quot;Unnamed </span><span class="s2">{</span><span class="s1">count</span><span class="s2">}</span><span class="s6">&quot;</span>
+            <span class="s1">count </span><span class="s3">+= </span><span class="s5">1</span>
+
+    <span class="s2">return </span><span class="s1">Index</span><span class="s3">(</span><span class="s1">index</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_get_axes</span><span class="s3">(</span>
+    <span class="s1">N</span><span class="s3">: </span><span class="s1">int</span><span class="s3">, </span><span class="s1">K</span><span class="s3">: </span><span class="s1">int</span><span class="s3">, </span><span class="s1">index</span><span class="s3">: </span><span class="s1">Index </span><span class="s3">| </span><span class="s2">None</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">: </span><span class="s1">Index </span><span class="s3">| </span><span class="s2">None</span>
+<span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">Index</span><span class="s3">, </span><span class="s1">Index</span><span class="s3">]:</span>
+    <span class="s4"># helper to create the axes as indexes</span>
+    <span class="s4"># return axes or defaults</span>
+
+    <span class="s2">if </span><span class="s1">index </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">index </span><span class="s3">= </span><span class="s1">default_index</span><span class="s3">(</span><span class="s1">N</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">index </span><span class="s3">= </span><span class="s1">ensure_index</span><span class="s3">(</span><span class="s1">index</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">columns </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">columns </span><span class="s3">= </span><span class="s1">default_index</span><span class="s3">(</span><span class="s1">K</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">columns </span><span class="s3">= </span><span class="s1">ensure_index</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">index</span><span class="s3">, </span><span class="s1">columns</span>
+
+
+<span class="s2">def </span><span class="s1">dataclasses_to_dicts</span><span class="s3">(</span><span class="s1">data</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Converts a list of dataclass instances to a list of dictionaries. 
+ 
+    Parameters 
+    ---------- 
+    data : List[Type[dataclass]] 
+ 
+    Returns 
+    -------- 
+    list_dict : List[dict] 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; from dataclasses import dataclass 
+    &gt;&gt;&gt; @dataclass 
+    ... class Point: 
+    ...     x: int 
+    ...     y: int 
+ 
+    &gt;&gt;&gt; dataclasses_to_dicts([Point(1, 2), Point(2, 3)]) 
+    [{'x': 1, 'y': 2}, {'x': 2, 'y': 3}] 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s2">from </span><span class="s1">dataclasses </span><span class="s2">import </span><span class="s1">asdict</span>
+
+    <span class="s2">return </span><span class="s1">list</span><span class="s3">(</span><span class="s1">map</span><span class="s3">(</span><span class="s1">asdict</span><span class="s3">, </span><span class="s1">data</span><span class="s3">))</span>
+
+
+<span class="s4"># ---------------------------------------------------------------------</span>
+<span class="s4"># Conversion of Inputs to Arrays</span>
+
+
+<span class="s2">def </span><span class="s1">to_arrays</span><span class="s3">(</span>
+    <span class="s1">data</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">: </span><span class="s1">Index </span><span class="s3">| </span><span class="s2">None</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">: </span><span class="s1">DtypeObj </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span>
+<span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">list</span><span class="s3">[</span><span class="s1">ArrayLike</span><span class="s3">], </span><span class="s1">Index</span><span class="s3">]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Return list of arrays, columns. 
+ 
+    Returns 
+    ------- 
+    list[ArrayLike] 
+        These will become columns in a DataFrame. 
+    Index 
+        This will become frame.columns. 
+ 
+    Notes 
+    ----- 
+    Ensures that len(result_arrays) == len(result_index). 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">if not </span><span class="s1">len</span><span class="s3">(</span><span class="s1">data</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">data</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">names </span><span class="s2">is not None</span><span class="s3">:</span>
+                <span class="s4"># i.e. numpy structured array</span>
+                <span class="s1">columns </span><span class="s3">= </span><span class="s1">ensure_index</span><span class="s3">(</span><span class="s1">data</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">names</span><span class="s3">)</span>
+                <span class="s1">arrays </span><span class="s3">= [</span><span class="s1">data</span><span class="s3">[</span><span class="s1">name</span><span class="s3">] </span><span class="s2">for </span><span class="s1">name </span><span class="s2">in </span><span class="s1">columns</span><span class="s3">]</span>
+
+                <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">data</span><span class="s3">) == </span><span class="s5">0</span><span class="s3">:</span>
+                    <span class="s4"># GH#42456 the indexing above results in list of 2D ndarrays</span>
+                    <span class="s4"># TODO: is that an issue with numpy?</span>
+                    <span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">arr </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">arrays</span><span class="s3">):</span>
+                        <span class="s2">if </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">ndim </span><span class="s3">== </span><span class="s5">2</span><span class="s3">:</span>
+                            <span class="s1">arrays</span><span class="s3">[</span><span class="s1">i</span><span class="s3">] = </span><span class="s1">arr</span><span class="s3">[:, </span><span class="s5">0</span><span class="s3">]</span>
+
+                <span class="s2">return </span><span class="s1">arrays</span><span class="s3">, </span><span class="s1">columns</span>
+        <span class="s2">return </span><span class="s3">[], </span><span class="s1">ensure_index</span><span class="s3">([])</span>
+
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">) </span><span class="s2">and </span><span class="s1">data</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">names </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s4"># e.g. recarray</span>
+        <span class="s2">if </span><span class="s1">columns </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">columns </span><span class="s3">= </span><span class="s1">Index</span><span class="s3">(</span><span class="s1">data</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">names</span><span class="s3">)</span>
+        <span class="s1">arrays </span><span class="s3">= [</span><span class="s1">data</span><span class="s3">[</span><span class="s1">k</span><span class="s3">] </span><span class="s2">for </span><span class="s1">k </span><span class="s2">in </span><span class="s1">columns</span><span class="s3">]</span>
+        <span class="s2">return </span><span class="s1">arrays</span><span class="s3">, </span><span class="s1">columns</span>
+
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">data</span><span class="s3">[</span><span class="s5">0</span><span class="s3">], (</span><span class="s1">list</span><span class="s3">, </span><span class="s1">tuple</span><span class="s3">)):</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">_list_to_arrays</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)</span>
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">data</span><span class="s3">[</span><span class="s5">0</span><span class="s3">], </span><span class="s1">abc</span><span class="s3">.</span><span class="s1">Mapping</span><span class="s3">):</span>
+        <span class="s1">arr</span><span class="s3">, </span><span class="s1">columns </span><span class="s3">= </span><span class="s1">_list_of_dict_to_arrays</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">)</span>
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">data</span><span class="s3">[</span><span class="s5">0</span><span class="s3">], </span><span class="s1">ABCSeries</span><span class="s3">):</span>
+        <span class="s1">arr</span><span class="s3">, </span><span class="s1">columns </span><span class="s3">= </span><span class="s1">_list_of_series_to_arrays</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s4"># last ditch effort</span>
+        <span class="s1">data </span><span class="s3">= [</span><span class="s1">tuple</span><span class="s3">(</span><span class="s1">x</span><span class="s3">) </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">data</span><span class="s3">]</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">_list_to_arrays</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)</span>
+
+    <span class="s1">content</span><span class="s3">, </span><span class="s1">columns </span><span class="s3">= </span><span class="s1">_finalize_columns_and_data</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">content</span><span class="s3">, </span><span class="s1">columns</span>
+
+
+<span class="s2">def </span><span class="s1">_list_to_arrays</span><span class="s3">(</span><span class="s1">data</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">tuple </span><span class="s3">| </span><span class="s1">list</span><span class="s3">]) </span><span class="s1">-&gt; np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">:</span>
+    <span class="s4"># Returned np.ndarray has ndim = 2</span>
+    <span class="s4"># Note: we already check len(data) &gt; 0 before getting hre</span>
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">data</span><span class="s3">[</span><span class="s5">0</span><span class="s3">], </span><span class="s1">tuple</span><span class="s3">):</span>
+        <span class="s1">content </span><span class="s3">= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">to_object_array_tuples</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s4"># list of lists</span>
+        <span class="s1">content </span><span class="s3">= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">to_object_array</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">content</span>
+
+
+<span class="s2">def </span><span class="s1">_list_of_series_to_arrays</span><span class="s3">(</span>
+    <span class="s1">data</span><span class="s3">: </span><span class="s1">list</span><span class="s3">,</span>
+    <span class="s1">columns</span><span class="s3">: </span><span class="s1">Index </span><span class="s3">| </span><span class="s2">None</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">, </span><span class="s1">Index</span><span class="s3">]:</span>
+    <span class="s4"># returned np.ndarray has ndim == 2</span>
+
+    <span class="s2">if </span><span class="s1">columns </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s4"># We know pass_data is non-empty because data[0] is a Series</span>
+        <span class="s1">pass_data </span><span class="s3">= [</span><span class="s1">x </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">data </span><span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">x</span><span class="s3">, (</span><span class="s1">ABCSeries</span><span class="s3">, </span><span class="s1">ABCDataFrame</span><span class="s3">))]</span>
+        <span class="s1">columns </span><span class="s3">= </span><span class="s1">get_objs_combined_axis</span><span class="s3">(</span><span class="s1">pass_data</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+
+    <span class="s1">indexer_cache</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">int</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">] = {}</span>
+
+    <span class="s1">aligned_values </span><span class="s3">= []</span>
+    <span class="s2">for </span><span class="s1">s </span><span class="s2">in </span><span class="s1">data</span><span class="s3">:</span>
+        <span class="s1">index </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">s</span><span class="s3">, </span><span class="s6">&quot;index&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">index </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">index </span><span class="s3">= </span><span class="s1">default_index</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">s</span><span class="s3">))</span>
+
+        <span class="s2">if </span><span class="s1">id</span><span class="s3">(</span><span class="s1">index</span><span class="s3">) </span><span class="s2">in </span><span class="s1">indexer_cache</span><span class="s3">:</span>
+            <span class="s1">indexer </span><span class="s3">= </span><span class="s1">indexer_cache</span><span class="s3">[</span><span class="s1">id</span><span class="s3">(</span><span class="s1">index</span><span class="s3">)]</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">indexer </span><span class="s3">= </span><span class="s1">indexer_cache</span><span class="s3">[</span><span class="s1">id</span><span class="s3">(</span><span class="s1">index</span><span class="s3">)] = </span><span class="s1">index</span><span class="s3">.</span><span class="s1">get_indexer</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">)</span>
+
+        <span class="s1">values </span><span class="s3">= </span><span class="s1">extract_array</span><span class="s3">(</span><span class="s1">s</span><span class="s3">, </span><span class="s1">extract_numpy</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+        <span class="s1">aligned_values</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">algorithms</span><span class="s3">.</span><span class="s1">take_nd</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, </span><span class="s1">indexer</span><span class="s3">))</span>
+
+    <span class="s1">content </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">vstack</span><span class="s3">(</span><span class="s1">aligned_values</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">content</span><span class="s3">, </span><span class="s1">columns</span>
+
+
+<span class="s2">def </span><span class="s1">_list_of_dict_to_arrays</span><span class="s3">(</span>
+    <span class="s1">data</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">dict</span><span class="s3">],</span>
+    <span class="s1">columns</span><span class="s3">: </span><span class="s1">Index </span><span class="s3">| </span><span class="s2">None</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">, </span><span class="s1">Index</span><span class="s3">]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Convert list of dicts to numpy arrays 
+ 
+    if `columns` is not passed, column names are inferred from the records 
+    - for OrderedDict and dicts, the column names match 
+      the key insertion-order from the first record to the last. 
+    - For other kinds of dict-likes, the keys are lexically sorted. 
+ 
+    Parameters 
+    ---------- 
+    data : iterable 
+        collection of records (OrderedDict, dict) 
+    columns: iterables or None 
+ 
+    Returns 
+    ------- 
+    content : np.ndarray[object, ndim=2] 
+    columns : Index 
+    &quot;&quot;&quot;</span>
+    <span class="s4"># assure that they are of the base dict class and not of derived</span>
+    <span class="s4"># classes</span>
+    <span class="s1">data </span><span class="s3">= [</span><span class="s1">d </span><span class="s2">if </span><span class="s1">type</span><span class="s3">(</span><span class="s1">d</span><span class="s3">) </span><span class="s2">is </span><span class="s1">dict </span><span class="s2">else </span><span class="s1">dict</span><span class="s3">(</span><span class="s1">d</span><span class="s3">) </span><span class="s2">for </span><span class="s1">d </span><span class="s2">in </span><span class="s1">data</span><span class="s3">]</span>
+
+    <span class="s2">if </span><span class="s1">columns </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">gen </span><span class="s3">= (</span><span class="s1">list</span><span class="s3">(</span><span class="s1">x</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">()) </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">data</span><span class="s3">)</span>
+        <span class="s1">sort </span><span class="s3">= </span><span class="s2">not </span><span class="s1">any</span><span class="s3">(</span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">d</span><span class="s3">, </span><span class="s1">dict</span><span class="s3">) </span><span class="s2">for </span><span class="s1">d </span><span class="s2">in </span><span class="s1">data</span><span class="s3">)</span>
+        <span class="s1">pre_cols </span><span class="s3">= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">fast_unique_multiple_list_gen</span><span class="s3">(</span><span class="s1">gen</span><span class="s3">, </span><span class="s1">sort</span><span class="s3">=</span><span class="s1">sort</span><span class="s3">)</span>
+        <span class="s1">columns </span><span class="s3">= </span><span class="s1">ensure_index</span><span class="s3">(</span><span class="s1">pre_cols</span><span class="s3">)</span>
+
+        <span class="s4"># use pre_cols to preserve exact values that were present as dict keys</span>
+        <span class="s4"># (e.g. otherwise missing values might be coerced to the canonical repr)</span>
+        <span class="s1">content </span><span class="s3">= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">dicts_to_array</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">pre_cols</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">content </span><span class="s3">= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">dicts_to_array</span><span class="s3">(</span><span class="s1">data</span><span class="s3">, </span><span class="s1">list</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">))</span>
+
+    <span class="s2">return </span><span class="s1">content</span><span class="s3">, </span><span class="s1">columns</span>
+
+
+<span class="s2">def </span><span class="s1">_finalize_columns_and_data</span><span class="s3">(</span>
+    <span class="s1">content</span><span class="s3">: </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">,  </span><span class="s4"># ndim == 2</span>
+    <span class="s1">columns</span><span class="s3">: </span><span class="s1">Index </span><span class="s3">| </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">dtype</span><span class="s3">: </span><span class="s1">DtypeObj </span><span class="s3">| </span><span class="s2">None</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; tuple</span><span class="s3">[</span><span class="s1">list</span><span class="s3">[</span><span class="s1">ArrayLike</span><span class="s3">], </span><span class="s1">Index</span><span class="s3">]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Ensure we have valid columns, cast object dtypes if possible. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">contents </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">content</span><span class="s3">.</span><span class="s1">T</span><span class="s3">)</span>
+
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s1">columns </span><span class="s3">= </span><span class="s1">_validate_or_indexify_columns</span><span class="s3">(</span><span class="s1">contents</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">)</span>
+    <span class="s2">except </span><span class="s1">AssertionError </span><span class="s2">as </span><span class="s1">err</span><span class="s3">:</span>
+        <span class="s4"># GH#26429 do not raise user-facing AssertionError</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s1">err</span><span class="s3">) </span><span class="s2">from </span><span class="s1">err</span>
+
+    <span class="s2">if </span><span class="s1">contents </span><span class="s2">and </span><span class="s1">contents</span><span class="s3">[</span><span class="s5">0</span><span class="s3">].</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">np</span><span class="s3">.</span><span class="s1">object_</span><span class="s3">:</span>
+        <span class="s1">contents </span><span class="s3">= </span><span class="s1">convert_object_array</span><span class="s3">(</span><span class="s1">contents</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">contents</span><span class="s3">, </span><span class="s1">columns</span>
+
+
+<span class="s2">def </span><span class="s1">_validate_or_indexify_columns</span><span class="s3">(</span>
+    <span class="s1">content</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">], </span><span class="s1">columns</span><span class="s3">: </span><span class="s1">Index </span><span class="s3">| </span><span class="s2">None</span>
+<span class="s3">) </span><span class="s1">-&gt; Index</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    If columns is None, make numbers as column names; Otherwise, validate that 
+    columns have valid length. 
+ 
+    Parameters 
+    ---------- 
+    content : list of np.ndarrays 
+    columns : Index or None 
+ 
+    Returns 
+    ------- 
+    Index 
+        If columns is None, assign positional column index value as columns. 
+ 
+    Raises 
+    ------ 
+    1. AssertionError when content is not composed of list of lists, and if 
+        length of columns is not equal to length of content. 
+    2. ValueError when content is list of lists, but length of each sub-list 
+        is not equal 
+    3. ValueError when content is list of lists, but length of sub-list is 
+        not equal to length of content 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">columns </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">columns </span><span class="s3">= </span><span class="s1">default_index</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">content</span><span class="s3">))</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s4"># Add mask for data which is composed of list of lists</span>
+        <span class="s1">is_mi_list </span><span class="s3">= </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">, </span><span class="s1">list</span><span class="s3">) </span><span class="s2">and </span><span class="s1">all</span><span class="s3">(</span>
+            <span class="s1">isinstance</span><span class="s3">(</span><span class="s1">col</span><span class="s3">, </span><span class="s1">list</span><span class="s3">) </span><span class="s2">for </span><span class="s1">col </span><span class="s2">in </span><span class="s1">columns</span>
+        <span class="s3">)</span>
+
+        <span class="s2">if not </span><span class="s1">is_mi_list </span><span class="s2">and </span><span class="s1">len</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">) != </span><span class="s1">len</span><span class="s3">(</span><span class="s1">content</span><span class="s3">):  </span><span class="s4"># pragma: no cover</span>
+            <span class="s4"># caller's responsibility to check for this...</span>
+            <span class="s2">raise </span><span class="s1">AssertionError</span><span class="s3">(</span>
+                <span class="s6">f&quot;</span><span class="s2">{</span><span class="s1">len</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">)</span><span class="s2">} </span><span class="s6">columns passed, passed data had </span><span class="s2">{</span><span class="s1">len</span><span class="s3">(</span><span class="s1">content</span><span class="s3">)</span><span class="s2">} </span><span class="s6">columns&quot;</span>
+            <span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">is_mi_list</span><span class="s3">:</span>
+            <span class="s4"># check if nested list column, length of each sub-list should be equal</span>
+            <span class="s2">if </span><span class="s1">len</span><span class="s3">({</span><span class="s1">len</span><span class="s3">(</span><span class="s1">col</span><span class="s3">) </span><span class="s2">for </span><span class="s1">col </span><span class="s2">in </span><span class="s1">columns</span><span class="s3">}) &gt; </span><span class="s5">1</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                    <span class="s6">&quot;Length of columns passed for MultiIndex columns is different&quot;</span>
+                <span class="s3">)</span>
+
+            <span class="s4"># if columns is not empty and length of sublist is not equal to content</span>
+            <span class="s2">if </span><span class="s1">columns </span><span class="s2">and </span><span class="s1">len</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">[</span><span class="s5">0</span><span class="s3">]) != </span><span class="s1">len</span><span class="s3">(</span><span class="s1">content</span><span class="s3">):</span>
+                <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                    <span class="s6">f&quot;</span><span class="s2">{</span><span class="s1">len</span><span class="s3">(</span><span class="s1">columns</span><span class="s3">[</span><span class="s5">0</span><span class="s3">])</span><span class="s2">} </span><span class="s6">columns passed, passed data had &quot;</span>
+                    <span class="s6">f&quot;</span><span class="s2">{</span><span class="s1">len</span><span class="s3">(</span><span class="s1">content</span><span class="s3">)</span><span class="s2">} </span><span class="s6">columns&quot;</span>
+                <span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">columns</span>
+
+
+<span class="s2">def </span><span class="s1">convert_object_array</span><span class="s3">(</span>
+    <span class="s1">content</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">npt</span><span class="s3">.</span><span class="s1">NDArray</span><span class="s3">[</span><span class="s1">np</span><span class="s3">.</span><span class="s1">object_</span><span class="s3">]],</span>
+    <span class="s1">dtype</span><span class="s3">: </span><span class="s1">DtypeObj </span><span class="s3">| </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">dtype_backend</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s6">&quot;numpy&quot;</span><span class="s3">,</span>
+    <span class="s1">coerce_float</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; list</span><span class="s3">[</span><span class="s1">ArrayLike</span><span class="s3">]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Internal function to convert object array. 
+ 
+    Parameters 
+    ---------- 
+    content: List[np.ndarray] 
+    dtype: np.dtype or ExtensionDtype 
+    dtype_backend: Controls if nullable/pyarrow dtypes are returned. 
+    coerce_float: Cast floats that are integers to int. 
+ 
+    Returns 
+    ------- 
+    List[ArrayLike] 
+    &quot;&quot;&quot;</span>
+    <span class="s4"># provide soft conversion of object dtypes</span>
+
+    <span class="s2">def </span><span class="s1">convert</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">dtype </span><span class="s3">!= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s6">&quot;O&quot;</span><span class="s3">):</span>
+            <span class="s4"># e.g. if dtype is UInt32 then we want to cast Nones to NA instead of</span>
+            <span class="s4">#  NaN in maybe_convert_objects.</span>
+            <span class="s1">to_nullable </span><span class="s3">= </span><span class="s1">dtype_backend </span><span class="s3">!= </span><span class="s6">&quot;numpy&quot; </span><span class="s2">or </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">BaseMaskedDtype</span><span class="s3">)</span>
+            <span class="s1">arr </span><span class="s3">= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">maybe_convert_objects</span><span class="s3">(</span>
+                <span class="s1">arr</span><span class="s3">,</span>
+                <span class="s1">try_float</span><span class="s3">=</span><span class="s1">coerce_float</span><span class="s3">,</span>
+                <span class="s1">convert_to_nullable_dtype</span><span class="s3">=</span><span class="s1">to_nullable</span><span class="s3">,</span>
+            <span class="s3">)</span>
+            <span class="s4"># Notes on cases that get here 2023-02-15</span>
+            <span class="s4"># 1) we DO get here when arr is all Timestamps and dtype=None</span>
+            <span class="s4"># 2) disabling this doesn't break the world, so this must be</span>
+            <span class="s4">#    getting caught at a higher level</span>
+            <span class="s4"># 3) passing convert_non_numeric to maybe_convert_objects get this right</span>
+            <span class="s4"># 4) convert_non_numeric?</span>
+
+            <span class="s2">if </span><span class="s1">dtype </span><span class="s2">is None</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s6">&quot;O&quot;</span><span class="s3">):</span>
+                    <span class="s4"># i.e. maybe_convert_objects didn't convert</span>
+                    <span class="s1">convert_to_nullable_dtype </span><span class="s3">= </span><span class="s1">dtype_backend </span><span class="s3">!= </span><span class="s6">&quot;numpy&quot;</span>
+                    <span class="s1">arr </span><span class="s3">= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">maybe_convert_objects</span><span class="s3">(</span>
+                        <span class="s1">arr</span><span class="s3">,</span>
+                        <span class="s4"># Here we do not convert numeric dtypes, as if we wanted that,</span>
+                        <span class="s4">#  numpy would have done it for us.</span>
+                        <span class="s1">convert_numeric</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+                        <span class="s1">convert_non_numeric</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+                        <span class="s1">convert_to_nullable_dtype</span><span class="s3">=</span><span class="s1">convert_to_nullable_dtype</span><span class="s3">,</span>
+                        <span class="s1">dtype_if_all_nat</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s6">&quot;M8[s]&quot;</span><span class="s3">),</span>
+                    <span class="s3">)</span>
+                    <span class="s2">if </span><span class="s1">convert_to_nullable_dtype </span><span class="s2">and </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s6">&quot;O&quot;</span><span class="s3">):</span>
+                        <span class="s1">new_dtype </span><span class="s3">= </span><span class="s1">StringDtype</span><span class="s3">()</span>
+                        <span class="s1">arr_cls </span><span class="s3">= </span><span class="s1">new_dtype</span><span class="s3">.</span><span class="s1">construct_array_type</span><span class="s3">()</span>
+                        <span class="s1">arr </span><span class="s3">= </span><span class="s1">arr_cls</span><span class="s3">.</span><span class="s1">_from_sequence</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">new_dtype</span><span class="s3">)</span>
+                <span class="s2">elif </span><span class="s1">dtype_backend </span><span class="s3">!= </span><span class="s6">&quot;numpy&quot; </span><span class="s2">and </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">ndarray</span><span class="s3">):</span>
+                    <span class="s2">if </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s2">in </span><span class="s6">&quot;iufb&quot;</span><span class="s3">:</span>
+                        <span class="s1">arr </span><span class="s3">= </span><span class="s1">pd_array</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+
+            <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">ExtensionDtype</span><span class="s3">):</span>
+                <span class="s4"># TODO: test(s) that get here</span>
+                <span class="s4"># TODO: try to de-duplicate this convert function with</span>
+                <span class="s4">#  core.construction functions</span>
+                <span class="s1">cls </span><span class="s3">= </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">construct_array_type</span><span class="s3">()</span>
+                <span class="s1">arr </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">_from_sequence</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">copy</span><span class="s3">=</span><span class="s2">False</span><span class="s3">)</span>
+            <span class="s2">elif </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s2">in </span><span class="s6">&quot;mM&quot;</span><span class="s3">:</span>
+                <span class="s4"># This restriction is harmless bc these are the only cases</span>
+                <span class="s4">#  where maybe_cast_to_datetime is not a no-op.</span>
+                <span class="s4"># Here we know:</span>
+                <span class="s4">#  1) dtype.kind in &quot;mM&quot; and</span>
+                <span class="s4">#  2) arr is either object or numeric dtype</span>
+                <span class="s1">arr </span><span class="s3">= </span><span class="s1">maybe_cast_to_datetime</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">arr</span>
+
+    <span class="s1">arrays </span><span class="s3">= [</span><span class="s1">convert</span><span class="s3">(</span><span class="s1">arr</span><span class="s3">) </span><span class="s2">for </span><span class="s1">arr </span><span class="s2">in </span><span class="s1">content</span><span class="s3">]</span>
+
+    <span class="s2">return </span><span class="s1">arrays</span>
+</pre>
+</body>
+</html>

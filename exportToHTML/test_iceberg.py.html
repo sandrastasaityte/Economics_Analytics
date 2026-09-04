@@ -1,0 +1,245 @@
+<html>
+<head>
+<title>test_iceberg.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_iceberg.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Tests for the Apache Iceberg format. 
+ 
+Tests in this file use a simple Iceberg catalog based on SQLite, with the same 
+data used for Parquet tests (``pandas/tests/io/data/parquet/simple.parquet``). 
+&quot;&quot;&quot;</span>
+
+<span class="s2">import </span><span class="s1">collections</span>
+<span class="s2">import </span><span class="s1">importlib</span>
+<span class="s2">import </span><span class="s1">pathlib</span>
+
+<span class="s2">import </span><span class="s1">pytest</span>
+
+<span class="s2">import </span><span class="s1">pandas </span><span class="s2">as </span><span class="s1">pd</span>
+<span class="s2">import </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_testing </span><span class="s2">as </span><span class="s1">tm</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">iceberg </span><span class="s2">import </span><span class="s1">read_iceberg</span>
+
+<span class="s1">pytestmark </span><span class="s3">= </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">single_cpu</span>
+
+<span class="s1">pyiceberg </span><span class="s3">= </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">importorskip</span><span class="s3">(</span><span class="s4">&quot;pyiceberg&quot;</span><span class="s3">)</span>
+<span class="s1">pyiceberg_catalog </span><span class="s3">= </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">importorskip</span><span class="s3">(</span><span class="s4">&quot;pyiceberg.catalog&quot;</span><span class="s3">)</span>
+<span class="s1">pq </span><span class="s3">= </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">importorskip</span><span class="s3">(</span><span class="s4">&quot;pyarrow.parquet&quot;</span><span class="s3">)</span>
+
+<span class="s1">Catalog </span><span class="s3">= </span><span class="s1">collections</span><span class="s3">.</span><span class="s1">namedtuple</span><span class="s3">(</span><span class="s4">&quot;Catalog&quot;</span><span class="s3">, [</span><span class="s4">&quot;name&quot;</span><span class="s3">, </span><span class="s4">&quot;uri&quot;</span><span class="s3">, </span><span class="s4">&quot;warehouse&quot;</span><span class="s3">])</span>
+
+
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">fixture</span>
+<span class="s2">def </span><span class="s1">catalog</span><span class="s3">(</span><span class="s1">request</span><span class="s3">, </span><span class="s1">tmp_path</span><span class="s3">):</span>
+    <span class="s5"># the catalog stores the full path of data files, so the catalog needs to be</span>
+    <span class="s5"># created dynamically, and not saved in pandas/tests/io/data as other formats</span>
+    <span class="s1">uri </span><span class="s3">= </span><span class="s4">f&quot;sqlite:///</span><span class="s2">{</span><span class="s1">tmp_path</span><span class="s2">}</span><span class="s4">/catalog.sqlite&quot;</span>
+    <span class="s1">warehouse </span><span class="s3">= </span><span class="s4">f&quot;file://</span><span class="s2">{</span><span class="s1">tmp_path</span><span class="s2">}</span><span class="s4">&quot;</span>
+    <span class="s1">catalog_name </span><span class="s3">= </span><span class="s1">request</span><span class="s3">.</span><span class="s1">param </span><span class="s2">if </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">request</span><span class="s3">, </span><span class="s4">&quot;param&quot;</span><span class="s3">) </span><span class="s2">else None</span>
+    <span class="s1">catalog </span><span class="s3">= </span><span class="s1">pyiceberg_catalog</span><span class="s3">.</span><span class="s1">load_catalog</span><span class="s3">(</span>
+        <span class="s1">catalog_name </span><span class="s2">or </span><span class="s4">&quot;default&quot;</span><span class="s3">,</span>
+        <span class="s1">type</span><span class="s3">=</span><span class="s4">&quot;sql&quot;</span><span class="s3">,</span>
+        <span class="s1">uri</span><span class="s3">=</span><span class="s1">uri</span><span class="s3">,</span>
+        <span class="s1">warehouse</span><span class="s3">=</span><span class="s1">warehouse</span><span class="s3">,</span>
+    <span class="s3">)</span>
+    <span class="s1">catalog</span><span class="s3">.</span><span class="s1">create_namespace</span><span class="s3">(</span><span class="s4">&quot;ns&quot;</span><span class="s3">)</span>
+
+    <span class="s1">df </span><span class="s3">= </span><span class="s1">pq</span><span class="s3">.</span><span class="s1">read_table</span><span class="s3">(</span>
+        <span class="s1">pathlib</span><span class="s3">.</span><span class="s1">Path</span><span class="s3">(</span><span class="s1">__file__</span><span class="s3">).</span><span class="s1">parent </span><span class="s3">/ </span><span class="s4">&quot;data&quot; </span><span class="s3">/ </span><span class="s4">&quot;parquet&quot; </span><span class="s3">/ </span><span class="s4">&quot;simple.parquet&quot;</span>
+    <span class="s3">)</span>
+    <span class="s1">table </span><span class="s3">= </span><span class="s1">catalog</span><span class="s3">.</span><span class="s1">create_table</span><span class="s3">(</span><span class="s4">&quot;ns.my_table&quot;</span><span class="s3">, </span><span class="s1">schema</span><span class="s3">=</span><span class="s1">df</span><span class="s3">.</span><span class="s1">schema</span><span class="s3">)</span>
+    <span class="s1">table</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">df</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">catalog_name </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s1">config_path </span><span class="s3">= </span><span class="s1">pathlib</span><span class="s3">.</span><span class="s1">Path</span><span class="s3">.</span><span class="s1">home</span><span class="s3">() / </span><span class="s4">&quot;.pyiceberg.yaml&quot;</span>
+        <span class="s2">with </span><span class="s1">open</span><span class="s3">(</span><span class="s1">config_path</span><span class="s3">, </span><span class="s4">&quot;w&quot;</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">=</span><span class="s4">&quot;utf-8&quot;</span><span class="s3">) </span><span class="s2">as </span><span class="s1">f</span><span class="s3">:</span>
+            <span class="s1">f</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s4">f&quot;&quot;&quot;</span><span class="s2">\ 
+</span><span class="s4">catalog:</span>
+  <span class="s2">{</span><span class="s1">catalog_name</span><span class="s2">}</span><span class="s4">:</span>
+    <span class="s4">type: sql</span>
+    <span class="s4">uri: </span><span class="s2">{</span><span class="s1">uri</span><span class="s2">}</span>
+    <span class="s4">warehouse: </span><span class="s2">{</span><span class="s1">warehouse</span><span class="s2">}</span><span class="s4">&quot;&quot;&quot;</span><span class="s3">)</span>
+
+        <span class="s1">importlib</span><span class="s3">.</span><span class="s1">reload</span><span class="s3">(</span><span class="s1">pyiceberg_catalog</span><span class="s3">)  </span><span class="s5"># needed to reload the config file</span>
+
+    <span class="s2">yield </span><span class="s1">Catalog</span><span class="s3">(</span><span class="s1">name</span><span class="s3">=</span><span class="s1">catalog_name </span><span class="s2">or </span><span class="s4">&quot;default&quot;</span><span class="s3">, </span><span class="s1">uri</span><span class="s3">=</span><span class="s1">uri</span><span class="s3">, </span><span class="s1">warehouse</span><span class="s3">=</span><span class="s1">warehouse</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">catalog_name </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s1">config_path</span><span class="s3">.</span><span class="s1">unlink</span><span class="s3">()</span>
+
+
+<span class="s2">class </span><span class="s1">TestIceberg</span><span class="s3">:</span>
+    <span class="s2">def </span><span class="s1">test_read</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">catalog</span><span class="s3">):</span>
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">DataFrame</span><span class="s3">(</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;A&quot;</span><span class="s3">: [</span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">, </span><span class="s6">3</span><span class="s3">],</span>
+                <span class="s4">&quot;B&quot;</span><span class="s3">: [</span><span class="s4">&quot;foo&quot;</span><span class="s3">, </span><span class="s4">&quot;foo&quot;</span><span class="s3">, </span><span class="s4">&quot;foo&quot;</span><span class="s3">],</span>
+            <span class="s3">}</span>
+        <span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">read_iceberg</span><span class="s3">(</span>
+            <span class="s4">&quot;ns.my_table&quot;</span><span class="s3">,</span>
+            <span class="s1">catalog_properties</span><span class="s3">={</span><span class="s4">&quot;uri&quot;</span><span class="s3">: </span><span class="s1">catalog</span><span class="s3">.</span><span class="s1">uri</span><span class="s3">},</span>
+        <span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">expected</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;catalog&quot;</span><span class="s3">, [</span><span class="s4">&quot;default&quot;</span><span class="s3">, </span><span class="s4">&quot;pandas_tests&quot;</span><span class="s3">], </span><span class="s1">indirect</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_read_by_catalog_name</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">catalog</span><span class="s3">):</span>
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">DataFrame</span><span class="s3">(</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;A&quot;</span><span class="s3">: [</span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">, </span><span class="s6">3</span><span class="s3">],</span>
+                <span class="s4">&quot;B&quot;</span><span class="s3">: [</span><span class="s4">&quot;foo&quot;</span><span class="s3">, </span><span class="s4">&quot;foo&quot;</span><span class="s3">, </span><span class="s4">&quot;foo&quot;</span><span class="s3">],</span>
+            <span class="s3">}</span>
+        <span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">read_iceberg</span><span class="s3">(</span>
+            <span class="s4">&quot;ns.my_table&quot;</span><span class="s3">,</span>
+            <span class="s1">catalog_name</span><span class="s3">=</span><span class="s1">catalog</span><span class="s3">.</span><span class="s1">name</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">expected</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_read_with_row_filter</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">catalog</span><span class="s3">):</span>
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">DataFrame</span><span class="s3">(</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;A&quot;</span><span class="s3">: [</span><span class="s6">2</span><span class="s3">, </span><span class="s6">3</span><span class="s3">],</span>
+                <span class="s4">&quot;B&quot;</span><span class="s3">: [</span><span class="s4">&quot;foo&quot;</span><span class="s3">, </span><span class="s4">&quot;foo&quot;</span><span class="s3">],</span>
+            <span class="s3">}</span>
+        <span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">read_iceberg</span><span class="s3">(</span>
+            <span class="s4">&quot;ns.my_table&quot;</span><span class="s3">,</span>
+            <span class="s1">catalog_properties</span><span class="s3">={</span><span class="s4">&quot;uri&quot;</span><span class="s3">: </span><span class="s1">catalog</span><span class="s3">.</span><span class="s1">uri</span><span class="s3">},</span>
+            <span class="s1">row_filter</span><span class="s3">=</span><span class="s4">&quot;A &gt; 1&quot;</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">expected</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_read_with_case_sensitive</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">catalog</span><span class="s3">):</span>
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">DataFrame</span><span class="s3">(</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;A&quot;</span><span class="s3">: [</span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">, </span><span class="s6">3</span><span class="s3">],</span>
+            <span class="s3">}</span>
+        <span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">read_iceberg</span><span class="s3">(</span>
+            <span class="s4">&quot;ns.my_table&quot;</span><span class="s3">,</span>
+            <span class="s1">catalog_properties</span><span class="s3">={</span><span class="s4">&quot;uri&quot;</span><span class="s3">: </span><span class="s1">catalog</span><span class="s3">.</span><span class="s1">uri</span><span class="s3">},</span>
+            <span class="s1">columns</span><span class="s3">=[</span><span class="s4">&quot;a&quot;</span><span class="s3">],</span>
+            <span class="s1">case_sensitive</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">expected</span><span class="s3">)</span>
+
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">, </span><span class="s1">match</span><span class="s3">=</span><span class="s4">&quot;^Could not find column&quot;</span><span class="s3">):</span>
+            <span class="s1">read_iceberg</span><span class="s3">(</span>
+                <span class="s4">&quot;ns.my_table&quot;</span><span class="s3">,</span>
+                <span class="s1">catalog_properties</span><span class="s3">={</span><span class="s4">&quot;uri&quot;</span><span class="s3">: </span><span class="s1">catalog</span><span class="s3">.</span><span class="s1">uri</span><span class="s3">},</span>
+                <span class="s1">columns</span><span class="s3">=[</span><span class="s4">&quot;a&quot;</span><span class="s3">],</span>
+                <span class="s1">case_sensitive</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+            <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_read_with_limit</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">catalog</span><span class="s3">):</span>
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">DataFrame</span><span class="s3">(</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;A&quot;</span><span class="s3">: [</span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">],</span>
+                <span class="s4">&quot;B&quot;</span><span class="s3">: [</span><span class="s4">&quot;foo&quot;</span><span class="s3">, </span><span class="s4">&quot;foo&quot;</span><span class="s3">],</span>
+            <span class="s3">}</span>
+        <span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">read_iceberg</span><span class="s3">(</span>
+            <span class="s4">&quot;ns.my_table&quot;</span><span class="s3">,</span>
+            <span class="s1">catalog_properties</span><span class="s3">={</span><span class="s4">&quot;uri&quot;</span><span class="s3">: </span><span class="s1">catalog</span><span class="s3">.</span><span class="s1">uri</span><span class="s3">},</span>
+            <span class="s1">limit</span><span class="s3">=</span><span class="s6">2</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">expected</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_write</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">catalog</span><span class="s3">):</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">DataFrame</span><span class="s3">(</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;A&quot;</span><span class="s3">: [</span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">, </span><span class="s6">3</span><span class="s3">],</span>
+                <span class="s4">&quot;B&quot;</span><span class="s3">: [</span><span class="s4">&quot;foo&quot;</span><span class="s3">, </span><span class="s4">&quot;foo&quot;</span><span class="s3">, </span><span class="s4">&quot;foo&quot;</span><span class="s3">],</span>
+            <span class="s3">}</span>
+        <span class="s3">)</span>
+        <span class="s1">df</span><span class="s3">.</span><span class="s1">to_iceberg</span><span class="s3">(</span>
+            <span class="s4">&quot;ns.new_table&quot;</span><span class="s3">,</span>
+            <span class="s1">catalog_properties</span><span class="s3">={</span><span class="s4">&quot;uri&quot;</span><span class="s3">: </span><span class="s1">catalog</span><span class="s3">.</span><span class="s1">uri</span><span class="s3">},</span>
+            <span class="s1">location</span><span class="s3">=</span><span class="s1">catalog</span><span class="s3">.</span><span class="s1">warehouse</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">read_iceberg</span><span class="s3">(</span>
+            <span class="s4">&quot;ns.new_table&quot;</span><span class="s3">,</span>
+            <span class="s1">catalog_properties</span><span class="s3">={</span><span class="s4">&quot;uri&quot;</span><span class="s3">: </span><span class="s1">catalog</span><span class="s3">.</span><span class="s1">uri</span><span class="s3">},</span>
+        <span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">df</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s4">&quot;catalog&quot;</span><span class="s3">, [</span><span class="s4">&quot;default&quot;</span><span class="s3">, </span><span class="s4">&quot;pandas_tests&quot;</span><span class="s3">], </span><span class="s1">indirect</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_write_by_catalog_name</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">catalog</span><span class="s3">):</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">DataFrame</span><span class="s3">(</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;A&quot;</span><span class="s3">: [</span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">, </span><span class="s6">3</span><span class="s3">],</span>
+                <span class="s4">&quot;B&quot;</span><span class="s3">: [</span><span class="s4">&quot;foo&quot;</span><span class="s3">, </span><span class="s4">&quot;foo&quot;</span><span class="s3">, </span><span class="s4">&quot;foo&quot;</span><span class="s3">],</span>
+            <span class="s3">}</span>
+        <span class="s3">)</span>
+        <span class="s1">df</span><span class="s3">.</span><span class="s1">to_iceberg</span><span class="s3">(</span>
+            <span class="s4">&quot;ns.new_table&quot;</span><span class="s3">,</span>
+            <span class="s1">catalog_name</span><span class="s3">=</span><span class="s1">catalog</span><span class="s3">.</span><span class="s1">name</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">read_iceberg</span><span class="s3">(</span>
+            <span class="s4">&quot;ns.new_table&quot;</span><span class="s3">,</span>
+            <span class="s1">catalog_name</span><span class="s3">=</span><span class="s1">catalog</span><span class="s3">.</span><span class="s1">name</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">df</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_write_existing_table_with_append_true</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">catalog</span><span class="s3">):</span>
+        <span class="s1">original </span><span class="s3">= </span><span class="s1">read_iceberg</span><span class="s3">(</span>
+            <span class="s4">&quot;ns.my_table&quot;</span><span class="s3">,</span>
+            <span class="s1">catalog_properties</span><span class="s3">={</span><span class="s4">&quot;uri&quot;</span><span class="s3">: </span><span class="s1">catalog</span><span class="s3">.</span><span class="s1">uri</span><span class="s3">},</span>
+        <span class="s3">)</span>
+        <span class="s1">new </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">DataFrame</span><span class="s3">(</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;A&quot;</span><span class="s3">: [</span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">, </span><span class="s6">3</span><span class="s3">],</span>
+                <span class="s4">&quot;B&quot;</span><span class="s3">: [</span><span class="s4">&quot;foo&quot;</span><span class="s3">, </span><span class="s4">&quot;foo&quot;</span><span class="s3">, </span><span class="s4">&quot;foo&quot;</span><span class="s3">],</span>
+            <span class="s3">}</span>
+        <span class="s3">)</span>
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">concat</span><span class="s3">([</span><span class="s1">original</span><span class="s3">, </span><span class="s1">new</span><span class="s3">], </span><span class="s1">ignore_index</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+        <span class="s1">new</span><span class="s3">.</span><span class="s1">to_iceberg</span><span class="s3">(</span>
+            <span class="s4">&quot;ns.my_table&quot;</span><span class="s3">,</span>
+            <span class="s1">catalog_properties</span><span class="s3">={</span><span class="s4">&quot;uri&quot;</span><span class="s3">: </span><span class="s1">catalog</span><span class="s3">.</span><span class="s1">uri</span><span class="s3">},</span>
+            <span class="s1">location</span><span class="s3">=</span><span class="s1">catalog</span><span class="s3">.</span><span class="s1">warehouse</span><span class="s3">,</span>
+            <span class="s1">append</span><span class="s3">=</span><span class="s2">True</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">read_iceberg</span><span class="s3">(</span>
+            <span class="s4">&quot;ns.my_table&quot;</span><span class="s3">,</span>
+            <span class="s1">catalog_properties</span><span class="s3">={</span><span class="s4">&quot;uri&quot;</span><span class="s3">: </span><span class="s1">catalog</span><span class="s3">.</span><span class="s1">uri</span><span class="s3">},</span>
+        <span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">expected</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_write_existing_table_with_append_false</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">catalog</span><span class="s3">):</span>
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">DataFrame</span><span class="s3">(</span>
+            <span class="s3">{</span>
+                <span class="s4">&quot;A&quot;</span><span class="s3">: [</span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">, </span><span class="s6">3</span><span class="s3">],</span>
+                <span class="s4">&quot;B&quot;</span><span class="s3">: [</span><span class="s4">&quot;foo&quot;</span><span class="s3">, </span><span class="s4">&quot;foo&quot;</span><span class="s3">, </span><span class="s4">&quot;foo&quot;</span><span class="s3">],</span>
+            <span class="s3">}</span>
+        <span class="s3">)</span>
+        <span class="s1">df</span><span class="s3">.</span><span class="s1">to_iceberg</span><span class="s3">(</span>
+            <span class="s4">&quot;ns.my_table&quot;</span><span class="s3">,</span>
+            <span class="s1">catalog_properties</span><span class="s3">={</span><span class="s4">&quot;uri&quot;</span><span class="s3">: </span><span class="s1">catalog</span><span class="s3">.</span><span class="s1">uri</span><span class="s3">},</span>
+            <span class="s1">location</span><span class="s3">=</span><span class="s1">catalog</span><span class="s3">.</span><span class="s1">warehouse</span><span class="s3">,</span>
+            <span class="s1">append</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">read_iceberg</span><span class="s3">(</span>
+            <span class="s4">&quot;ns.my_table&quot;</span><span class="s3">,</span>
+            <span class="s1">catalog_properties</span><span class="s3">={</span><span class="s4">&quot;uri&quot;</span><span class="s3">: </span><span class="s1">catalog</span><span class="s3">.</span><span class="s1">uri</span><span class="s3">},</span>
+        <span class="s3">)</span>
+        <span class="s1">tm</span><span class="s3">.</span><span class="s1">assert_frame_equal</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">df</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

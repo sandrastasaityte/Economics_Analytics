@@ -1,0 +1,266 @@
+<html>
+<head>
+<title>orc.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+orc.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;orc compat&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">import </span><span class="s1">io</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s3">,</span>
+    <span class="s1">Any</span><span class="s3">,</span>
+    <span class="s1">Literal</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs </span><span class="s2">import </span><span class="s1">lib</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">compat</span><span class="s3">.</span><span class="s1">_optional </span><span class="s2">import </span><span class="s1">import_optional_dependency</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">_decorators </span><span class="s2">import </span><span class="s1">set_module</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">_validators </span><span class="s2">import </span><span class="s1">check_dtype_backend</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">indexes</span><span class="s3">.</span><span class="s1">api </span><span class="s2">import </span><span class="s1">default_index</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">_util </span><span class="s2">import </span><span class="s1">arrow_table_to_pandas</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">common </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">get_handle</span><span class="s3">,</span>
+    <span class="s1">is_fsspec_url</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">import </span><span class="s1">fsspec</span>
+    <span class="s2">import </span><span class="s1">pyarrow</span><span class="s3">.</span><span class="s1">fs</span>
+
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_typing </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">DtypeBackend</span><span class="s3">,</span>
+        <span class="s1">FilePath</span><span class="s3">,</span>
+        <span class="s1">ReadBuffer</span><span class="s3">,</span>
+        <span class="s1">WriteBuffer</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">frame </span><span class="s2">import </span><span class="s1">DataFrame</span>
+
+
+<span class="s3">@</span><span class="s1">set_module</span><span class="s3">(</span><span class="s4">&quot;pandas&quot;</span><span class="s3">)</span>
+<span class="s2">def </span><span class="s1">read_orc</span><span class="s3">(</span>
+    <span class="s1">path</span><span class="s3">: </span><span class="s1">FilePath </span><span class="s3">| </span><span class="s1">ReadBuffer</span><span class="s3">[</span><span class="s1">bytes</span><span class="s3">],</span>
+    <span class="s1">columns</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">dtype_backend</span><span class="s3">: </span><span class="s1">DtypeBackend </span><span class="s3">| </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">NoDefault </span><span class="s3">= </span><span class="s1">lib</span><span class="s3">.</span><span class="s1">no_default</span><span class="s3">,</span>
+    <span class="s1">filesystem</span><span class="s3">: </span><span class="s1">pyarrow</span><span class="s3">.</span><span class="s1">fs</span><span class="s3">.</span><span class="s1">FileSystem </span><span class="s3">| </span><span class="s1">fsspec</span><span class="s3">.</span><span class="s1">spec</span><span class="s3">.</span><span class="s1">AbstractFileSystem </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">**</span><span class="s1">kwargs</span><span class="s3">: </span><span class="s1">Any</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; DataFrame</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Load an ORC object from the file path, returning a DataFrame. 
+ 
+    This method reads an ORC (Optimized Row Columnar) file into a pandas 
+    DataFrame using the `pyarrow.orc` library. ORC is a columnar storage format 
+    that provides efficient compression and fast retrieval for analytical workloads. 
+    It allows reading specific columns, handling different filesystem 
+    types (such as local storage, cloud storage via fsspec, or pyarrow filesystem), 
+    and supports different data type backends, including `numpy_nullable` and `pyarrow`. 
+ 
+    Parameters 
+    ---------- 
+    path : str, path object, or file-like object 
+        String, path object (implementing ``os.PathLike[str]``), or file-like 
+        object implementing a binary ``read()`` function. The string could be a URL. 
+        Valid URL schemes include http, ftp, s3, and file. For file URLs, a host is 
+        expected. A local file could be: 
+        ``file://localhost/path/to/table.orc``. 
+    columns : list, default None 
+        If not None, only these columns will be read from the file. 
+        Output always follows the ordering of the file and not the columns list. 
+        This mirrors the original behaviour of 
+        :external+pyarrow:py:meth:`pyarrow.orc.ORCFile.read`. 
+    dtype_backend : {'numpy_nullable', 'pyarrow'} 
+        Back-end data type applied to the resultant :class:`DataFrame` 
+        (still experimental). If not specified, the default behavior 
+        is to not use nullable data types. If specified, the behavior 
+        is as follows: 
+ 
+        * ``&quot;numpy_nullable&quot;``: returns nullable-dtype-backed :class:`DataFrame` 
+        * ``&quot;pyarrow&quot;``: returns pyarrow-backed nullable 
+          :class:`ArrowDtype` :class:`DataFrame` 
+ 
+        .. versionadded:: 2.0 
+ 
+    filesystem : fsspec or pyarrow filesystem, default None 
+        Filesystem object to use when reading the orc file. 
+ 
+        .. versionadded:: 2.1.0 
+ 
+    **kwargs 
+        Any additional kwargs are passed to pyarrow. 
+ 
+    Returns 
+    ------- 
+    DataFrame 
+        DataFrame based on the ORC file. 
+ 
+    See Also 
+    -------- 
+    read_csv : Read a comma-separated values (csv) file into a pandas DataFrame. 
+    read_excel : Read an Excel file into a pandas DataFrame. 
+    read_spss : Read an SPSS file into a pandas DataFrame. 
+    read_sas : Load a SAS file into a pandas DataFrame. 
+    read_feather : Load a feather-format object into a pandas DataFrame. 
+ 
+    Notes 
+    ----- 
+    Before using this function you should read the :ref:`user guide about ORC &lt;io.orc&gt;` 
+    and :ref:`install optional dependencies &lt;install.warn_orc&gt;`. 
+ 
+    If ``path`` is a URI scheme pointing to a local or remote file (e.g. &quot;s3://&quot;), 
+    a ``pyarrow.fs`` filesystem will be attempted to read the file. You can also pass a 
+    pyarrow or fsspec filesystem object into the filesystem keyword to override this 
+    behavior. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; result = pd.read_orc(&quot;example_pa.orc&quot;)  # doctest: +SKIP 
+    &quot;&quot;&quot;</span>
+    <span class="s5"># we require a newer version of pyarrow than we support for orc</span>
+
+    <span class="s1">orc </span><span class="s3">= </span><span class="s1">import_optional_dependency</span><span class="s3">(</span><span class="s4">&quot;pyarrow.orc&quot;</span><span class="s3">)</span>
+
+    <span class="s1">check_dtype_backend</span><span class="s3">(</span><span class="s1">dtype_backend</span><span class="s3">)</span>
+
+    <span class="s2">with </span><span class="s1">get_handle</span><span class="s3">(</span><span class="s1">path</span><span class="s3">, </span><span class="s4">&quot;rb&quot;</span><span class="s3">, </span><span class="s1">is_text</span><span class="s3">=</span><span class="s2">False</span><span class="s3">) </span><span class="s2">as </span><span class="s1">handles</span><span class="s3">:</span>
+        <span class="s1">source </span><span class="s3">= </span><span class="s1">handles</span><span class="s3">.</span><span class="s1">handle</span>
+        <span class="s2">if </span><span class="s1">is_fsspec_url</span><span class="s3">(</span><span class="s1">path</span><span class="s3">) </span><span class="s2">and </span><span class="s1">filesystem </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">pa </span><span class="s3">= </span><span class="s1">import_optional_dependency</span><span class="s3">(</span><span class="s4">&quot;pyarrow&quot;</span><span class="s3">)</span>
+            <span class="s1">pa_fs </span><span class="s3">= </span><span class="s1">import_optional_dependency</span><span class="s3">(</span><span class="s4">&quot;pyarrow.fs&quot;</span><span class="s3">)</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">filesystem</span><span class="s3">, </span><span class="s1">source </span><span class="s3">= </span><span class="s1">pa_fs</span><span class="s3">.</span><span class="s1">FileSystem</span><span class="s3">.</span><span class="s1">from_uri</span><span class="s3">(</span><span class="s1">path</span><span class="s3">)</span>
+            <span class="s2">except </span><span class="s3">(</span><span class="s1">TypeError</span><span class="s3">, </span><span class="s1">pa</span><span class="s3">.</span><span class="s1">ArrowInvalid</span><span class="s3">):</span>
+                <span class="s2">pass</span>
+
+        <span class="s1">pa_table </span><span class="s3">= </span><span class="s1">orc</span><span class="s3">.</span><span class="s1">read_table</span><span class="s3">(</span>
+            <span class="s1">source</span><span class="s3">=</span><span class="s1">source</span><span class="s3">, </span><span class="s1">columns</span><span class="s3">=</span><span class="s1">columns</span><span class="s3">, </span><span class="s1">filesystem</span><span class="s3">=</span><span class="s1">filesystem</span><span class="s3">, **</span><span class="s1">kwargs</span>
+        <span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">arrow_table_to_pandas</span><span class="s3">(</span><span class="s1">pa_table</span><span class="s3">, </span><span class="s1">dtype_backend</span><span class="s3">=</span><span class="s1">dtype_backend</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">to_orc</span><span class="s3">(</span>
+    <span class="s1">df</span><span class="s3">: </span><span class="s1">DataFrame</span><span class="s3">,</span>
+    <span class="s1">path</span><span class="s3">: </span><span class="s1">FilePath </span><span class="s3">| </span><span class="s1">WriteBuffer</span><span class="s3">[</span><span class="s1">bytes</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">*,</span>
+    <span class="s1">engine</span><span class="s3">: </span><span class="s1">Literal</span><span class="s3">[</span><span class="s4">&quot;pyarrow&quot;</span><span class="s3">] = </span><span class="s4">&quot;pyarrow&quot;</span><span class="s3">,</span>
+    <span class="s1">index</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">engine_kwargs</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; bytes </span><span class="s3">| </span><span class="s2">None</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Write a DataFrame to the ORC format. 
+ 
+    Parameters 
+    ---------- 
+    df : DataFrame 
+        The dataframe to be written to ORC. Raises NotImplementedError 
+        if dtype of one or more columns is category, unsigned integers, 
+        intervals, periods or sparse. 
+    path : str, file-like object or None, default None 
+        If a string, it will be used as Root Directory path 
+        when writing a partitioned dataset. By file-like object, 
+        we refer to objects with a write() method, such as a file handle 
+        (e.g. via builtin open function). If path is None, 
+        a bytes object is returned. 
+    engine : str, default 'pyarrow' 
+        ORC library to use. 
+    index : bool, optional 
+        If ``True``, include the dataframe's index(es) in the file output. If 
+        ``False``, they will not be written to the file. 
+        If ``None``, similar to ``infer`` the dataframe's index(es) 
+        will be saved. However, instead of being saved as values, 
+        the RangeIndex will be stored as a range in the metadata so it 
+        doesn't require much space and is faster. Other indexes will 
+        be included as columns in the file output. 
+    engine_kwargs : dict[str, Any] or None, default None 
+        Additional keyword arguments passed to :func:`pyarrow.orc.write_table`. 
+ 
+    Returns 
+    ------- 
+    bytes if no path argument is provided else None 
+ 
+    Raises 
+    ------ 
+    NotImplementedError 
+        Dtype of one or more columns is category, unsigned integers, interval, 
+        period or sparse. 
+    ValueError 
+        engine is not pyarrow. 
+ 
+    Notes 
+    ----- 
+    * Before using this function you should read the 
+      :ref:`user guide about ORC &lt;io.orc&gt;` and 
+      :ref:`install optional dependencies &lt;install.warn_orc&gt;`. 
+    * This function requires `pyarrow &lt;https://arrow.apache.org/docs/python/&gt;`_ 
+      library. 
+    * For supported dtypes please refer to `supported ORC features in Arrow 
+      &lt;https://arrow.apache.org/docs/cpp/orc.html#data-types&gt;`__. 
+    * Currently timezones in datetime columns are not preserved when a 
+      dataframe is converted into ORC files. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">index </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">index </span><span class="s3">= </span><span class="s1">df</span><span class="s3">.</span><span class="s1">index</span><span class="s3">.</span><span class="s1">names</span><span class="s3">[</span><span class="s6">0</span><span class="s3">] </span><span class="s2">is not None</span>
+    <span class="s2">if </span><span class="s1">engine_kwargs </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s1">engine_kwargs </span><span class="s3">= {}</span>
+
+    <span class="s5"># validate index</span>
+    <span class="s5"># --------------</span>
+
+    <span class="s5"># validate that we have only a default index</span>
+    <span class="s5"># raise on anything else as we don't serialize the index</span>
+
+    <span class="s2">if not </span><span class="s1">df</span><span class="s3">.</span><span class="s1">index</span><span class="s3">.</span><span class="s1">equals</span><span class="s3">(</span><span class="s1">default_index</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">df</span><span class="s3">))):</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+            <span class="s4">&quot;orc does not support serializing a non-default index for the index; &quot;</span>
+            <span class="s4">&quot;you can .reset_index() to make the index into column(s)&quot;</span>
+        <span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">df</span><span class="s3">.</span><span class="s1">index</span><span class="s3">.</span><span class="s1">name </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;orc does not serialize index meta-data on a default index&quot;</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">engine </span><span class="s3">!= </span><span class="s4">&quot;pyarrow&quot;</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;engine must be 'pyarrow'&quot;</span><span class="s3">)</span>
+    <span class="s1">pa </span><span class="s3">= </span><span class="s1">import_optional_dependency</span><span class="s3">(</span><span class="s4">&quot;pyarrow&quot;</span><span class="s3">)</span>
+    <span class="s1">orc </span><span class="s3">= </span><span class="s1">import_optional_dependency</span><span class="s3">(</span><span class="s4">&quot;pyarrow.orc&quot;</span><span class="s3">)</span>
+
+    <span class="s1">was_none </span><span class="s3">= </span><span class="s1">path </span><span class="s2">is None</span>
+    <span class="s2">if </span><span class="s1">was_none</span><span class="s3">:</span>
+        <span class="s1">path </span><span class="s3">= </span><span class="s1">io</span><span class="s3">.</span><span class="s1">BytesIO</span><span class="s3">()</span>
+    <span class="s2">assert </span><span class="s1">path </span><span class="s2">is not None  </span><span class="s5"># For mypy</span>
+    <span class="s2">with </span><span class="s1">get_handle</span><span class="s3">(</span><span class="s1">path</span><span class="s3">, </span><span class="s4">&quot;wb&quot;</span><span class="s3">, </span><span class="s1">is_text</span><span class="s3">=</span><span class="s2">False</span><span class="s3">) </span><span class="s2">as </span><span class="s1">handles</span><span class="s3">:</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">orc</span><span class="s3">.</span><span class="s1">write_table</span><span class="s3">(</span>
+                <span class="s1">pa</span><span class="s3">.</span><span class="s1">Table</span><span class="s3">.</span><span class="s1">from_pandas</span><span class="s3">(</span><span class="s1">df</span><span class="s3">, </span><span class="s1">preserve_index</span><span class="s3">=</span><span class="s1">index</span><span class="s3">),</span>
+                <span class="s1">handles</span><span class="s3">.</span><span class="s1">handle</span><span class="s3">,</span>
+                <span class="s3">**</span><span class="s1">engine_kwargs</span><span class="s3">,</span>
+            <span class="s3">)</span>
+        <span class="s2">except </span><span class="s3">(</span><span class="s1">TypeError</span><span class="s3">, </span><span class="s1">pa</span><span class="s3">.</span><span class="s1">ArrowNotImplementedError</span><span class="s3">) </span><span class="s2">as </span><span class="s1">e</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">NotImplementedError</span><span class="s3">(</span>
+                <span class="s4">&quot;The dtype of one or more columns is not supported yet.&quot;</span>
+            <span class="s3">) </span><span class="s2">from </span><span class="s1">e</span>
+
+    <span class="s2">if </span><span class="s1">was_none</span><span class="s3">:</span>
+        <span class="s2">assert </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">path</span><span class="s3">, </span><span class="s1">io</span><span class="s3">.</span><span class="s1">BytesIO</span><span class="s3">)  </span><span class="s5"># For mypy</span>
+        <span class="s2">return </span><span class="s1">path</span><span class="s3">.</span><span class="s1">getvalue</span><span class="s3">()</span>
+    <span class="s2">return None</span>
+</pre>
+</body>
+</html>

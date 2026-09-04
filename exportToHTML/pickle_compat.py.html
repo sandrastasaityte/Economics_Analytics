@@ -1,0 +1,166 @@
+<html>
+<head>
+<title>pickle_compat.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #7a7e85;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+pickle_compat.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Pickle compatibility to pandas version 1.0 
+&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">import </span><span class="s1">contextlib</span>
+<span class="s2">import </span><span class="s1">io</span>
+<span class="s2">import </span><span class="s1">pickle</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s3">,</span>
+    <span class="s1">Any</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs</span><span class="s3">.</span><span class="s1">arrays </span><span class="s2">import </span><span class="s1">NDArrayBacked</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs</span><span class="s3">.</span><span class="s1">tslibs </span><span class="s2">import </span><span class="s1">BaseOffset</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">arrays </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">DatetimeArray</span><span class="s3">,</span>
+    <span class="s1">PeriodArray</span><span class="s3">,</span>
+    <span class="s1">TimedeltaArray</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">internals </span><span class="s2">import </span><span class="s1">BlockManager</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">collections</span><span class="s3">.</span><span class="s1">abc </span><span class="s2">import </span><span class="s1">Generator</span>
+
+
+<span class="s4"># If classes are moved, provide compat here.</span>
+<span class="s1">_class_locations_map </span><span class="s3">= {</span>
+    <span class="s4"># Re-routing unpickle block logic to go through _unpickle_block instead</span>
+    <span class="s4"># for pandas &lt;= 1.3.5</span>
+    <span class="s3">(</span><span class="s5">&quot;pandas.core.internals.blocks&quot;</span><span class="s3">, </span><span class="s5">&quot;new_block&quot;</span><span class="s3">): (</span>
+        <span class="s5">&quot;pandas._libs.internals&quot;</span><span class="s3">,</span>
+        <span class="s5">&quot;_unpickle_block&quot;</span><span class="s3">,</span>
+    <span class="s3">),</span>
+    <span class="s4"># Avoid Cython's warning &quot;contradiction to Python 'class private name' rules&quot;</span>
+    <span class="s3">(</span><span class="s5">&quot;pandas._libs.tslibs.nattype&quot;</span><span class="s3">, </span><span class="s5">&quot;__nat_unpickle&quot;</span><span class="s3">): (</span>
+        <span class="s5">&quot;pandas._libs.tslibs.nattype&quot;</span><span class="s3">,</span>
+        <span class="s5">&quot;_nat_unpickle&quot;</span><span class="s3">,</span>
+    <span class="s3">),</span>
+    <span class="s4"># 50775, remove Int64Index, UInt64Index &amp; Float64Index from codebase</span>
+    <span class="s3">(</span><span class="s5">&quot;pandas.core.indexes.numeric&quot;</span><span class="s3">, </span><span class="s5">&quot;Int64Index&quot;</span><span class="s3">): (</span>
+        <span class="s5">&quot;pandas.core.indexes.base&quot;</span><span class="s3">,</span>
+        <span class="s5">&quot;Index&quot;</span><span class="s3">,</span>
+    <span class="s3">),</span>
+    <span class="s3">(</span><span class="s5">&quot;pandas.core.indexes.numeric&quot;</span><span class="s3">, </span><span class="s5">&quot;UInt64Index&quot;</span><span class="s3">): (</span>
+        <span class="s5">&quot;pandas.core.indexes.base&quot;</span><span class="s3">,</span>
+        <span class="s5">&quot;Index&quot;</span><span class="s3">,</span>
+    <span class="s3">),</span>
+    <span class="s3">(</span><span class="s5">&quot;pandas.core.indexes.numeric&quot;</span><span class="s3">, </span><span class="s5">&quot;Float64Index&quot;</span><span class="s3">): (</span>
+        <span class="s5">&quot;pandas.core.indexes.base&quot;</span><span class="s3">,</span>
+        <span class="s5">&quot;Index&quot;</span><span class="s3">,</span>
+    <span class="s3">),</span>
+    <span class="s3">(</span><span class="s5">&quot;pandas.core.arrays.sparse.dtype&quot;</span><span class="s3">, </span><span class="s5">&quot;SparseDtype&quot;</span><span class="s3">): (</span>
+        <span class="s5">&quot;pandas.core.dtypes.dtypes&quot;</span><span class="s3">,</span>
+        <span class="s5">&quot;SparseDtype&quot;</span><span class="s3">,</span>
+    <span class="s3">),</span>
+<span class="s3">}</span>
+
+
+<span class="s4"># our Unpickler sub-class to override methods and some dispatcher</span>
+<span class="s4"># functions for compat and uses a non-public class of the pickle module.</span>
+<span class="s2">class </span><span class="s1">Unpickler</span><span class="s3">(</span><span class="s1">pickle</span><span class="s3">.</span><span class="s1">_Unpickler</span><span class="s3">):</span>
+    <span class="s2">def </span><span class="s1">find_class</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">module</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">name</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; Any</span><span class="s3">:</span>
+        <span class="s1">key </span><span class="s3">= (</span><span class="s1">module</span><span class="s3">, </span><span class="s1">name</span><span class="s3">)</span>
+        <span class="s1">module</span><span class="s3">, </span><span class="s1">name </span><span class="s3">= </span><span class="s1">_class_locations_map</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s1">key</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">super</span><span class="s3">().</span><span class="s1">find_class</span><span class="s3">(</span><span class="s1">module</span><span class="s3">, </span><span class="s1">name</span><span class="s3">)</span>
+
+    <span class="s1">dispatch </span><span class="s3">= </span><span class="s1">pickle</span><span class="s3">.</span><span class="s1">_Unpickler</span><span class="s3">.</span><span class="s1">dispatch</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">load_reduce</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">stack </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">stack  </span><span class="s4"># type: ignore[attr-defined]</span>
+        <span class="s1">args </span><span class="s3">= </span><span class="s1">stack</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">()</span>
+        <span class="s1">func </span><span class="s3">= </span><span class="s1">stack</span><span class="s3">[-</span><span class="s6">1</span><span class="s3">]</span>
+
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">stack</span><span class="s3">[-</span><span class="s6">1</span><span class="s3">] = </span><span class="s1">func</span><span class="s3">(*</span><span class="s1">args</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s1">TypeError</span><span class="s3">:</span>
+            <span class="s4"># If we have a deprecated function,</span>
+            <span class="s4"># try to replace and try again.</span>
+            <span class="s2">if </span><span class="s1">args </span><span class="s2">and </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">args</span><span class="s3">[</span><span class="s6">0</span><span class="s3">], </span><span class="s1">type</span><span class="s3">) </span><span class="s2">and </span><span class="s1">issubclass</span><span class="s3">(</span><span class="s1">args</span><span class="s3">[</span><span class="s6">0</span><span class="s3">], </span><span class="s1">BaseOffset</span><span class="s3">):</span>
+                <span class="s4"># TypeError: object.__new__(Day) is not safe, use Day.__new__()</span>
+                <span class="s1">cls </span><span class="s3">= </span><span class="s1">args</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]</span>
+                <span class="s1">stack</span><span class="s3">[-</span><span class="s6">1</span><span class="s3">] = </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">__new__</span><span class="s3">(*</span><span class="s1">args</span><span class="s3">)</span>
+                <span class="s2">return</span>
+            <span class="s2">elif </span><span class="s1">args </span><span class="s2">and </span><span class="s1">issubclass</span><span class="s3">(</span><span class="s1">args</span><span class="s3">[</span><span class="s6">0</span><span class="s3">], </span><span class="s1">PeriodArray</span><span class="s3">):</span>
+                <span class="s1">cls </span><span class="s3">= </span><span class="s1">args</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]</span>
+                <span class="s1">stack</span><span class="s3">[-</span><span class="s6">1</span><span class="s3">] = </span><span class="s1">NDArrayBacked</span><span class="s3">.</span><span class="s1">__new__</span><span class="s3">(*</span><span class="s1">args</span><span class="s3">)</span>
+                <span class="s2">return</span>
+            <span class="s2">raise</span>
+
+    <span class="s1">dispatch</span><span class="s3">[</span><span class="s1">pickle</span><span class="s3">.</span><span class="s1">REDUCE</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]] = </span><span class="s1">load_reduce  </span><span class="s4"># type: ignore[assignment]</span>
+
+    <span class="s2">def </span><span class="s1">load_newobj</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">args </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">stack</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">()  </span><span class="s4"># type: ignore[attr-defined]</span>
+        <span class="s1">cls </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">stack</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">()  </span><span class="s4"># type: ignore[attr-defined]</span>
+
+        <span class="s4"># compat</span>
+        <span class="s2">if </span><span class="s1">issubclass</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">DatetimeArray</span><span class="s3">) </span><span class="s2">and not </span><span class="s1">args</span><span class="s3">:</span>
+            <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;M8[ns]&quot;</span><span class="s3">)</span>
+            <span class="s1">obj </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">__new__</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">arr</span><span class="s3">, </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">issubclass</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">TimedeltaArray</span><span class="s3">) </span><span class="s2">and not </span><span class="s1">args</span><span class="s3">:</span>
+            <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;m8[ns]&quot;</span><span class="s3">)</span>
+            <span class="s1">obj </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">__new__</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">arr</span><span class="s3">, </span><span class="s1">arr</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">cls </span><span class="s2">is </span><span class="s1">BlockManager </span><span class="s2">and not </span><span class="s1">args</span><span class="s3">:</span>
+            <span class="s1">obj </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">__new__</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, (), [], </span><span class="s2">False</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">obj </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">__new__</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">)  </span><span class="s4"># type: ignore[attr-defined]</span>
+
+    <span class="s1">dispatch</span><span class="s3">[</span><span class="s1">pickle</span><span class="s3">.</span><span class="s1">NEWOBJ</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]] = </span><span class="s1">load_newobj  </span><span class="s4"># type: ignore[assignment]</span>
+
+
+<span class="s2">def </span><span class="s1">loads</span><span class="s3">(</span>
+    <span class="s1">bytes_object</span><span class="s3">: </span><span class="s1">bytes</span><span class="s3">,</span>
+    <span class="s3">*,</span>
+    <span class="s1">fix_imports</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">encoding</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s5">&quot;ASCII&quot;</span><span class="s3">,</span>
+    <span class="s1">errors</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s5">&quot;strict&quot;</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; Any</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Analogous to pickle._loads. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">fd </span><span class="s3">= </span><span class="s1">io</span><span class="s3">.</span><span class="s1">BytesIO</span><span class="s3">(</span><span class="s1">bytes_object</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">Unpickler</span><span class="s3">(</span>
+        <span class="s1">fd</span><span class="s3">, </span><span class="s1">fix_imports</span><span class="s3">=</span><span class="s1">fix_imports</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">=</span><span class="s1">encoding</span><span class="s3">, </span><span class="s1">errors</span><span class="s3">=</span><span class="s1">errors</span>
+    <span class="s3">).</span><span class="s1">load</span><span class="s3">()</span>
+
+
+<span class="s3">@</span><span class="s1">contextlib</span><span class="s3">.</span><span class="s1">contextmanager</span>
+<span class="s2">def </span><span class="s1">patch_pickle</span><span class="s3">() </span><span class="s1">-&gt; Generator</span><span class="s3">[</span><span class="s2">None</span><span class="s3">]:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Temporarily patch pickle to use our unpickler. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">orig_loads </span><span class="s3">= </span><span class="s1">pickle</span><span class="s3">.</span><span class="s1">loads</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s1">setattr</span><span class="s3">(</span><span class="s1">pickle</span><span class="s3">, </span><span class="s5">&quot;loads&quot;</span><span class="s3">, </span><span class="s1">loads</span><span class="s3">)</span>
+        <span class="s2">yield</span>
+    <span class="s2">finally</span><span class="s3">:</span>
+        <span class="s1">setattr</span><span class="s3">(</span><span class="s1">pickle</span><span class="s3">, </span><span class="s5">&quot;loads&quot;</span><span class="s3">, </span><span class="s1">orig_loads</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

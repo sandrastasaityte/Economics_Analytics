@@ -1,0 +1,502 @@
+<html>
+<head>
+<title>column.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+.s6 { color: #5f826b; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+column.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s2">,</span>
+    <span class="s1">Any</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_config </span><span class="s0">import </span><span class="s1">using_python_scalars</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_libs</span><span class="s2">.</span><span class="s1">lib </span><span class="s0">import </span><span class="s1">infer_dtype</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_libs</span><span class="s2">.</span><span class="s1">tslibs </span><span class="s0">import </span><span class="s1">iNaT</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">errors </span><span class="s0">import </span><span class="s1">NoBufferPresent</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">util</span><span class="s2">.</span><span class="s1">_decorators </span><span class="s0">import </span><span class="s1">cache_readonly</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">dtypes</span><span class="s2">.</span><span class="s1">dtypes </span><span class="s0">import </span><span class="s1">BaseMaskedDtype</span>
+
+<span class="s0">import </span><span class="s1">pandas </span><span class="s0">as </span><span class="s1">pd</span>
+<span class="s0">from </span><span class="s1">pandas </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">ArrowDtype</span><span class="s2">,</span>
+    <span class="s1">DatetimeTZDtype</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">api</span><span class="s2">.</span><span class="s1">types </span><span class="s0">import </span><span class="s1">is_string_dtype</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">interchange</span><span class="s2">.</span><span class="s1">buffer </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">PandasBuffer</span><span class="s2">,</span>
+    <span class="s1">PandasBufferPyarrow</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">interchange</span><span class="s2">.</span><span class="s1">dataframe_protocol </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">Column</span><span class="s2">,</span>
+    <span class="s1">ColumnBuffers</span><span class="s2">,</span>
+    <span class="s1">ColumnNullType</span><span class="s2">,</span>
+    <span class="s1">DtypeKind</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">interchange</span><span class="s2">.</span><span class="s1">utils </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">ArrowCTypes</span><span class="s2">,</span>
+    <span class="s1">Endianness</span><span class="s2">,</span>
+    <span class="s1">dtype_to_arrow_c_fmt</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s0">if </span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">interchange</span><span class="s2">.</span><span class="s1">dataframe_protocol </span><span class="s0">import </span><span class="s1">Buffer</span>
+
+<span class="s1">_NP_KINDS </span><span class="s2">= {</span>
+    <span class="s3">&quot;i&quot;</span><span class="s2">: </span><span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">INT</span><span class="s2">,</span>
+    <span class="s3">&quot;u&quot;</span><span class="s2">: </span><span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">UINT</span><span class="s2">,</span>
+    <span class="s3">&quot;f&quot;</span><span class="s2">: </span><span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">FLOAT</span><span class="s2">,</span>
+    <span class="s3">&quot;b&quot;</span><span class="s2">: </span><span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">BOOL</span><span class="s2">,</span>
+    <span class="s3">&quot;U&quot;</span><span class="s2">: </span><span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">STRING</span><span class="s2">,</span>
+    <span class="s3">&quot;M&quot;</span><span class="s2">: </span><span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">DATETIME</span><span class="s2">,</span>
+    <span class="s3">&quot;m&quot;</span><span class="s2">: </span><span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">DATETIME</span><span class="s2">,</span>
+<span class="s2">}</span>
+
+<span class="s1">_NULL_DESCRIPTION </span><span class="s2">= {</span>
+    <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">FLOAT</span><span class="s2">: (</span><span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">USE_NAN</span><span class="s2">, </span><span class="s0">None</span><span class="s2">),</span>
+    <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">DATETIME</span><span class="s2">: (</span><span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">USE_SENTINEL</span><span class="s2">, </span><span class="s1">iNaT</span><span class="s2">),</span>
+    <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">INT</span><span class="s2">: (</span><span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">NON_NULLABLE</span><span class="s2">, </span><span class="s0">None</span><span class="s2">),</span>
+    <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">UINT</span><span class="s2">: (</span><span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">NON_NULLABLE</span><span class="s2">, </span><span class="s0">None</span><span class="s2">),</span>
+    <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">BOOL</span><span class="s2">: (</span><span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">NON_NULLABLE</span><span class="s2">, </span><span class="s0">None</span><span class="s2">),</span>
+    <span class="s4"># Null values for categoricals are stored as `-1` sentinel values</span>
+    <span class="s4"># in the category date (e.g., `col.values.codes` is int8 np.ndarray)</span>
+    <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">CATEGORICAL</span><span class="s2">: (</span><span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">USE_SENTINEL</span><span class="s2">, -</span><span class="s5">1</span><span class="s2">),</span>
+    <span class="s4"># follow Arrow in using 1 as valid value and 0 for missing/null value</span>
+    <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">STRING</span><span class="s2">: (</span><span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">USE_BYTEMASK</span><span class="s2">, </span><span class="s5">0</span><span class="s2">),</span>
+<span class="s2">}</span>
+
+<span class="s1">_NO_VALIDITY_BUFFER </span><span class="s2">= {</span>
+    <span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">NON_NULLABLE</span><span class="s2">: </span><span class="s3">&quot;This column is non-nullable&quot;</span><span class="s2">,</span>
+    <span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">USE_NAN</span><span class="s2">: </span><span class="s3">&quot;This column uses NaN as null&quot;</span><span class="s2">,</span>
+    <span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">USE_SENTINEL</span><span class="s2">: </span><span class="s3">&quot;This column uses a sentinel value&quot;</span><span class="s2">,</span>
+<span class="s2">}</span>
+
+
+<span class="s0">class </span><span class="s1">PandasColumn</span><span class="s2">(</span><span class="s1">Column</span><span class="s2">):</span>
+    <span class="s6">&quot;&quot;&quot; 
+    A column object, with only the methods and properties required by the 
+    interchange protocol defined. 
+    A column can contain one or more chunks. Each chunk can contain up to three 
+    buffers - a data buffer, a mask buffer (depending on null representation), 
+    and an offsets buffer (if variable-size binary; e.g., variable-length 
+    strings). 
+    Note: this Column object can only be produced by ``__dataframe__``, so 
+          doesn't need its own version or ``__column__`` protocol. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">column</span><span class="s2">: </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">, </span><span class="s1">allow_copy</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">True</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Note: doesn't deal with extension arrays yet, just assume a regular 
+        Series/ndarray for now. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">column</span><span class="s2">, </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">DataFrame</span><span class="s2">):</span>
+            <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span>
+                <span class="s3">&quot;Expected a Series, got a DataFrame. This likely happened &quot;</span>
+                <span class="s3">&quot;because you called __dataframe__ on a DataFrame which, &quot;</span>
+                <span class="s3">&quot;after converting column names to string, resulted in duplicated &quot;</span>
+                <span class="s3">f&quot;names: </span><span class="s0">{</span><span class="s1">column</span><span class="s2">.</span><span class="s1">columns</span><span class="s0">}</span><span class="s3">. Please rename these columns before &quot;</span>
+                <span class="s3">&quot;using the interchange protocol.&quot;</span>
+            <span class="s2">)</span>
+        <span class="s0">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">column</span><span class="s2">, </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">):</span>
+            <span class="s0">raise </span><span class="s1">NotImplementedError</span><span class="s2">(</span><span class="s3">f&quot;Columns of type </span><span class="s0">{</span><span class="s1">type</span><span class="s2">(</span><span class="s1">column</span><span class="s2">)</span><span class="s0">} </span><span class="s3">not handled yet&quot;</span><span class="s2">)</span>
+
+        <span class="s4"># Store the column as a private attribute</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_col </span><span class="s2">= </span><span class="s1">column</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_allow_copy </span><span class="s2">= </span><span class="s1">allow_copy</span>
+
+    <span class="s0">def </span><span class="s1">size</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; int</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Size of the column, in elements. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">size</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">offset</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; int</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Offset of first element. Always zero. 
+        &quot;&quot;&quot;</span>
+        <span class="s4"># TODO: chunks are implemented now, probably this should return something</span>
+        <span class="s0">return </span><span class="s5">0</span>
+
+    <span class="s2">@</span><span class="s1">cache_readonly</span>
+    <span class="s0">def </span><span class="s1">dtype</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">DtypeKind</span><span class="s2">, </span><span class="s1">int</span><span class="s2">, </span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]:</span>
+        <span class="s1">dtype </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">dtype</span>
+
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">CategoricalDtype</span><span class="s2">):</span>
+            <span class="s1">codes </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">values</span><span class="s2">.</span><span class="s1">codes</span>
+            <span class="s2">(</span>
+                <span class="s1">_</span><span class="s2">,</span>
+                <span class="s1">bitwidth</span><span class="s2">,</span>
+                <span class="s1">c_arrow_dtype_f_str</span><span class="s2">,</span>
+                <span class="s1">_</span><span class="s2">,</span>
+            <span class="s2">) = </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_dtype_from_pandasdtype</span><span class="s2">(</span><span class="s1">codes</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">)</span>
+            <span class="s0">return </span><span class="s2">(</span>
+                <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">CATEGORICAL</span><span class="s2">,</span>
+                <span class="s1">bitwidth</span><span class="s2">,</span>
+                <span class="s1">c_arrow_dtype_f_str</span><span class="s2">,</span>
+                <span class="s1">Endianness</span><span class="s2">.</span><span class="s1">NATIVE</span><span class="s2">,</span>
+            <span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">is_string_dtype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s1">infer_dtype</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">) </span><span class="s0">in </span><span class="s2">(</span><span class="s3">&quot;string&quot;</span><span class="s2">, </span><span class="s3">&quot;empty&quot;</span><span class="s2">):</span>
+                <span class="s0">return </span><span class="s2">(</span>
+                    <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">STRING</span><span class="s2">,</span>
+                    <span class="s5">8</span><span class="s2">,</span>
+                    <span class="s1">dtype_to_arrow_c_fmt</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">),</span>
+                    <span class="s1">Endianness</span><span class="s2">.</span><span class="s1">NATIVE</span><span class="s2">,</span>
+                <span class="s2">)</span>
+            <span class="s0">raise </span><span class="s1">NotImplementedError</span><span class="s2">(</span><span class="s3">&quot;Non-string object dtypes are not supported yet&quot;</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_dtype_from_pandasdtype</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_dtype_from_pandasdtype</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">DtypeKind</span><span class="s2">, </span><span class="s1">int</span><span class="s2">, </span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        See `self.dtype` for details. 
+        &quot;&quot;&quot;</span>
+        <span class="s4"># Note: 'c' (complex) not handled yet (not in array spec v1).</span>
+        <span class="s4">#       'b', 'B' (bytes), 'S', 'a', (old-style string) 'V' (void) not handled</span>
+        <span class="s4">#       datetime and timedelta both map to datetime (is timedelta handled?)</span>
+
+        <span class="s1">kind </span><span class="s2">= </span><span class="s1">_NP_KINDS</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">kind</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">kind </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s4"># Not a NumPy dtype. Check if it's a categorical maybe</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">f&quot;Data type </span><span class="s0">{</span><span class="s1">dtype</span><span class="s0">} </span><span class="s3">not supported by interchange protocol&quot;</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">ArrowDtype</span><span class="s2">):</span>
+            <span class="s1">byteorder </span><span class="s2">= </span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">numpy_dtype</span><span class="s2">.</span><span class="s1">byteorder</span>
+        <span class="s0">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">DatetimeTZDtype</span><span class="s2">):</span>
+            <span class="s1">byteorder </span><span class="s2">= </span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">base</span><span class="s2">.</span><span class="s1">byteorder  </span><span class="s4"># type: ignore[union-attr]</span>
+        <span class="s0">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">BaseMaskedDtype</span><span class="s2">):</span>
+            <span class="s1">byteorder </span><span class="s2">= </span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">numpy_dtype</span><span class="s2">.</span><span class="s1">byteorder</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">byteorder </span><span class="s2">= </span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">byteorder</span>
+
+        <span class="s0">if </span><span class="s1">dtype </span><span class="s2">== </span><span class="s3">&quot;bool[pyarrow]&quot;</span><span class="s2">:</span>
+            <span class="s4"># return early to avoid the `* 8` below, as this is a bitmask</span>
+            <span class="s4"># rather than a bytemask</span>
+            <span class="s0">return </span><span class="s2">(</span>
+                <span class="s1">kind</span><span class="s2">,</span>
+                <span class="s1">dtype</span><span class="s2">.</span><span class="s1">itemsize</span><span class="s2">,  </span><span class="s4"># pyright: ignore[reportAttributeAccessIssue]</span>
+                <span class="s1">ArrowCTypes</span><span class="s2">.</span><span class="s1">BOOL</span><span class="s2">,</span>
+                <span class="s1">byteorder</span><span class="s2">,</span>
+            <span class="s2">)</span>
+
+        <span class="s0">return </span><span class="s1">kind</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">.</span><span class="s1">itemsize </span><span class="s2">* </span><span class="s5">8</span><span class="s2">, </span><span class="s1">dtype_to_arrow_c_fmt</span><span class="s2">(</span><span class="s1">dtype</span><span class="s2">), </span><span class="s1">byteorder</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">describe_categorical</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s6">&quot;&quot;&quot; 
+        If the dtype is categorical, there are two options: 
+        - There are only values in the data buffer. 
+        - There is a separate non-categorical Column encoding for categorical values. 
+ 
+        Raises TypeError if the dtype is not categorical 
+ 
+        Content of returned dict: 
+            - &quot;is_ordered&quot; : bool, whether the ordering of dictionary indices is 
+                             semantically meaningful. 
+            - &quot;is_dictionary&quot; : bool, whether a dictionary-style mapping of 
+                                categorical values to other objects exists 
+            - &quot;categories&quot; : Column representing the (implicit) mapping of indices to 
+                             category values (e.g. an array of cat1, cat2, ...). 
+                             None if not a dictionary-style categorical. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">if not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] == </span><span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">CATEGORICAL</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span>
+                <span class="s3">&quot;describe_categorical only works on a column with categorical dtype!&quot;</span>
+            <span class="s2">)</span>
+
+        <span class="s0">return </span><span class="s2">{</span>
+            <span class="s3">&quot;is_ordered&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">cat</span><span class="s2">.</span><span class="s1">ordered</span><span class="s2">,</span>
+            <span class="s3">&quot;is_dictionary&quot;</span><span class="s2">: </span><span class="s0">True</span><span class="s2">,</span>
+            <span class="s3">&quot;categories&quot;</span><span class="s2">: </span><span class="s1">PandasColumn</span><span class="s2">(</span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">cat</span><span class="s2">.</span><span class="s1">categories</span><span class="s2">)),</span>
+        <span class="s2">}</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">describe_null</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">BaseMaskedDtype</span><span class="s2">):</span>
+            <span class="s1">column_null_dtype </span><span class="s2">= </span><span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">USE_BYTEMASK</span>
+            <span class="s1">null_value </span><span class="s2">= </span><span class="s5">1</span>
+            <span class="s0">return </span><span class="s1">column_null_dtype</span><span class="s2">, </span><span class="s1">null_value</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">ArrowDtype</span><span class="s2">):</span>
+            <span class="s4"># We already rechunk (if necessary / allowed) upon initialization, so this</span>
+            <span class="s4"># is already single-chunk by the time we get here.</span>
+            <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">array</span><span class="s2">.</span><span class="s1">_pa_array</span><span class="s2">.</span><span class="s1">chunks</span><span class="s2">[</span><span class="s5">0</span><span class="s2">].</span><span class="s1">buffers</span><span class="s2">()[</span><span class="s5">0</span><span class="s2">] </span><span class="s0">is None</span><span class="s2">:  </span><span class="s4"># type: ignore[attr-defined]</span>
+                <span class="s0">return </span><span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">NON_NULLABLE</span><span class="s2">, </span><span class="s0">None</span>
+            <span class="s0">return </span><span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">USE_BITMASK</span><span class="s2">, </span><span class="s5">0</span>
+        <span class="s1">kind </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">null</span><span class="s2">, </span><span class="s1">value </span><span class="s2">= </span><span class="s1">_NULL_DESCRIPTION</span><span class="s2">[</span><span class="s1">kind</span><span class="s2">]</span>
+        <span class="s0">except </span><span class="s1">KeyError </span><span class="s0">as </span><span class="s1">err</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">NotImplementedError</span><span class="s2">(</span><span class="s3">f&quot;Data type </span><span class="s0">{</span><span class="s1">kind</span><span class="s0">} </span><span class="s3">not yet supported&quot;</span><span class="s2">) </span><span class="s0">from </span><span class="s1">err</span>
+
+        <span class="s0">return </span><span class="s1">null</span><span class="s2">, </span><span class="s1">value</span>
+
+    <span class="s2">@</span><span class="s1">cache_readonly</span>
+    <span class="s0">def </span><span class="s1">null_count</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; int</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Number of null elements. Should always be known. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">isna</span><span class="s2">().</span><span class="s1">sum</span><span class="s2">()</span>
+        <span class="s0">if not </span><span class="s1">using_python_scalars</span><span class="s2">():</span>
+            <span class="s1">result </span><span class="s2">= </span><span class="s1">result</span><span class="s2">.</span><span class="s1">item</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s1">result</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">metadata</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Index</span><span class="s2">]:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Store specific metadata of the column. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s2">{</span><span class="s3">&quot;pandas.index&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">index</span><span class="s2">}</span>
+
+    <span class="s0">def </span><span class="s1">num_chunks</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; int</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Return the number of chunks the column consists of. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s5">1</span>
+
+    <span class="s0">def </span><span class="s1">get_chunks</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">n_chunks</span><span class="s2">: </span><span class="s1">int </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">):</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Return an iterator yielding the chunks. 
+        See `DataFrame.get_chunks` for details on ``n_chunks``. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">n_chunks </span><span class="s0">and </span><span class="s1">n_chunks </span><span class="s2">&gt; </span><span class="s5">1</span><span class="s2">:</span>
+            <span class="s1">size </span><span class="s2">= </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">)</span>
+            <span class="s1">step </span><span class="s2">= </span><span class="s1">size </span><span class="s2">// </span><span class="s1">n_chunks</span>
+            <span class="s0">if </span><span class="s1">size </span><span class="s2">% </span><span class="s1">n_chunks </span><span class="s2">!= </span><span class="s5">0</span><span class="s2">:</span>
+                <span class="s1">step </span><span class="s2">+= </span><span class="s5">1</span>
+            <span class="s0">for </span><span class="s1">start </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">0</span><span class="s2">, </span><span class="s1">step </span><span class="s2">* </span><span class="s1">n_chunks</span><span class="s2">, </span><span class="s1">step</span><span class="s2">):</span>
+                <span class="s0">yield </span><span class="s1">PandasColumn</span><span class="s2">(</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">iloc</span><span class="s2">[</span><span class="s1">start </span><span class="s2">: </span><span class="s1">start </span><span class="s2">+ </span><span class="s1">step</span><span class="s2">], </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_allow_copy</span>
+                <span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">yield </span><span class="s1">self</span>
+
+    <span class="s0">def </span><span class="s1">get_buffers</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; ColumnBuffers</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Return a dictionary containing the underlying buffers. 
+        The returned dictionary has the following contents: 
+            - &quot;data&quot;: a two-element tuple whose first element is a buffer 
+                      containing the data and whose second element is the data 
+                      buffer's associated dtype. 
+            - &quot;validity&quot;: a two-element tuple whose first element is a buffer 
+                          containing mask values indicating missing data and 
+                          whose second element is the mask value buffer's 
+                          associated dtype. None if the null representation is 
+                          not a bit or byte mask. 
+            - &quot;offsets&quot;: a two-element tuple whose first element is a buffer 
+                         containing the offset values for variable-size binary 
+                         data (e.g., variable-length strings) and whose second 
+                         element is the offsets buffer's associated dtype. None 
+                         if the data buffer does not have an associated offsets 
+                         buffer. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">buffers</span><span class="s2">: </span><span class="s1">ColumnBuffers </span><span class="s2">= {</span>
+            <span class="s3">&quot;data&quot;</span><span class="s2">: </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_data_buffer</span><span class="s2">(),</span>
+            <span class="s3">&quot;validity&quot;</span><span class="s2">: </span><span class="s0">None</span><span class="s2">,</span>
+            <span class="s3">&quot;offsets&quot;</span><span class="s2">: </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s2">}</span>
+
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">buffers</span><span class="s2">[</span><span class="s3">&quot;validity&quot;</span><span class="s2">] = </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_validity_buffer</span><span class="s2">()</span>
+        <span class="s0">except </span><span class="s1">NoBufferPresent</span><span class="s2">:</span>
+            <span class="s0">pass</span>
+
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">buffers</span><span class="s2">[</span><span class="s3">&quot;offsets&quot;</span><span class="s2">] = </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_offsets_buffer</span><span class="s2">()</span>
+        <span class="s0">except </span><span class="s1">NoBufferPresent</span><span class="s2">:</span>
+            <span class="s0">pass</span>
+
+        <span class="s0">return </span><span class="s1">buffers</span>
+
+    <span class="s0">def </span><span class="s1">_get_data_buffer</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">Buffer</span><span class="s2">, </span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">DtypeKind</span><span class="s2">, </span><span class="s1">int</span><span class="s2">, </span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]]:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Return the buffer containing the data and the buffer's associated dtype. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">buffer</span><span class="s2">: </span><span class="s1">Buffer</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] == </span><span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">DATETIME</span><span class="s2">:</span>
+            <span class="s4"># self.dtype[2] is an ArrowCTypes.TIMESTAMP where the tz will make</span>
+            <span class="s4"># it longer than 4 characters</span>
+            <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">[</span><span class="s5">2</span><span class="s2">]) &gt; </span><span class="s5">4</span><span class="s2">:</span>
+                <span class="s1">np_arr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">dt</span><span class="s2">.</span><span class="s1">tz_convert</span><span class="s2">(</span><span class="s0">None</span><span class="s2">).</span><span class="s1">to_numpy</span><span class="s2">()</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">np_arr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">to_numpy</span><span class="s2">()</span>
+            <span class="s1">buffer </span><span class="s2">= </span><span class="s1">PandasBuffer</span><span class="s2">(</span><span class="s1">np_arr</span><span class="s2">, </span><span class="s1">allow_copy</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_allow_copy</span><span class="s2">)</span>
+            <span class="s1">dtype </span><span class="s2">= (</span>
+                <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">INT</span><span class="s2">,</span>
+                <span class="s5">64</span><span class="s2">,</span>
+                <span class="s1">ArrowCTypes</span><span class="s2">.</span><span class="s1">INT64</span><span class="s2">,</span>
+                <span class="s1">Endianness</span><span class="s2">.</span><span class="s1">NATIVE</span><span class="s2">,</span>
+            <span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] </span><span class="s0">in </span><span class="s2">(</span>
+            <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">INT</span><span class="s2">,</span>
+            <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">UINT</span><span class="s2">,</span>
+            <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">FLOAT</span><span class="s2">,</span>
+            <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">BOOL</span><span class="s2">,</span>
+        <span class="s2">):</span>
+            <span class="s1">dtype </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span>
+            <span class="s1">arr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">array</span>
+            <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">ArrowDtype</span><span class="s2">):</span>
+                <span class="s4"># We already rechunk (if necessary / allowed) upon initialization, so</span>
+                <span class="s4"># this is already single-chunk by the time we get here.</span>
+                <span class="s1">arr </span><span class="s2">= </span><span class="s1">arr</span><span class="s2">.</span><span class="s1">_pa_array</span><span class="s2">.</span><span class="s1">chunks</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]  </span><span class="s4"># type: ignore[attr-defined]</span>
+                <span class="s1">buffer </span><span class="s2">= </span><span class="s1">PandasBufferPyarrow</span><span class="s2">(</span>
+                    <span class="s1">arr</span><span class="s2">.</span><span class="s1">buffers</span><span class="s2">()[</span><span class="s5">1</span><span class="s2">],</span>
+                    <span class="s1">length</span><span class="s2">=</span><span class="s1">len</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">),</span>
+                <span class="s2">)</span>
+                <span class="s0">return </span><span class="s1">buffer</span><span class="s2">, </span><span class="s1">dtype</span>
+            <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">BaseMaskedDtype</span><span class="s2">):</span>
+                <span class="s1">np_arr </span><span class="s2">= </span><span class="s1">arr</span><span class="s2">.</span><span class="s1">_data  </span><span class="s4"># type: ignore[attr-defined]</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">np_arr </span><span class="s2">= </span><span class="s1">arr</span><span class="s2">.</span><span class="s1">_ndarray  </span><span class="s4"># type: ignore[attr-defined]</span>
+            <span class="s1">buffer </span><span class="s2">= </span><span class="s1">PandasBuffer</span><span class="s2">(</span><span class="s1">np_arr</span><span class="s2">, </span><span class="s1">allow_copy</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_allow_copy</span><span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] == </span><span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">CATEGORICAL</span><span class="s2">:</span>
+            <span class="s1">codes </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">values</span><span class="s2">.</span><span class="s1">_codes</span>
+            <span class="s1">buffer </span><span class="s2">= </span><span class="s1">PandasBuffer</span><span class="s2">(</span><span class="s1">codes</span><span class="s2">, </span><span class="s1">allow_copy</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_allow_copy</span><span class="s2">)</span>
+            <span class="s1">dtype </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_dtype_from_pandasdtype</span><span class="s2">(</span><span class="s1">codes</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] == </span><span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">STRING</span><span class="s2">:</span>
+            <span class="s4"># Marshal the strings from a NumPy object array into a byte array</span>
+            <span class="s1">buf </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">to_numpy</span><span class="s2">()</span>
+            <span class="s1">b </span><span class="s2">= </span><span class="s1">bytearray</span><span class="s2">()</span>
+
+            <span class="s4"># TODO: this for-loop is slow; can be implemented in Cython/C/C++ later</span>
+            <span class="s0">for </span><span class="s1">obj </span><span class="s0">in </span><span class="s1">buf</span><span class="s2">:</span>
+                <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">str</span><span class="s2">):</span>
+                    <span class="s1">b</span><span class="s2">.</span><span class="s1">extend</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">.</span><span class="s1">encode</span><span class="s2">(</span><span class="s1">encoding</span><span class="s2">=</span><span class="s3">&quot;utf-8&quot;</span><span class="s2">))</span>
+
+            <span class="s4"># Convert the byte array to a Pandas &quot;buffer&quot; using</span>
+            <span class="s4"># a NumPy array as the backing store</span>
+            <span class="s1">buffer </span><span class="s2">= </span><span class="s1">PandasBuffer</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">frombuffer</span><span class="s2">(</span><span class="s1">b</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s3">&quot;uint8&quot;</span><span class="s2">))</span>
+
+            <span class="s4"># Define the dtype for the returned buffer</span>
+            <span class="s4"># TODO: this will need correcting</span>
+            <span class="s4"># https://github.com/pandas-dev/pandas/issues/54781</span>
+            <span class="s1">dtype </span><span class="s2">= (</span>
+                <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">UINT</span><span class="s2">,</span>
+                <span class="s5">8</span><span class="s2">,</span>
+                <span class="s1">ArrowCTypes</span><span class="s2">.</span><span class="s1">UINT8</span><span class="s2">,</span>
+                <span class="s1">Endianness</span><span class="s2">.</span><span class="s1">NATIVE</span><span class="s2">,</span>
+            <span class="s2">)  </span><span class="s4"># note: currently only support native endianness</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">NotImplementedError</span><span class="s2">(</span><span class="s3">f&quot;Data type </span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">dtype</span><span class="s0">} </span><span class="s3">not handled yet&quot;</span><span class="s2">)</span>
+
+        <span class="s0">return </span><span class="s1">buffer</span><span class="s2">, </span><span class="s1">dtype</span>
+
+    <span class="s0">def </span><span class="s1">_get_validity_buffer</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">Buffer</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">] | </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Return the buffer containing the mask values indicating missing data and 
+        the buffer's associated dtype. 
+        Raises NoBufferPresent if null representation is not a bit or byte mask. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">null</span><span class="s2">, </span><span class="s1">invalid </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">describe_null</span>
+        <span class="s1">buffer</span><span class="s2">: </span><span class="s1">Buffer</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">ArrowDtype</span><span class="s2">):</span>
+            <span class="s4"># We already rechunk (if necessary / allowed) upon initialization, so this</span>
+            <span class="s4"># is already single-chunk by the time we get here.</span>
+            <span class="s1">arr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">array</span><span class="s2">.</span><span class="s1">_pa_array</span><span class="s2">.</span><span class="s1">chunks</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]  </span><span class="s4"># type: ignore[attr-defined]</span>
+            <span class="s1">dtype </span><span class="s2">= (</span><span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">BOOL</span><span class="s2">, </span><span class="s5">1</span><span class="s2">, </span><span class="s1">ArrowCTypes</span><span class="s2">.</span><span class="s1">BOOL</span><span class="s2">, </span><span class="s1">Endianness</span><span class="s2">.</span><span class="s1">NATIVE</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">arr</span><span class="s2">.</span><span class="s1">buffers</span><span class="s2">()[</span><span class="s5">0</span><span class="s2">] </span><span class="s0">is None</span><span class="s2">:</span>
+                <span class="s0">return None</span>
+            <span class="s1">buffer </span><span class="s2">= </span><span class="s1">PandasBufferPyarrow</span><span class="s2">(</span>
+                <span class="s1">arr</span><span class="s2">.</span><span class="s1">buffers</span><span class="s2">()[</span><span class="s5">0</span><span class="s2">],</span>
+                <span class="s1">length</span><span class="s2">=</span><span class="s1">len</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">),</span>
+            <span class="s2">)</span>
+            <span class="s0">return </span><span class="s1">buffer</span><span class="s2">, </span><span class="s1">dtype</span>
+
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">, </span><span class="s1">BaseMaskedDtype</span><span class="s2">):</span>
+            <span class="s1">mask </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">array</span><span class="s2">.</span><span class="s1">_mask  </span><span class="s4"># type: ignore[attr-defined]</span>
+            <span class="s1">buffer </span><span class="s2">= </span><span class="s1">PandasBuffer</span><span class="s2">(</span><span class="s1">mask</span><span class="s2">)</span>
+            <span class="s1">dtype </span><span class="s2">= (</span><span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">BOOL</span><span class="s2">, </span><span class="s5">8</span><span class="s2">, </span><span class="s1">ArrowCTypes</span><span class="s2">.</span><span class="s1">BOOL</span><span class="s2">, </span><span class="s1">Endianness</span><span class="s2">.</span><span class="s1">NATIVE</span><span class="s2">)</span>
+            <span class="s0">return </span><span class="s1">buffer</span><span class="s2">, </span><span class="s1">dtype</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] == </span><span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">STRING</span><span class="s2">:</span>
+            <span class="s4"># For now, use byte array as the mask.</span>
+            <span class="s4"># TODO: maybe store as bit array to save space?..</span>
+            <span class="s1">buf </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">to_numpy</span><span class="s2">()</span>
+
+            <span class="s4"># Determine the encoding for valid values</span>
+            <span class="s1">valid </span><span class="s2">= </span><span class="s1">invalid </span><span class="s2">== </span><span class="s5">0</span>
+            <span class="s1">invalid </span><span class="s2">= </span><span class="s0">not </span><span class="s1">valid</span>
+
+            <span class="s1">mask </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">(</span><span class="s1">shape</span><span class="s2">=(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">buf</span><span class="s2">),), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">bool_</span><span class="s2">)</span>
+            <span class="s0">for </span><span class="s1">i</span><span class="s2">, </span><span class="s1">obj </span><span class="s0">in </span><span class="s1">enumerate</span><span class="s2">(</span><span class="s1">buf</span><span class="s2">):</span>
+                <span class="s1">mask</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s1">valid </span><span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">str</span><span class="s2">) </span><span class="s0">else </span><span class="s1">invalid</span>
+
+            <span class="s4"># Convert the mask array to a Pandas &quot;buffer&quot; using</span>
+            <span class="s4"># a NumPy array as the backing store</span>
+            <span class="s1">buffer </span><span class="s2">= </span><span class="s1">PandasBuffer</span><span class="s2">(</span><span class="s1">mask</span><span class="s2">)</span>
+
+            <span class="s4"># Define the dtype of the returned buffer</span>
+            <span class="s1">dtype </span><span class="s2">= (</span><span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">BOOL</span><span class="s2">, </span><span class="s5">8</span><span class="s2">, </span><span class="s1">ArrowCTypes</span><span class="s2">.</span><span class="s1">BOOL</span><span class="s2">, </span><span class="s1">Endianness</span><span class="s2">.</span><span class="s1">NATIVE</span><span class="s2">)</span>
+
+            <span class="s0">return </span><span class="s1">buffer</span><span class="s2">, </span><span class="s1">dtype</span>
+
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">msg </span><span class="s2">= </span><span class="s3">f&quot;</span><span class="s0">{</span><span class="s1">_NO_VALIDITY_BUFFER</span><span class="s2">[</span><span class="s1">null</span><span class="s2">]</span><span class="s0">} </span><span class="s3">so does not have a separate mask&quot;</span>
+        <span class="s0">except </span><span class="s1">KeyError </span><span class="s0">as </span><span class="s1">err</span><span class="s2">:</span>
+            <span class="s4"># TODO: implement for other bit/byte masks?</span>
+            <span class="s0">raise </span><span class="s1">NotImplementedError</span><span class="s2">(</span><span class="s3">&quot;See self.describe_null&quot;</span><span class="s2">) </span><span class="s0">from </span><span class="s1">err</span>
+
+        <span class="s0">raise </span><span class="s1">NoBufferPresent</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_get_offsets_buffer</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">PandasBuffer</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">]:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        Return the buffer containing the offset values for variable-size binary 
+        data (e.g., variable-length strings) and the buffer's associated dtype. 
+        Raises NoBufferPresent if the data buffer does not have an associated 
+        offsets buffer. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] == </span><span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">STRING</span><span class="s2">:</span>
+            <span class="s4"># For each string, we need to manually determine the next offset</span>
+            <span class="s1">values </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">.</span><span class="s1">to_numpy</span><span class="s2">()</span>
+            <span class="s1">ptr </span><span class="s2">= </span><span class="s5">0</span>
+            <span class="s1">offsets </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">zeros</span><span class="s2">(</span><span class="s1">shape</span><span class="s2">=(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">values</span><span class="s2">) + </span><span class="s5">1</span><span class="s2">,), </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">)</span>
+            <span class="s0">for </span><span class="s1">i</span><span class="s2">, </span><span class="s1">v </span><span class="s0">in </span><span class="s1">enumerate</span><span class="s2">(</span><span class="s1">values</span><span class="s2">):</span>
+                <span class="s4"># For missing values (in this case, `np.nan` values)</span>
+                <span class="s4"># we don't increment the pointer</span>
+                <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">v</span><span class="s2">, </span><span class="s1">str</span><span class="s2">):</span>
+                    <span class="s1">b </span><span class="s2">= </span><span class="s1">v</span><span class="s2">.</span><span class="s1">encode</span><span class="s2">(</span><span class="s1">encoding</span><span class="s2">=</span><span class="s3">&quot;utf-8&quot;</span><span class="s2">)</span>
+                    <span class="s1">ptr </span><span class="s2">+= </span><span class="s1">len</span><span class="s2">(</span><span class="s1">b</span><span class="s2">)</span>
+
+                <span class="s1">offsets</span><span class="s2">[</span><span class="s1">i </span><span class="s2">+ </span><span class="s5">1</span><span class="s2">] = </span><span class="s1">ptr</span>
+
+            <span class="s4"># Convert the offsets to a Pandas &quot;buffer&quot; using</span>
+            <span class="s4"># the NumPy array as the backing store</span>
+            <span class="s1">buffer </span><span class="s2">= </span><span class="s1">PandasBuffer</span><span class="s2">(</span><span class="s1">offsets</span><span class="s2">)</span>
+
+            <span class="s4"># Assemble the buffer dtype info</span>
+            <span class="s1">dtype </span><span class="s2">= (</span>
+                <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">INT</span><span class="s2">,</span>
+                <span class="s5">64</span><span class="s2">,</span>
+                <span class="s1">ArrowCTypes</span><span class="s2">.</span><span class="s1">INT64</span><span class="s2">,</span>
+                <span class="s1">Endianness</span><span class="s2">.</span><span class="s1">NATIVE</span><span class="s2">,</span>
+            <span class="s2">)  </span><span class="s4"># note: currently only support native endianness</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">NoBufferPresent</span><span class="s2">(</span>
+                <span class="s3">&quot;This column has a fixed-length dtype so &quot;</span>
+                <span class="s3">&quot;it does not have an offsets buffer&quot;</span>
+            <span class="s2">)</span>
+
+        <span class="s0">return </span><span class="s1">buffer</span><span class="s2">, </span><span class="s1">dtype</span>
+</pre>
+</body>
+</html>

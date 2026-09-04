@@ -1,0 +1,636 @@
+<html>
+<head>
+<title>from_dataframe.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #2aacb8;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+from_dataframe.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">ctypes</span>
+<span class="s0">import </span><span class="s1">re</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">Any</span><span class="s2">,</span>
+    <span class="s1">overload</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">import </span><span class="s1">warnings</span>
+
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_config </span><span class="s0">import </span><span class="s1">using_string_dtype</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">compat</span><span class="s2">.</span><span class="s1">_optional </span><span class="s0">import </span><span class="s1">import_optional_dependency</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">errors </span><span class="s0">import </span><span class="s1">Pandas4Warning</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">util</span><span class="s2">.</span><span class="s1">_decorators </span><span class="s0">import </span><span class="s1">set_module</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">util</span><span class="s2">.</span><span class="s1">_exceptions </span><span class="s0">import </span><span class="s1">find_stack_level</span>
+
+<span class="s0">import </span><span class="s1">pandas </span><span class="s0">as </span><span class="s1">pd</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">interchange</span><span class="s2">.</span><span class="s1">dataframe_protocol </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">Buffer</span><span class="s2">,</span>
+    <span class="s1">Column</span><span class="s2">,</span>
+    <span class="s1">ColumnNullType</span><span class="s2">,</span>
+    <span class="s1">DataFrame </span><span class="s0">as </span><span class="s1">DataFrameXchg</span><span class="s2">,</span>
+    <span class="s1">DtypeKind</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">core</span><span class="s2">.</span><span class="s1">interchange</span><span class="s2">.</span><span class="s1">utils </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">ArrowCTypes</span><span class="s2">,</span>
+    <span class="s1">Endianness</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s1">_NP_DTYPES</span><span class="s2">: </span><span class="s1">dict</span><span class="s2">[</span><span class="s1">DtypeKind</span><span class="s2">, </span><span class="s1">dict</span><span class="s2">[</span><span class="s1">int</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">]] = {</span>
+    <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">INT</span><span class="s2">: {</span><span class="s3">8</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int8</span><span class="s2">, </span><span class="s3">16</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int16</span><span class="s2">, </span><span class="s3">32</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int32</span><span class="s2">, </span><span class="s3">64</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">int64</span><span class="s2">},</span>
+    <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">UINT</span><span class="s2">: {</span><span class="s3">8</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint8</span><span class="s2">, </span><span class="s3">16</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint16</span><span class="s2">, </span><span class="s3">32</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint32</span><span class="s2">, </span><span class="s3">64</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint64</span><span class="s2">},</span>
+    <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">FLOAT</span><span class="s2">: {</span><span class="s3">32</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float32</span><span class="s2">, </span><span class="s3">64</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">float64</span><span class="s2">},</span>
+    <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">BOOL</span><span class="s2">: {</span><span class="s3">1</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">, </span><span class="s3">8</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">},</span>
+<span class="s2">}</span>
+
+
+<span class="s2">@</span><span class="s1">set_module</span><span class="s2">(</span><span class="s4">&quot;pandas.api.interchange&quot;</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">from_dataframe</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s1">allow_copy</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">True</span><span class="s2">) </span><span class="s1">-&gt; pd</span><span class="s2">.</span><span class="s1">DataFrame</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Build a ``pd.DataFrame`` from any DataFrame supporting the interchange protocol. 
+ 
+    .. note:: 
+ 
+       For new development, we highly recommend using the Arrow C Data Interface 
+       alongside the Arrow PyCapsule Interface instead of the interchange protocol. 
+       From pandas 3.0 onwards, `from_dataframe` uses the PyCapsule Interface, 
+       only falling back to the interchange protocol if that fails. 
+ 
+       From pandas 4.0 onwards, that fallback will no longer be available and only 
+       the PyCapsule Interface will be used. 
+ 
+    .. warning:: 
+ 
+        Due to severe implementation issues, we recommend only considering using the 
+        interchange protocol in the following cases: 
+ 
+        - converting to pandas: for pandas &gt;= 2.0.3 
+        - converting from pandas: for pandas &gt;= 3.0.0 
+ 
+    Parameters 
+    ---------- 
+    df : DataFrameXchg 
+        Object supporting the interchange protocol, i.e. `__dataframe__` method. 
+    allow_copy : bool, default: True 
+        Whether to allow copying the memory to perform the conversion 
+        (if false then zero-copy approach is requested). 
+ 
+    Returns 
+    ------- 
+    pd.DataFrame 
+        A pandas DataFrame built from the provided interchange 
+        protocol object. 
+ 
+    See Also 
+    -------- 
+    pd.DataFrame : DataFrame class which can be created from various input data 
+        formats, including objects that support the interchange protocol. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; df_not_necessarily_pandas = pd.DataFrame({&quot;A&quot;: [1, 2], &quot;B&quot;: [3, 4]}) 
+    &gt;&gt;&gt; interchange_object = df_not_necessarily_pandas.__dataframe__() 
+    &gt;&gt;&gt; interchange_object.column_names() 
+    Index(['A', 'B'], dtype='str') 
+    &gt;&gt;&gt; df_pandas = pd.api.interchange.from_dataframe( 
+    ...     interchange_object.select_columns_by_name([&quot;A&quot;]) 
+    ... ) 
+    &gt;&gt;&gt; df_pandas 
+         A 
+    0    1 
+    1    2 
+ 
+    These methods (``column_names``, ``select_columns_by_name``) should work 
+    for any dataframe library which implements the interchange protocol. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">DataFrame</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">df</span>
+
+    <span class="s0">if </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s4">&quot;__arrow_c_stream__&quot;</span><span class="s2">):</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">pa </span><span class="s2">= </span><span class="s1">import_optional_dependency</span><span class="s2">(</span><span class="s4">&quot;pyarrow&quot;</span><span class="s2">, </span><span class="s1">min_version</span><span class="s2">=</span><span class="s4">&quot;14.0.0&quot;</span><span class="s2">)</span>
+        <span class="s0">except </span><span class="s1">ImportError</span><span class="s2">:</span>
+            <span class="s6"># fallback to _from_dataframe</span>
+            <span class="s1">warnings</span><span class="s2">.</span><span class="s1">warn</span><span class="s2">(</span>
+                <span class="s4">&quot;Conversion using Arrow PyCapsule Interface failed due to &quot;</span>
+                <span class="s4">&quot;missing PyArrow&gt;=14 dependency, falling back to (deprecated) &quot;</span>
+                <span class="s4">&quot;interchange protocol. We recommend that you install &quot;</span>
+                <span class="s4">&quot;PyArrow&gt;=14.0.0.&quot;</span><span class="s2">,</span>
+                <span class="s1">UserWarning</span><span class="s2">,</span>
+                <span class="s1">stacklevel</span><span class="s2">=</span><span class="s1">find_stack_level</span><span class="s2">(),</span>
+            <span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s0">return </span><span class="s1">pa</span><span class="s2">.</span><span class="s1">table</span><span class="s2">(</span><span class="s1">df</span><span class="s2">).</span><span class="s1">to_pandas</span><span class="s2">(</span><span class="s1">zero_copy_only</span><span class="s2">=</span><span class="s0">not </span><span class="s1">allow_copy</span><span class="s2">)</span>
+            <span class="s0">except </span><span class="s1">pa</span><span class="s2">.</span><span class="s1">ArrowInvalid </span><span class="s0">as </span><span class="s1">e</span><span class="s2">:</span>
+                <span class="s0">raise </span><span class="s1">RuntimeError</span><span class="s2">(</span><span class="s1">e</span><span class="s2">) </span><span class="s0">from </span><span class="s1">e</span>
+
+    <span class="s0">if not </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s4">&quot;__dataframe__&quot;</span><span class="s2">):</span>
+        <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s4">&quot;`df` does not support __dataframe__&quot;</span><span class="s2">)</span>
+
+    <span class="s1">warnings</span><span class="s2">.</span><span class="s1">warn</span><span class="s2">(</span>
+        <span class="s4">&quot;The Dataframe Interchange Protocol is deprecated.</span><span class="s0">\n</span><span class="s4">&quot;</span>
+        <span class="s4">&quot;For dataframe-agnostic code, you may want to look into:</span><span class="s0">\n</span><span class="s4">&quot;</span>
+        <span class="s4">&quot;- Arrow PyCapsule Interface: https://arrow.apache.org/docs/format/CDataInterface/PyCapsuleInterface.html</span><span class="s0">\n</span><span class="s4">&quot;</span>
+        <span class="s4">&quot;- Narwhals: https://github.com/narwhals-dev/narwhals</span><span class="s0">\n</span><span class="s4">&quot;</span><span class="s2">,</span>
+        <span class="s1">Pandas4Warning</span><span class="s2">,</span>
+        <span class="s1">stacklevel</span><span class="s2">=</span><span class="s1">find_stack_level</span><span class="s2">(),</span>
+    <span class="s2">)</span>
+
+    <span class="s0">return </span><span class="s1">_from_dataframe</span><span class="s2">(</span>
+        <span class="s1">df</span><span class="s2">.</span><span class="s1">__dataframe__</span><span class="s2">(</span><span class="s1">allow_copy</span><span class="s2">=</span><span class="s1">allow_copy</span><span class="s2">), </span><span class="s1">allow_copy</span><span class="s2">=</span><span class="s1">allow_copy</span>
+    <span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_from_dataframe</span><span class="s2">(</span><span class="s1">df</span><span class="s2">: </span><span class="s1">DataFrameXchg</span><span class="s2">, </span><span class="s1">allow_copy</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">True</span><span class="s2">) </span><span class="s1">-&gt; pd</span><span class="s2">.</span><span class="s1">DataFrame</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Build a ``pd.DataFrame`` from the DataFrame interchange object. 
+ 
+    Parameters 
+    ---------- 
+    df : DataFrameXchg 
+        Object supporting the interchange protocol, i.e. `__dataframe__` method. 
+    allow_copy : bool, default: True 
+        Whether to allow copying the memory to perform the conversion 
+        (if false then zero-copy approach is requested). 
+ 
+    Returns 
+    ------- 
+    pd.DataFrame 
+    &quot;&quot;&quot;</span>
+    <span class="s1">pandas_dfs </span><span class="s2">= []</span>
+    <span class="s0">for </span><span class="s1">chunk </span><span class="s0">in </span><span class="s1">df</span><span class="s2">.</span><span class="s1">get_chunks</span><span class="s2">():</span>
+        <span class="s1">pandas_df </span><span class="s2">= </span><span class="s1">protocol_df_chunk_to_pandas</span><span class="s2">(</span><span class="s1">chunk</span><span class="s2">)</span>
+        <span class="s1">pandas_dfs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">pandas_df</span><span class="s2">)</span>
+
+    <span class="s0">if not </span><span class="s1">allow_copy </span><span class="s0">and </span><span class="s1">len</span><span class="s2">(</span><span class="s1">pandas_dfs</span><span class="s2">) &gt; </span><span class="s3">1</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">RuntimeError</span><span class="s2">(</span>
+            <span class="s4">&quot;To join chunks a copy is required which is forbidden by allow_copy=False&quot;</span>
+        <span class="s2">)</span>
+    <span class="s0">if not </span><span class="s1">pandas_dfs</span><span class="s2">:</span>
+        <span class="s1">pandas_df </span><span class="s2">= </span><span class="s1">protocol_df_chunk_to_pandas</span><span class="s2">(</span><span class="s1">df</span><span class="s2">)</span>
+    <span class="s0">elif </span><span class="s1">len</span><span class="s2">(</span><span class="s1">pandas_dfs</span><span class="s2">) == </span><span class="s3">1</span><span class="s2">:</span>
+        <span class="s1">pandas_df </span><span class="s2">= </span><span class="s1">pandas_dfs</span><span class="s2">[</span><span class="s3">0</span><span class="s2">]</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">pandas_df </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">concat</span><span class="s2">(</span><span class="s1">pandas_dfs</span><span class="s2">, </span><span class="s1">axis</span><span class="s2">=</span><span class="s3">0</span><span class="s2">, </span><span class="s1">ignore_index</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+
+    <span class="s1">index_obj </span><span class="s2">= </span><span class="s1">df</span><span class="s2">.</span><span class="s1">metadata</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s4">&quot;pandas.index&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">index_obj </span><span class="s0">is not None</span><span class="s2">:</span>
+        <span class="s1">pandas_df</span><span class="s2">.</span><span class="s1">index </span><span class="s2">= </span><span class="s1">index_obj</span>
+
+    <span class="s0">return </span><span class="s1">pandas_df</span>
+
+
+<span class="s0">def </span><span class="s1">protocol_df_chunk_to_pandas</span><span class="s2">(</span><span class="s1">df</span><span class="s2">: </span><span class="s1">DataFrameXchg</span><span class="s2">) </span><span class="s1">-&gt; pd</span><span class="s2">.</span><span class="s1">DataFrame</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Convert interchange protocol chunk to ``pd.DataFrame``. 
+ 
+    Parameters 
+    ---------- 
+    df : DataFrameXchg 
+ 
+    Returns 
+    ------- 
+    pd.DataFrame 
+    &quot;&quot;&quot;</span>
+    <span class="s1">columns</span><span class="s2">: </span><span class="s1">dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">] = {}</span>
+    <span class="s1">buffers </span><span class="s2">= []  </span><span class="s6"># hold on to buffers, keeps memory alive</span>
+    <span class="s0">for </span><span class="s1">name </span><span class="s0">in </span><span class="s1">df</span><span class="s2">.</span><span class="s1">column_names</span><span class="s2">():</span>
+        <span class="s0">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">name</span><span class="s2">, </span><span class="s1">str</span><span class="s2">):</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s4">f&quot;Column </span><span class="s0">{</span><span class="s1">name</span><span class="s0">} </span><span class="s4">is not a string&quot;</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">name </span><span class="s0">in </span><span class="s1">columns</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s4">f&quot;Column </span><span class="s0">{</span><span class="s1">name</span><span class="s0">} </span><span class="s4">is not unique&quot;</span><span class="s2">)</span>
+        <span class="s1">col </span><span class="s2">= </span><span class="s1">df</span><span class="s2">.</span><span class="s1">get_column_by_name</span><span class="s2">(</span><span class="s1">name</span><span class="s2">)</span>
+        <span class="s1">dtype </span><span class="s2">= </span><span class="s1">col</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">[</span><span class="s3">0</span><span class="s2">]</span>
+        <span class="s0">if </span><span class="s1">dtype </span><span class="s0">in </span><span class="s2">(</span>
+            <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">INT</span><span class="s2">,</span>
+            <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">UINT</span><span class="s2">,</span>
+            <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">FLOAT</span><span class="s2">,</span>
+            <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">BOOL</span><span class="s2">,</span>
+        <span class="s2">):</span>
+            <span class="s1">columns</span><span class="s2">[</span><span class="s1">name</span><span class="s2">], </span><span class="s1">buf </span><span class="s2">= </span><span class="s1">primitive_column_to_ndarray</span><span class="s2">(</span><span class="s1">col</span><span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">dtype </span><span class="s2">== </span><span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">CATEGORICAL</span><span class="s2">:</span>
+            <span class="s1">columns</span><span class="s2">[</span><span class="s1">name</span><span class="s2">], </span><span class="s1">buf </span><span class="s2">= </span><span class="s1">categorical_column_to_series</span><span class="s2">(</span><span class="s1">col</span><span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">dtype </span><span class="s2">== </span><span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">STRING</span><span class="s2">:</span>
+            <span class="s1">columns</span><span class="s2">[</span><span class="s1">name</span><span class="s2">], </span><span class="s1">buf </span><span class="s2">= </span><span class="s1">string_column_to_ndarray</span><span class="s2">(</span><span class="s1">col</span><span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">dtype </span><span class="s2">== </span><span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">DATETIME</span><span class="s2">:</span>
+            <span class="s1">columns</span><span class="s2">[</span><span class="s1">name</span><span class="s2">], </span><span class="s1">buf </span><span class="s2">= </span><span class="s1">datetime_column_to_ndarray</span><span class="s2">(</span><span class="s1">col</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">NotImplementedError</span><span class="s2">(</span><span class="s4">f&quot;Data type </span><span class="s0">{</span><span class="s1">dtype</span><span class="s0">} </span><span class="s4">not handled yet&quot;</span><span class="s2">)</span>
+
+        <span class="s1">buffers</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">buf</span><span class="s2">)</span>
+
+    <span class="s1">pandas_df </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">DataFrame</span><span class="s2">(</span><span class="s1">columns</span><span class="s2">)</span>
+    <span class="s1">pandas_df</span><span class="s2">.</span><span class="s1">attrs</span><span class="s2">[</span><span class="s4">&quot;_INTERCHANGE_PROTOCOL_BUFFERS&quot;</span><span class="s2">] = </span><span class="s1">buffers</span>
+    <span class="s0">return </span><span class="s1">pandas_df</span>
+
+
+<span class="s0">def </span><span class="s1">primitive_column_to_ndarray</span><span class="s2">(</span><span class="s1">col</span><span class="s2">: </span><span class="s1">Column</span><span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">]:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Convert a column holding one of the primitive dtypes to a NumPy array. 
+ 
+    A primitive type is one of: int, uint, float, bool. 
+ 
+    Parameters 
+    ---------- 
+    col : Column 
+ 
+    Returns 
+    ------- 
+    tuple 
+        Tuple of np.ndarray holding the data and the memory owner object 
+        that keeps the memory alive. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">buffers </span><span class="s2">= </span><span class="s1">col</span><span class="s2">.</span><span class="s1">get_buffers</span><span class="s2">()</span>
+
+    <span class="s1">data_buff</span><span class="s2">, </span><span class="s1">data_dtype </span><span class="s2">= </span><span class="s1">buffers</span><span class="s2">[</span><span class="s4">&quot;data&quot;</span><span class="s2">]</span>
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">buffer_to_ndarray</span><span class="s2">(</span>
+        <span class="s1">data_buff</span><span class="s2">, </span><span class="s1">data_dtype</span><span class="s2">, </span><span class="s1">offset</span><span class="s2">=</span><span class="s1">col</span><span class="s2">.</span><span class="s1">offset</span><span class="s2">, </span><span class="s1">length</span><span class="s2">=</span><span class="s1">col</span><span class="s2">.</span><span class="s1">size</span><span class="s2">()</span>
+    <span class="s2">)</span>
+
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">set_nulls</span><span class="s2">(</span><span class="s1">data</span><span class="s2">, </span><span class="s1">col</span><span class="s2">, </span><span class="s1">buffers</span><span class="s2">[</span><span class="s4">&quot;validity&quot;</span><span class="s2">])</span>
+    <span class="s0">return </span><span class="s1">data</span><span class="s2">, </span><span class="s1">buffers</span>
+
+
+<span class="s0">def </span><span class="s1">categorical_column_to_series</span><span class="s2">(</span><span class="s1">col</span><span class="s2">: </span><span class="s1">Column</span><span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">]:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Convert a column holding categorical data to a pandas Series. 
+ 
+    Parameters 
+    ---------- 
+    col : Column 
+ 
+    Returns 
+    ------- 
+    tuple 
+        Tuple of pd.Series holding the data and the memory owner object 
+        that keeps the memory alive. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">categorical </span><span class="s2">= </span><span class="s1">col</span><span class="s2">.</span><span class="s1">describe_categorical</span>
+
+    <span class="s0">if not </span><span class="s1">categorical</span><span class="s2">[</span><span class="s4">&quot;is_dictionary&quot;</span><span class="s2">]:</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError</span><span class="s2">(</span><span class="s4">&quot;Non-dictionary categoricals not supported yet&quot;</span><span class="s2">)</span>
+
+    <span class="s1">cat_column </span><span class="s2">= </span><span class="s1">categorical</span><span class="s2">[</span><span class="s4">&quot;categories&quot;</span><span class="s2">]</span>
+    <span class="s0">if </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">cat_column</span><span class="s2">, </span><span class="s4">&quot;_col&quot;</span><span class="s2">):</span>
+        <span class="s6"># Item &quot;Column&quot; of &quot;Optional[Column]&quot; has no attribute &quot;_col&quot;</span>
+        <span class="s6"># Item &quot;None&quot; of &quot;Optional[Column]&quot; has no attribute &quot;_col&quot;</span>
+        <span class="s1">categories </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">(</span><span class="s1">cat_column</span><span class="s2">.</span><span class="s1">_col</span><span class="s2">)  </span><span class="s6"># type: ignore[union-attr]</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError</span><span class="s2">(</span>
+            <span class="s4">&quot;Interchanging categorical columns isn't supported yet, and our &quot;</span>
+            <span class="s4">&quot;fallback of using the `col._col` attribute (a ndarray) failed.&quot;</span>
+        <span class="s2">)</span>
+    <span class="s1">buffers </span><span class="s2">= </span><span class="s1">col</span><span class="s2">.</span><span class="s1">get_buffers</span><span class="s2">()</span>
+
+    <span class="s1">codes_buff</span><span class="s2">, </span><span class="s1">codes_dtype </span><span class="s2">= </span><span class="s1">buffers</span><span class="s2">[</span><span class="s4">&quot;data&quot;</span><span class="s2">]</span>
+    <span class="s1">codes </span><span class="s2">= </span><span class="s1">buffer_to_ndarray</span><span class="s2">(</span>
+        <span class="s1">codes_buff</span><span class="s2">, </span><span class="s1">codes_dtype</span><span class="s2">, </span><span class="s1">offset</span><span class="s2">=</span><span class="s1">col</span><span class="s2">.</span><span class="s1">offset</span><span class="s2">, </span><span class="s1">length</span><span class="s2">=</span><span class="s1">col</span><span class="s2">.</span><span class="s1">size</span><span class="s2">()</span>
+    <span class="s2">)</span>
+
+    <span class="s6"># Doing module in order to not get ``IndexError`` for</span>
+    <span class="s6"># out-of-bounds sentinel values in `codes`</span>
+    <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">categories</span><span class="s2">) &gt; </span><span class="s3">0</span><span class="s2">:</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">categories</span><span class="s2">[</span><span class="s1">codes </span><span class="s2">% </span><span class="s1">len</span><span class="s2">(</span><span class="s1">categories</span><span class="s2">)]</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">values </span><span class="s2">= </span><span class="s1">codes</span>
+
+    <span class="s1">cat </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Categorical</span><span class="s2">(</span>
+        <span class="s1">values</span><span class="s2">, </span><span class="s1">categories</span><span class="s2">=</span><span class="s1">categories</span><span class="s2">, </span><span class="s1">ordered</span><span class="s2">=</span><span class="s1">categorical</span><span class="s2">[</span><span class="s4">&quot;is_ordered&quot;</span><span class="s2">]</span>
+    <span class="s2">)</span>
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">(</span><span class="s1">cat</span><span class="s2">)</span>
+
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">set_nulls</span><span class="s2">(</span><span class="s1">data</span><span class="s2">, </span><span class="s1">col</span><span class="s2">, </span><span class="s1">buffers</span><span class="s2">[</span><span class="s4">&quot;validity&quot;</span><span class="s2">])</span>
+    <span class="s0">return </span><span class="s1">data</span><span class="s2">, </span><span class="s1">buffers</span>
+
+
+<span class="s0">def </span><span class="s1">string_column_to_ndarray</span><span class="s2">(</span><span class="s1">col</span><span class="s2">: </span><span class="s1">Column</span><span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">]:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Convert a column holding string data to a NumPy array. 
+ 
+    Parameters 
+    ---------- 
+    col : Column 
+ 
+    Returns 
+    ------- 
+    tuple 
+        Tuple of np.ndarray holding the data and the memory owner object 
+        that keeps the memory alive. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">null_kind</span><span class="s2">, </span><span class="s1">sentinel_val </span><span class="s2">= </span><span class="s1">col</span><span class="s2">.</span><span class="s1">describe_null</span>
+
+    <span class="s0">if </span><span class="s1">null_kind </span><span class="s0">not in </span><span class="s2">(</span>
+        <span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">NON_NULLABLE</span><span class="s2">,</span>
+        <span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">USE_BITMASK</span><span class="s2">,</span>
+        <span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">USE_BYTEMASK</span><span class="s2">,</span>
+    <span class="s2">):</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError</span><span class="s2">(</span>
+            <span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">null_kind</span><span class="s0">} </span><span class="s4">null kind is not yet supported for string columns.&quot;</span>
+        <span class="s2">)</span>
+
+    <span class="s1">buffers </span><span class="s2">= </span><span class="s1">col</span><span class="s2">.</span><span class="s1">get_buffers</span><span class="s2">()</span>
+
+    <span class="s0">assert </span><span class="s1">buffers</span><span class="s2">[</span><span class="s4">&quot;offsets&quot;</span><span class="s2">], </span><span class="s4">&quot;String buffers must contain offsets&quot;</span>
+    <span class="s6"># Retrieve the data buffer containing the UTF-8 code units</span>
+    <span class="s1">data_buff</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">buffers</span><span class="s2">[</span><span class="s4">&quot;data&quot;</span><span class="s2">]</span>
+    <span class="s6"># We're going to reinterpret the buffer as uint8, so make sure we can do it safely</span>
+    <span class="s0">assert </span><span class="s1">col</span><span class="s2">.</span><span class="s1">dtype</span><span class="s2">[</span><span class="s3">2</span><span class="s2">] </span><span class="s0">in </span><span class="s2">(</span>
+        <span class="s1">ArrowCTypes</span><span class="s2">.</span><span class="s1">STRING</span><span class="s2">,</span>
+        <span class="s1">ArrowCTypes</span><span class="s2">.</span><span class="s1">LARGE_STRING</span><span class="s2">,</span>
+    <span class="s2">)  </span><span class="s6"># format_str == utf-8</span>
+    <span class="s6"># Convert the buffers to NumPy arrays. In order to go from STRING to</span>
+    <span class="s6"># an equivalent ndarray, we claim that the buffer is uint8 (i.e., a byte array)</span>
+    <span class="s1">data_dtype </span><span class="s2">= (</span>
+        <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">UINT</span><span class="s2">,</span>
+        <span class="s3">8</span><span class="s2">,</span>
+        <span class="s1">ArrowCTypes</span><span class="s2">.</span><span class="s1">UINT8</span><span class="s2">,</span>
+        <span class="s1">Endianness</span><span class="s2">.</span><span class="s1">NATIVE</span><span class="s2">,</span>
+    <span class="s2">)</span>
+    <span class="s6"># Specify zero offset as we don't want to chunk the string data</span>
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">buffer_to_ndarray</span><span class="s2">(</span><span class="s1">data_buff</span><span class="s2">, </span><span class="s1">data_dtype</span><span class="s2">, </span><span class="s1">offset</span><span class="s2">=</span><span class="s3">0</span><span class="s2">, </span><span class="s1">length</span><span class="s2">=</span><span class="s1">data_buff</span><span class="s2">.</span><span class="s1">bufsize</span><span class="s2">)</span>
+
+    <span class="s6"># Retrieve the offsets buffer containing the index offsets demarcating</span>
+    <span class="s6"># the beginning and the ending of each string</span>
+    <span class="s1">offset_buff</span><span class="s2">, </span><span class="s1">offset_dtype </span><span class="s2">= </span><span class="s1">buffers</span><span class="s2">[</span><span class="s4">&quot;offsets&quot;</span><span class="s2">]</span>
+    <span class="s6"># Offsets buffer contains start-stop positions of strings in the data buffer,</span>
+    <span class="s6"># meaning that it has more elements than in the data buffer, do `col.size() + 1`</span>
+    <span class="s6"># here to pass a proper offsets buffer size</span>
+    <span class="s1">offsets </span><span class="s2">= </span><span class="s1">buffer_to_ndarray</span><span class="s2">(</span>
+        <span class="s1">offset_buff</span><span class="s2">, </span><span class="s1">offset_dtype</span><span class="s2">, </span><span class="s1">offset</span><span class="s2">=</span><span class="s1">col</span><span class="s2">.</span><span class="s1">offset</span><span class="s2">, </span><span class="s1">length</span><span class="s2">=</span><span class="s1">col</span><span class="s2">.</span><span class="s1">size</span><span class="s2">() + </span><span class="s3">1</span>
+    <span class="s2">)</span>
+
+    <span class="s1">null_pos </span><span class="s2">= </span><span class="s0">None</span>
+    <span class="s0">if </span><span class="s1">null_kind </span><span class="s0">in </span><span class="s2">(</span><span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">USE_BITMASK</span><span class="s2">, </span><span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">USE_BYTEMASK</span><span class="s2">):</span>
+        <span class="s1">validity </span><span class="s2">= </span><span class="s1">buffers</span><span class="s2">[</span><span class="s4">&quot;validity&quot;</span><span class="s2">]</span>
+        <span class="s0">if </span><span class="s1">validity </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s1">valid_buff</span><span class="s2">, </span><span class="s1">valid_dtype </span><span class="s2">= </span><span class="s1">validity</span>
+            <span class="s1">null_pos </span><span class="s2">= </span><span class="s1">buffer_to_ndarray</span><span class="s2">(</span>
+                <span class="s1">valid_buff</span><span class="s2">, </span><span class="s1">valid_dtype</span><span class="s2">, </span><span class="s1">offset</span><span class="s2">=</span><span class="s1">col</span><span class="s2">.</span><span class="s1">offset</span><span class="s2">, </span><span class="s1">length</span><span class="s2">=</span><span class="s1">col</span><span class="s2">.</span><span class="s1">size</span><span class="s2">()</span>
+            <span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">sentinel_val </span><span class="s2">== </span><span class="s3">0</span><span class="s2">:</span>
+                <span class="s1">null_pos </span><span class="s2">= ~</span><span class="s1">null_pos</span>
+
+    <span class="s6"># Assemble the strings from the code units</span>
+    <span class="s1">str_list</span><span class="s2">: </span><span class="s1">list</span><span class="s2">[</span><span class="s0">None </span><span class="s2">| </span><span class="s1">float </span><span class="s2">| </span><span class="s1">str</span><span class="s2">] = [</span><span class="s0">None</span><span class="s2">] * </span><span class="s1">col</span><span class="s2">.</span><span class="s1">size</span><span class="s2">()</span>
+    <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">col</span><span class="s2">.</span><span class="s1">size</span><span class="s2">()):</span>
+        <span class="s6"># Check for missing values</span>
+        <span class="s0">if </span><span class="s1">null_pos </span><span class="s0">is not None and </span><span class="s1">null_pos</span><span class="s2">[</span><span class="s1">i</span><span class="s2">]:</span>
+            <span class="s1">str_list</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span>
+            <span class="s0">continue</span>
+
+        <span class="s6"># Extract a range of code units</span>
+        <span class="s1">units </span><span class="s2">= </span><span class="s1">data</span><span class="s2">[</span><span class="s1">offsets</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] : </span><span class="s1">offsets</span><span class="s2">[</span><span class="s1">i </span><span class="s2">+ </span><span class="s3">1</span><span class="s2">]]</span>
+
+        <span class="s6"># Convert the list of code units to bytes</span>
+        <span class="s1">str_bytes </span><span class="s2">= </span><span class="s1">bytes</span><span class="s2">(</span><span class="s1">units</span><span class="s2">)</span>
+
+        <span class="s6"># Create the string</span>
+        <span class="s1">string </span><span class="s2">= </span><span class="s1">str_bytes</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">&quot;utf-8&quot;</span><span class="s2">)</span>
+
+        <span class="s6"># Add to our list of strings</span>
+        <span class="s1">str_list</span><span class="s2">[</span><span class="s1">i</span><span class="s2">] = </span><span class="s1">string</span>
+
+    <span class="s0">if </span><span class="s1">using_string_dtype</span><span class="s2">():</span>
+        <span class="s1">res </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">(</span><span class="s1">str_list</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s4">&quot;str&quot;</span><span class="s2">)</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">res </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">asarray</span><span class="s2">(</span><span class="s1">str_list</span><span class="s2">, </span><span class="s1">dtype</span><span class="s2">=</span><span class="s4">&quot;object&quot;</span><span class="s2">)  </span><span class="s6"># type: ignore[assignment]</span>
+
+    <span class="s0">return </span><span class="s1">res</span><span class="s2">, </span><span class="s1">buffers  </span><span class="s6"># type: ignore[return-value]</span>
+
+
+<span class="s0">def </span><span class="s1">parse_datetime_format_str</span><span class="s2">(</span><span class="s1">format_str</span><span class="s2">, </span><span class="s1">data</span><span class="s2">) </span><span class="s1">-&gt; pd</span><span class="s2">.</span><span class="s1">Series </span><span class="s2">| </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot;Parse datetime `format_str` to interpret the `data`.&quot;&quot;&quot;</span>
+    <span class="s6"># timestamp 'ts{unit}:tz'</span>
+    <span class="s1">timestamp_meta </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">match</span><span class="s2">(</span><span class="s4">r&quot;ts([smun]):(.*)&quot;</span><span class="s2">, </span><span class="s1">format_str</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">timestamp_meta</span><span class="s2">:</span>
+        <span class="s1">unit</span><span class="s2">, </span><span class="s1">tz </span><span class="s2">= </span><span class="s1">timestamp_meta</span><span class="s2">.</span><span class="s1">group</span><span class="s2">(</span><span class="s3">1</span><span class="s2">), </span><span class="s1">timestamp_meta</span><span class="s2">.</span><span class="s1">group</span><span class="s2">(</span><span class="s3">2</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">unit </span><span class="s2">!= </span><span class="s4">&quot;s&quot;</span><span class="s2">:</span>
+            <span class="s6"># the format string describes only a first letter of the unit, so</span>
+            <span class="s6"># add one extra letter to convert the unit to numpy-style:</span>
+            <span class="s6"># 'm' -&gt; 'ms', 'u' -&gt; 'us', 'n' -&gt; 'ns'</span>
+            <span class="s1">unit </span><span class="s2">+= </span><span class="s4">&quot;s&quot;</span>
+        <span class="s1">data </span><span class="s2">= </span><span class="s1">data</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s4">f&quot;datetime64[</span><span class="s0">{</span><span class="s1">unit</span><span class="s0">}</span><span class="s4">]&quot;</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">tz </span><span class="s2">!= </span><span class="s4">&quot;&quot;</span><span class="s2">:</span>
+            <span class="s1">data </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">(</span><span class="s1">data</span><span class="s2">).</span><span class="s1">dt</span><span class="s2">.</span><span class="s1">tz_localize</span><span class="s2">(</span><span class="s4">&quot;UTC&quot;</span><span class="s2">).</span><span class="s1">dt</span><span class="s2">.</span><span class="s1">tz_convert</span><span class="s2">(</span><span class="s1">tz</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">data</span>
+
+    <span class="s6"># date 'td{Days/Ms}'</span>
+    <span class="s1">date_meta </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">match</span><span class="s2">(</span><span class="s4">r&quot;td([Dm])&quot;</span><span class="s2">, </span><span class="s1">format_str</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">date_meta</span><span class="s2">:</span>
+        <span class="s1">unit </span><span class="s2">= </span><span class="s1">date_meta</span><span class="s2">.</span><span class="s1">group</span><span class="s2">(</span><span class="s3">1</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">unit </span><span class="s2">== </span><span class="s4">&quot;D&quot;</span><span class="s2">:</span>
+            <span class="s6"># NumPy doesn't support DAY unit, so converting days to seconds</span>
+            <span class="s6"># (converting to uint64 to avoid overflow)</span>
+            <span class="s1">data </span><span class="s2">= (</span><span class="s1">data</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">np</span><span class="s2">.</span><span class="s1">uint64</span><span class="s2">) * (</span><span class="s3">24 </span><span class="s2">* </span><span class="s3">60 </span><span class="s2">* </span><span class="s3">60</span><span class="s2">)).</span><span class="s1">astype</span><span class="s2">(</span><span class="s4">&quot;datetime64[s]&quot;</span><span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">unit </span><span class="s2">== </span><span class="s4">&quot;m&quot;</span><span class="s2">:</span>
+            <span class="s1">data </span><span class="s2">= </span><span class="s1">data</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s4">&quot;datetime64[ms]&quot;</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">NotImplementedError</span><span class="s2">(</span><span class="s4">f&quot;Date unit is not supported: </span><span class="s0">{</span><span class="s1">unit</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">data</span>
+
+    <span class="s0">raise </span><span class="s1">NotImplementedError</span><span class="s2">(</span><span class="s4">f&quot;DateTime kind is not supported: </span><span class="s0">{</span><span class="s1">format_str</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">datetime_column_to_ndarray</span><span class="s2">(</span><span class="s1">col</span><span class="s2">: </span><span class="s1">Column</span><span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray </span><span class="s2">| </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">]:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Convert a column holding DateTime data to a NumPy array. 
+ 
+    Parameters 
+    ---------- 
+    col : Column 
+ 
+    Returns 
+    ------- 
+    tuple 
+        Tuple of np.ndarray holding the data and the memory owner object 
+        that keeps the memory alive. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">buffers </span><span class="s2">= </span><span class="s1">col</span><span class="s2">.</span><span class="s1">get_buffers</span><span class="s2">()</span>
+
+    <span class="s1">_</span><span class="s2">, </span><span class="s1">col_bit_width</span><span class="s2">, </span><span class="s1">format_str</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">col</span><span class="s2">.</span><span class="s1">dtype</span>
+    <span class="s1">dbuf</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">buffers</span><span class="s2">[</span><span class="s4">&quot;data&quot;</span><span class="s2">]</span>
+    <span class="s6"># Consider dtype being `uint` to get number of units passed since the 01.01.1970</span>
+
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">buffer_to_ndarray</span><span class="s2">(</span>
+        <span class="s1">dbuf</span><span class="s2">,</span>
+        <span class="s2">(</span>
+            <span class="s1">DtypeKind</span><span class="s2">.</span><span class="s1">INT</span><span class="s2">,</span>
+            <span class="s1">col_bit_width</span><span class="s2">,</span>
+            <span class="s1">getattr</span><span class="s2">(</span><span class="s1">ArrowCTypes</span><span class="s2">, </span><span class="s4">f&quot;INT</span><span class="s0">{</span><span class="s1">col_bit_width</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">),</span>
+            <span class="s1">Endianness</span><span class="s2">.</span><span class="s1">NATIVE</span><span class="s2">,</span>
+        <span class="s2">),</span>
+        <span class="s1">offset</span><span class="s2">=</span><span class="s1">col</span><span class="s2">.</span><span class="s1">offset</span><span class="s2">,</span>
+        <span class="s1">length</span><span class="s2">=</span><span class="s1">col</span><span class="s2">.</span><span class="s1">size</span><span class="s2">(),</span>
+    <span class="s2">)</span>
+
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">parse_datetime_format_str</span><span class="s2">(</span><span class="s1">format_str</span><span class="s2">, </span><span class="s1">data</span><span class="s2">)  </span><span class="s6"># type: ignore[assignment]</span>
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">set_nulls</span><span class="s2">(</span><span class="s1">data</span><span class="s2">, </span><span class="s1">col</span><span class="s2">, </span><span class="s1">buffers</span><span class="s2">[</span><span class="s4">&quot;validity&quot;</span><span class="s2">])</span>
+    <span class="s0">return </span><span class="s1">data</span><span class="s2">, </span><span class="s1">buffers</span>
+
+
+<span class="s0">def </span><span class="s1">buffer_to_ndarray</span><span class="s2">(</span>
+    <span class="s1">buffer</span><span class="s2">: </span><span class="s1">Buffer</span><span class="s2">,</span>
+    <span class="s1">dtype</span><span class="s2">: </span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">DtypeKind</span><span class="s2">, </span><span class="s1">int</span><span class="s2">, </span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">],</span>
+    <span class="s2">*,</span>
+    <span class="s1">length</span><span class="s2">: </span><span class="s1">int</span><span class="s2">,</span>
+    <span class="s1">offset</span><span class="s2">: </span><span class="s1">int </span><span class="s2">= </span><span class="s3">0</span><span class="s2">,</span>
+<span class="s2">) </span><span class="s1">-&gt; np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Build a NumPy array from the passed buffer. 
+ 
+    Parameters 
+    ---------- 
+    buffer : Buffer 
+        Buffer to build a NumPy array from. 
+    dtype : tuple 
+        Data type of the buffer conforming protocol dtypes format. 
+    offset : int, default: 0 
+        Number of elements to offset from the start of the buffer. 
+    length : int, optional 
+        If the buffer is a bit-mask, specifies a number of bits to read 
+        from the buffer. Has no effect otherwise. 
+ 
+    Returns 
+    ------- 
+    np.ndarray 
+ 
+    Notes 
+    ----- 
+    The returned array doesn't own the memory. The caller of this function is 
+    responsible for keeping the memory owner object alive as long as 
+    the returned NumPy array is being used. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">kind</span><span class="s2">, </span><span class="s1">bit_width</span><span class="s2">, </span><span class="s1">_</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">dtype</span>
+
+    <span class="s1">column_dtype </span><span class="s2">= </span><span class="s1">_NP_DTYPES</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">kind</span><span class="s2">, {}).</span><span class="s1">get</span><span class="s2">(</span><span class="s1">bit_width</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">column_dtype </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError</span><span class="s2">(</span><span class="s4">f&quot;Conversion for </span><span class="s0">{</span><span class="s1">dtype</span><span class="s0">} </span><span class="s4">is not yet supported.&quot;</span><span class="s2">)</span>
+
+    <span class="s6"># TODO: No DLPack yet, so need to construct a new ndarray from the data pointer</span>
+    <span class="s6"># and size in the buffer plus the dtype on the column. Use DLPack as NumPy supports</span>
+    <span class="s6"># it since https://github.com/numpy/numpy/pull/19083</span>
+    <span class="s1">ctypes_type </span><span class="s2">= </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ctypeslib</span><span class="s2">.</span><span class="s1">as_ctypes_type</span><span class="s2">(</span><span class="s1">column_dtype</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">bit_width </span><span class="s2">== </span><span class="s3">1</span><span class="s2">:</span>
+        <span class="s0">assert </span><span class="s1">length </span><span class="s0">is not None</span><span class="s2">, </span><span class="s4">&quot;`length` must be specified for a bit-mask buffer.&quot;</span>
+        <span class="s1">pa </span><span class="s2">= </span><span class="s1">import_optional_dependency</span><span class="s2">(</span><span class="s4">&quot;pyarrow&quot;</span><span class="s2">)</span>
+        <span class="s1">arr </span><span class="s2">= </span><span class="s1">pa</span><span class="s2">.</span><span class="s1">BooleanArray</span><span class="s2">.</span><span class="s1">from_buffers</span><span class="s2">(</span>
+            <span class="s1">pa</span><span class="s2">.</span><span class="s1">bool_</span><span class="s2">(),</span>
+            <span class="s1">length</span><span class="s2">,</span>
+            <span class="s2">[</span><span class="s0">None</span><span class="s2">, </span><span class="s1">pa</span><span class="s2">.</span><span class="s1">foreign_buffer</span><span class="s2">(</span><span class="s1">buffer</span><span class="s2">.</span><span class="s1">ptr</span><span class="s2">, </span><span class="s1">length</span><span class="s2">)],</span>
+            <span class="s1">offset</span><span class="s2">=</span><span class="s1">offset</span><span class="s2">,</span>
+        <span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">np</span><span class="s2">.</span><span class="s1">asarray</span><span class="s2">(</span><span class="s1">arr</span><span class="s2">)</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">data_pointer </span><span class="s2">= </span><span class="s1">ctypes</span><span class="s2">.</span><span class="s1">cast</span><span class="s2">(</span>
+            <span class="s1">buffer</span><span class="s2">.</span><span class="s1">ptr </span><span class="s2">+ (</span><span class="s1">offset </span><span class="s2">* </span><span class="s1">bit_width </span><span class="s2">// </span><span class="s3">8</span><span class="s2">), </span><span class="s1">ctypes</span><span class="s2">.</span><span class="s1">POINTER</span><span class="s2">(</span><span class="s1">ctypes_type</span><span class="s2">)</span>
+        <span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">length </span><span class="s2">&gt; </span><span class="s3">0</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ctypeslib</span><span class="s2">.</span><span class="s1">as_array</span><span class="s2">(</span><span class="s1">data_pointer</span><span class="s2">, </span><span class="s1">shape</span><span class="s2">=(</span><span class="s1">length</span><span class="s2">,))</span>
+        <span class="s0">return </span><span class="s1">np</span><span class="s2">.</span><span class="s1">array</span><span class="s2">([], </span><span class="s1">dtype</span><span class="s2">=</span><span class="s1">ctypes_type</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">overload</span>
+<span class="s0">def </span><span class="s1">set_nulls</span><span class="s2">(</span>
+    <span class="s1">data</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">,</span>
+    <span class="s1">col</span><span class="s2">: </span><span class="s1">Column</span><span class="s2">,</span>
+    <span class="s1">validity</span><span class="s2">: </span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">Buffer</span><span class="s2">, </span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">DtypeKind</span><span class="s2">, </span><span class="s1">int</span><span class="s2">, </span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]] | </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">allow_modify_inplace</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= ...,</span>
+<span class="s2">) </span><span class="s1">-&gt; np</span><span class="s2">.</span><span class="s1">ndarray</span><span class="s2">: ...</span>
+
+
+<span class="s2">@</span><span class="s1">overload</span>
+<span class="s0">def </span><span class="s1">set_nulls</span><span class="s2">(</span>
+    <span class="s1">data</span><span class="s2">: </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">,</span>
+    <span class="s1">col</span><span class="s2">: </span><span class="s1">Column</span><span class="s2">,</span>
+    <span class="s1">validity</span><span class="s2">: </span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">Buffer</span><span class="s2">, </span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">DtypeKind</span><span class="s2">, </span><span class="s1">int</span><span class="s2">, </span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]] | </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">allow_modify_inplace</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= ...,</span>
+<span class="s2">) </span><span class="s1">-&gt; pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">: ...</span>
+
+
+<span class="s2">@</span><span class="s1">overload</span>
+<span class="s0">def </span><span class="s1">set_nulls</span><span class="s2">(</span>
+    <span class="s1">data</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray </span><span class="s2">| </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">,</span>
+    <span class="s1">col</span><span class="s2">: </span><span class="s1">Column</span><span class="s2">,</span>
+    <span class="s1">validity</span><span class="s2">: </span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">Buffer</span><span class="s2">, </span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">DtypeKind</span><span class="s2">, </span><span class="s1">int</span><span class="s2">, </span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]] | </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">allow_modify_inplace</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= ...,</span>
+<span class="s2">) </span><span class="s1">-&gt; np</span><span class="s2">.</span><span class="s1">ndarray </span><span class="s2">| </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">: ...</span>
+
+
+<span class="s0">def </span><span class="s1">set_nulls</span><span class="s2">(</span>
+    <span class="s1">data</span><span class="s2">: </span><span class="s1">np</span><span class="s2">.</span><span class="s1">ndarray </span><span class="s2">| </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">,</span>
+    <span class="s1">col</span><span class="s2">: </span><span class="s1">Column</span><span class="s2">,</span>
+    <span class="s1">validity</span><span class="s2">: </span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">Buffer</span><span class="s2">, </span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">DtypeKind</span><span class="s2">, </span><span class="s1">int</span><span class="s2">, </span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]] | </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">allow_modify_inplace</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">True</span><span class="s2">,</span>
+<span class="s2">) </span><span class="s1">-&gt; np</span><span class="s2">.</span><span class="s1">ndarray </span><span class="s2">| </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Set null values for the data according to the column null kind. 
+ 
+    Parameters 
+    ---------- 
+    data : np.ndarray or pd.Series 
+        Data to set nulls in. 
+    col : Column 
+        Column object that describes the `data`. 
+    validity : tuple(Buffer, dtype) or None 
+        The return value of ``col.buffers()``. We do not access the ``col.buffers()`` 
+        here to not take the ownership of the memory of buffer objects. 
+    allow_modify_inplace : bool, default: True 
+        Whether to modify the `data` inplace when zero-copy is possible (True) or always 
+        modify a copy of the `data` (False). 
+ 
+    Returns 
+    ------- 
+    np.ndarray or pd.Series 
+        Data with the nulls being set. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">validity </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">data</span>
+    <span class="s1">null_kind</span><span class="s2">, </span><span class="s1">sentinel_val </span><span class="s2">= </span><span class="s1">col</span><span class="s2">.</span><span class="s1">describe_null</span>
+    <span class="s1">null_pos </span><span class="s2">= </span><span class="s0">None</span>
+
+    <span class="s0">if </span><span class="s1">null_kind </span><span class="s2">== </span><span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">USE_SENTINEL</span><span class="s2">:</span>
+        <span class="s1">null_pos </span><span class="s2">= </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">Series</span><span class="s2">(</span><span class="s1">data</span><span class="s2">) == </span><span class="s1">sentinel_val</span>
+    <span class="s0">elif </span><span class="s1">null_kind </span><span class="s0">in </span><span class="s2">(</span><span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">USE_BITMASK</span><span class="s2">, </span><span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">USE_BYTEMASK</span><span class="s2">):</span>
+        <span class="s1">valid_buff</span><span class="s2">, </span><span class="s1">valid_dtype </span><span class="s2">= </span><span class="s1">validity</span>
+        <span class="s1">null_pos </span><span class="s2">= </span><span class="s1">buffer_to_ndarray</span><span class="s2">(</span>
+            <span class="s1">valid_buff</span><span class="s2">, </span><span class="s1">valid_dtype</span><span class="s2">, </span><span class="s1">offset</span><span class="s2">=</span><span class="s1">col</span><span class="s2">.</span><span class="s1">offset</span><span class="s2">, </span><span class="s1">length</span><span class="s2">=</span><span class="s1">col</span><span class="s2">.</span><span class="s1">size</span><span class="s2">()</span>
+        <span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">sentinel_val </span><span class="s2">== </span><span class="s3">0</span><span class="s2">:</span>
+            <span class="s1">null_pos </span><span class="s2">= ~</span><span class="s1">null_pos</span>
+    <span class="s0">elif </span><span class="s1">null_kind </span><span class="s0">in </span><span class="s2">(</span><span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">NON_NULLABLE</span><span class="s2">, </span><span class="s1">ColumnNullType</span><span class="s2">.</span><span class="s1">USE_NAN</span><span class="s2">):</span>
+        <span class="s0">pass</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError</span><span class="s2">(</span><span class="s4">f&quot;Null kind </span><span class="s0">{</span><span class="s1">null_kind</span><span class="s0">} </span><span class="s4">is not yet supported.&quot;</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">null_pos </span><span class="s0">is not None and </span><span class="s1">np</span><span class="s2">.</span><span class="s1">any</span><span class="s2">(</span><span class="s1">null_pos</span><span class="s2">):</span>
+        <span class="s0">if not </span><span class="s1">allow_modify_inplace</span><span class="s2">:</span>
+            <span class="s1">data </span><span class="s2">= </span><span class="s1">data</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">data</span><span class="s2">[</span><span class="s1">null_pos</span><span class="s2">] = </span><span class="s0">None</span>
+        <span class="s0">except </span><span class="s1">TypeError</span><span class="s2">:</span>
+            <span class="s6"># TypeError happens if the `data` dtype appears to be non-nullable</span>
+            <span class="s6"># in numpy notation (bool, int, uint). If this happens,</span>
+            <span class="s6"># cast the `data` to nullable float dtype.</span>
+            <span class="s1">data </span><span class="s2">= </span><span class="s1">data</span><span class="s2">.</span><span class="s1">astype</span><span class="s2">(</span><span class="s1">float</span><span class="s2">)</span>
+            <span class="s1">data</span><span class="s2">[</span><span class="s1">null_pos</span><span class="s2">] = </span><span class="s0">None</span>
+
+    <span class="s0">return </span><span class="s1">data</span>
+</pre>
+</body>
+</html>

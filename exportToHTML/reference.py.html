@@ -1,0 +1,147 @@
+<html>
+<head>
+<title>reference.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #5f826b; font-style: italic;}
+.s5 { color: #2aacb8;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+reference.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright (c) 2010-2024 openpyxl</span>
+
+<span class="s2">from </span><span class="s1">itertools </span><span class="s2">import </span><span class="s1">chain</span>
+
+<span class="s2">from </span><span class="s1">openpyxl</span><span class="s3">.</span><span class="s1">descriptors</span><span class="s3">.</span><span class="s1">serialisable </span><span class="s2">import </span><span class="s1">Serialisable</span>
+<span class="s2">from </span><span class="s1">openpyxl</span><span class="s3">.</span><span class="s1">descriptors </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">MinMax</span><span class="s3">,</span>
+    <span class="s1">Typed</span><span class="s3">,</span>
+    <span class="s1">String</span><span class="s3">,</span>
+    <span class="s1">Strict</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s2">from </span><span class="s1">openpyxl</span><span class="s3">.</span><span class="s1">worksheet</span><span class="s3">.</span><span class="s1">worksheet </span><span class="s2">import </span><span class="s1">Worksheet</span>
+<span class="s2">from </span><span class="s1">openpyxl</span><span class="s3">.</span><span class="s1">utils </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">get_column_letter</span><span class="s3">,</span>
+    <span class="s1">range_to_tuple</span><span class="s3">,</span>
+    <span class="s1">quote_sheetname</span>
+<span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">DummyWorksheet</span><span class="s3">:</span>
+
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">title</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">title </span><span class="s3">= </span><span class="s1">title</span>
+
+
+<span class="s2">class </span><span class="s1">Reference</span><span class="s3">(</span><span class="s1">Strict</span><span class="s3">):</span>
+
+    <span class="s4">&quot;&quot;&quot; 
+    Normalise cell range references 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">min_row </span><span class="s3">= </span><span class="s1">MinMax</span><span class="s3">(</span><span class="s1">min</span><span class="s3">=</span><span class="s5">1</span><span class="s3">, </span><span class="s1">max</span><span class="s3">=</span><span class="s5">1000000</span><span class="s3">, </span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">int</span><span class="s3">)</span>
+    <span class="s1">max_row </span><span class="s3">= </span><span class="s1">MinMax</span><span class="s3">(</span><span class="s1">min</span><span class="s3">=</span><span class="s5">1</span><span class="s3">, </span><span class="s1">max</span><span class="s3">=</span><span class="s5">1000000</span><span class="s3">, </span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">int</span><span class="s3">)</span>
+    <span class="s1">min_col </span><span class="s3">= </span><span class="s1">MinMax</span><span class="s3">(</span><span class="s1">min</span><span class="s3">=</span><span class="s5">1</span><span class="s3">, </span><span class="s1">max</span><span class="s3">=</span><span class="s5">16384</span><span class="s3">, </span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">int</span><span class="s3">)</span>
+    <span class="s1">max_col </span><span class="s3">= </span><span class="s1">MinMax</span><span class="s3">(</span><span class="s1">min</span><span class="s3">=</span><span class="s5">1</span><span class="s3">, </span><span class="s1">max</span><span class="s3">=</span><span class="s5">16384</span><span class="s3">, </span><span class="s1">expected_type</span><span class="s3">=</span><span class="s1">int</span><span class="s3">)</span>
+    <span class="s1">range_string </span><span class="s3">= </span><span class="s1">String</span><span class="s3">(</span><span class="s1">allow_none</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">,</span>
+                 <span class="s1">worksheet</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">min_col</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">min_row</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">max_col</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">max_row</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                 <span class="s1">range_string</span><span class="s3">=</span><span class="s2">None</span>
+                 <span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">range_string </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">sheetname</span><span class="s3">, </span><span class="s1">boundaries </span><span class="s3">= </span><span class="s1">range_to_tuple</span><span class="s3">(</span><span class="s1">range_string</span><span class="s3">)</span>
+            <span class="s1">min_col</span><span class="s3">, </span><span class="s1">min_row</span><span class="s3">, </span><span class="s1">max_col</span><span class="s3">, </span><span class="s1">max_row </span><span class="s3">= </span><span class="s1">boundaries</span>
+            <span class="s1">worksheet </span><span class="s3">= </span><span class="s1">DummyWorksheet</span><span class="s3">(</span><span class="s1">sheetname</span><span class="s3">)</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">worksheet </span><span class="s3">= </span><span class="s1">worksheet</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">min_col </span><span class="s3">= </span><span class="s1">min_col</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">min_row </span><span class="s3">= </span><span class="s1">min_row</span>
+        <span class="s2">if </span><span class="s1">max_col </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">max_col </span><span class="s3">= </span><span class="s1">min_col</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">max_col </span><span class="s3">= </span><span class="s1">max_col</span>
+        <span class="s2">if </span><span class="s1">max_row </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">max_row </span><span class="s3">= </span><span class="s1">min_row</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">max_row </span><span class="s3">= </span><span class="s1">max_row</span>
+
+
+    <span class="s2">def </span><span class="s1">__repr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">str</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">__str__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">fmt </span><span class="s3">= </span><span class="s6">u&quot;{0}!${1}${2}:${3}${4}&quot;</span>
+        <span class="s2">if </span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col </span><span class="s3">== </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col</span>
+            <span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row </span><span class="s3">== </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span><span class="s3">):</span>
+            <span class="s1">fmt </span><span class="s3">= </span><span class="s6">u&quot;{0}!${1}${2}&quot;</span>
+        <span class="s2">return </span><span class="s1">fmt</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">sheetname</span><span class="s3">,</span>
+                          <span class="s1">get_column_letter</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col</span><span class="s3">), </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span><span class="s3">,</span>
+                          <span class="s1">get_column_letter</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col</span><span class="s3">), </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span>
+                          <span class="s3">)</span>
+
+
+    <span class="s1">__str__ </span><span class="s3">= </span><span class="s1">__str__</span>
+
+
+
+    <span class="s2">def </span><span class="s1">__len__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row </span><span class="s3">== </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s5">1 </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col </span><span class="s3">- </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col</span>
+        <span class="s2">return </span><span class="s5">1 </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row </span><span class="s3">- </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span>
+
+
+    <span class="s2">def </span><span class="s1">__eq__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">str</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) == </span><span class="s1">str</span><span class="s3">(</span><span class="s1">other</span><span class="s3">)</span>
+
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">rows</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Return all rows in the range 
+        &quot;&quot;&quot;</span>
+        <span class="s2">for </span><span class="s1">row </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span><span class="s3">+</span><span class="s5">1</span><span class="s3">):</span>
+            <span class="s2">yield </span><span class="s1">Reference</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">worksheet</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col</span><span class="s3">, </span><span class="s1">row</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col</span><span class="s3">, </span><span class="s1">row</span><span class="s3">)</span>
+
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">cols</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Return all columns in the range 
+        &quot;&quot;&quot;</span>
+        <span class="s2">for </span><span class="s1">col </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_col</span><span class="s3">+</span><span class="s5">1</span><span class="s3">):</span>
+            <span class="s2">yield </span><span class="s1">Reference</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">worksheet</span><span class="s3">, </span><span class="s1">col</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span><span class="s3">, </span><span class="s1">col</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span><span class="s3">)</span>
+
+
+    <span class="s2">def </span><span class="s1">pop</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Return and remove the first cell 
+        &quot;&quot;&quot;</span>
+        <span class="s1">cell </span><span class="s3">= </span><span class="s6">&quot;{0}{1}&quot;</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">get_column_letter</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_col</span><span class="s3">), </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">min_row </span><span class="s3">== </span><span class="s1">self</span><span class="s3">.</span><span class="s1">max_row</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">min_col </span><span class="s3">+= </span><span class="s5">1</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">min_row </span><span class="s3">+= </span><span class="s5">1</span>
+        <span class="s2">return </span><span class="s1">cell</span>
+
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">sheetname</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">quote_sheetname</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">worksheet</span><span class="s3">.</span><span class="s1">title</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

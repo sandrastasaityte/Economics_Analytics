@@ -1,0 +1,256 @@
+<html>
+<head>
+<title>test_gcs.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #5f826b; font-style: italic;}
+.s5 { color: #2aacb8;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_gcs.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">io </span><span class="s0">import </span><span class="s1">BytesIO</span>
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">pathlib</span>
+<span class="s0">import </span><span class="s1">tarfile</span>
+<span class="s0">import </span><span class="s1">zipfile</span>
+
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">compat</span><span class="s2">.</span><span class="s1">pyarrow </span><span class="s0">import </span><span class="s1">pa_version_under17p0</span>
+
+<span class="s0">from </span><span class="s1">pandas </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">DataFrame</span><span class="s2">,</span>
+    <span class="s1">Index</span><span class="s2">,</span>
+    <span class="s1">date_range</span><span class="s2">,</span>
+    <span class="s1">read_csv</span><span class="s2">,</span>
+    <span class="s1">read_excel</span><span class="s2">,</span>
+    <span class="s1">read_json</span><span class="s2">,</span>
+    <span class="s1">read_parquet</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">import </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">_testing </span><span class="s0">as </span><span class="s1">tm</span>
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">util </span><span class="s0">import </span><span class="s1">_test_decorators </span><span class="s0">as </span><span class="s1">td</span>
+
+<span class="s1">pytestmark </span><span class="s2">= </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">filterwarnings</span><span class="s2">(</span>
+    <span class="s3">&quot;ignore:Passing a BlockManager to DataFrame:DeprecationWarning&quot;</span>
+<span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">fixture</span>
+<span class="s0">def </span><span class="s1">gcs_buffer</span><span class="s2">():</span>
+    <span class="s4">&quot;&quot;&quot;Emulate GCS using a binary buffer.&quot;&quot;&quot;</span>
+    <span class="s1">pytest</span><span class="s2">.</span><span class="s1">importorskip</span><span class="s2">(</span><span class="s3">&quot;gcsfs&quot;</span><span class="s2">)</span>
+    <span class="s1">fsspec </span><span class="s2">= </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">importorskip</span><span class="s2">(</span><span class="s3">&quot;fsspec&quot;</span><span class="s2">)</span>
+
+    <span class="s1">gcs_buffer </span><span class="s2">= </span><span class="s1">BytesIO</span><span class="s2">()</span>
+    <span class="s1">gcs_buffer</span><span class="s2">.</span><span class="s1">close </span><span class="s2">= </span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">True</span>
+
+    <span class="s0">class </span><span class="s1">MockGCSFileSystem</span><span class="s2">(</span><span class="s1">fsspec</span><span class="s2">.</span><span class="s1">AbstractFileSystem</span><span class="s2">):</span>
+        <span class="s2">@</span><span class="s1">staticmethod</span>
+        <span class="s0">def </span><span class="s1">open</span><span class="s2">(*</span><span class="s1">args</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">):</span>
+            <span class="s1">gcs_buffer</span><span class="s2">.</span><span class="s1">seek</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)</span>
+            <span class="s0">return </span><span class="s1">gcs_buffer</span>
+
+        <span class="s0">def </span><span class="s1">ls</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">path</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">):</span>
+            <span class="s6"># needed for pyarrow</span>
+            <span class="s0">return </span><span class="s2">[{</span><span class="s3">&quot;name&quot;</span><span class="s2">: </span><span class="s1">path</span><span class="s2">, </span><span class="s3">&quot;type&quot;</span><span class="s2">: </span><span class="s3">&quot;file&quot;</span><span class="s2">}]</span>
+
+    <span class="s6"># Overwrites the default implementation from gcsfs to our mock class</span>
+    <span class="s1">fsspec</span><span class="s2">.</span><span class="s1">register_implementation</span><span class="s2">(</span><span class="s3">&quot;gs&quot;</span><span class="s2">, </span><span class="s1">MockGCSFileSystem</span><span class="s2">, </span><span class="s1">clobber</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s0">return </span><span class="s1">gcs_buffer</span>
+
+
+<span class="s6"># Patches pyarrow; other processes should not pick up change</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">single_cpu</span>
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s3">&quot;format&quot;</span><span class="s2">, [</span><span class="s3">&quot;csv&quot;</span><span class="s2">, </span><span class="s3">&quot;json&quot;</span><span class="s2">, </span><span class="s3">&quot;parquet&quot;</span><span class="s2">, </span><span class="s3">&quot;excel&quot;</span><span class="s2">, </span><span class="s3">&quot;markdown&quot;</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_to_read_gcs</span><span class="s2">(</span><span class="s1">gcs_buffer</span><span class="s2">, </span><span class="s1">format</span><span class="s2">, </span><span class="s1">monkeypatch</span><span class="s2">, </span><span class="s1">capsys</span><span class="s2">, </span><span class="s1">request</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Test that many to/read functions support GCS. 
+ 
+    GH 33987 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">df1 </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span>
+        <span class="s2">{</span>
+            <span class="s3">&quot;int&quot;</span><span class="s2">: [</span><span class="s5">1</span><span class="s2">, </span><span class="s5">3</span><span class="s2">],</span>
+            <span class="s3">&quot;float&quot;</span><span class="s2">: [</span><span class="s5">2.0</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">],</span>
+            <span class="s3">&quot;str&quot;</span><span class="s2">: [</span><span class="s3">&quot;t&quot;</span><span class="s2">, </span><span class="s3">&quot;s&quot;</span><span class="s2">],</span>
+            <span class="s3">&quot;dt&quot;</span><span class="s2">: </span><span class="s1">date_range</span><span class="s2">(</span><span class="s3">&quot;2018-06-18&quot;</span><span class="s2">, </span><span class="s1">periods</span><span class="s2">=</span><span class="s5">2</span><span class="s2">, </span><span class="s1">unit</span><span class="s2">=</span><span class="s3">&quot;ns&quot;</span><span class="s2">),</span>
+        <span class="s2">}</span>
+    <span class="s2">)</span>
+
+    <span class="s1">path </span><span class="s2">= </span><span class="s3">f&quot;gs://test/test.</span><span class="s0">{</span><span class="s1">format</span><span class="s0">}</span><span class="s3">&quot;</span>
+
+    <span class="s0">if </span><span class="s1">format </span><span class="s2">== </span><span class="s3">&quot;csv&quot;</span><span class="s2">:</span>
+        <span class="s1">df1</span><span class="s2">.</span><span class="s1">to_csv</span><span class="s2">(</span><span class="s1">path</span><span class="s2">, </span><span class="s1">index</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+        <span class="s1">df2 </span><span class="s2">= </span><span class="s1">read_csv</span><span class="s2">(</span><span class="s1">path</span><span class="s2">, </span><span class="s1">parse_dates</span><span class="s2">=[</span><span class="s3">&quot;dt&quot;</span><span class="s2">], </span><span class="s1">index_col</span><span class="s2">=</span><span class="s5">0</span><span class="s2">)</span>
+    <span class="s0">elif </span><span class="s1">format </span><span class="s2">== </span><span class="s3">&quot;excel&quot;</span><span class="s2">:</span>
+        <span class="s1">path </span><span class="s2">= </span><span class="s3">&quot;gs://test/test.xlsx&quot;</span>
+        <span class="s1">df1</span><span class="s2">.</span><span class="s1">to_excel</span><span class="s2">(</span><span class="s1">path</span><span class="s2">)</span>
+        <span class="s1">df2 </span><span class="s2">= </span><span class="s1">read_excel</span><span class="s2">(</span><span class="s1">path</span><span class="s2">, </span><span class="s1">parse_dates</span><span class="s2">=[</span><span class="s3">&quot;dt&quot;</span><span class="s2">], </span><span class="s1">index_col</span><span class="s2">=</span><span class="s5">0</span><span class="s2">)</span>
+    <span class="s0">elif </span><span class="s1">format </span><span class="s2">== </span><span class="s3">&quot;json&quot;</span><span class="s2">:</span>
+        <span class="s1">df1</span><span class="s2">.</span><span class="s1">to_json</span><span class="s2">(</span><span class="s1">path</span><span class="s2">, </span><span class="s1">date_format</span><span class="s2">=</span><span class="s3">&quot;iso&quot;</span><span class="s2">)</span>
+        <span class="s1">df2 </span><span class="s2">= </span><span class="s1">read_json</span><span class="s2">(</span><span class="s1">path</span><span class="s2">, </span><span class="s1">convert_dates</span><span class="s2">=[</span><span class="s3">&quot;dt&quot;</span><span class="s2">])</span>
+    <span class="s0">elif </span><span class="s1">format </span><span class="s2">== </span><span class="s3">&quot;parquet&quot;</span><span class="s2">:</span>
+        <span class="s1">pytest</span><span class="s2">.</span><span class="s1">importorskip</span><span class="s2">(</span><span class="s3">&quot;pyarrow&quot;</span><span class="s2">)</span>
+        <span class="s1">pa_fs </span><span class="s2">= </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">importorskip</span><span class="s2">(</span><span class="s3">&quot;pyarrow.fs&quot;</span><span class="s2">)</span>
+
+        <span class="s0">class </span><span class="s1">MockFileSystem</span><span class="s2">(</span><span class="s1">pa_fs</span><span class="s2">.</span><span class="s1">FileSystem</span><span class="s2">):</span>
+            <span class="s2">@</span><span class="s1">staticmethod</span>
+            <span class="s0">def </span><span class="s1">from_uri</span><span class="s2">(</span><span class="s1">path</span><span class="s2">):</span>
+                <span class="s1">print</span><span class="s2">(</span><span class="s3">&quot;Using pyarrow filesystem&quot;</span><span class="s2">)</span>
+                <span class="s1">to_local </span><span class="s2">= </span><span class="s1">pathlib</span><span class="s2">.</span><span class="s1">Path</span><span class="s2">(</span><span class="s1">path</span><span class="s2">.</span><span class="s1">replace</span><span class="s2">(</span><span class="s3">&quot;gs://&quot;</span><span class="s2">, </span><span class="s3">&quot;&quot;</span><span class="s2">)).</span><span class="s1">absolute</span><span class="s2">().</span><span class="s1">as_uri</span><span class="s2">()</span>
+                <span class="s0">return </span><span class="s1">pa_fs</span><span class="s2">.</span><span class="s1">LocalFileSystem</span><span class="s2">(</span><span class="s1">to_local</span><span class="s2">)</span>
+
+        <span class="s1">request</span><span class="s2">.</span><span class="s1">applymarker</span><span class="s2">(</span>
+            <span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">xfail</span><span class="s2">(</span>
+                <span class="s0">not </span><span class="s1">pa_version_under17p0</span><span class="s2">,</span>
+                <span class="s1">raises</span><span class="s2">=</span><span class="s1">TypeError</span><span class="s2">,</span>
+                <span class="s1">reason</span><span class="s2">=</span><span class="s3">&quot;pyarrow 17 broke the mocked filesystem&quot;</span><span class="s2">,</span>
+            <span class="s2">)</span>
+        <span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">context</span><span class="s2">() </span><span class="s0">as </span><span class="s1">m</span><span class="s2">:</span>
+            <span class="s1">m</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s1">pa_fs</span><span class="s2">, </span><span class="s3">&quot;FileSystem&quot;</span><span class="s2">, </span><span class="s1">MockFileSystem</span><span class="s2">)</span>
+            <span class="s1">df1</span><span class="s2">.</span><span class="s1">to_parquet</span><span class="s2">(</span><span class="s1">path</span><span class="s2">)</span>
+            <span class="s1">df2 </span><span class="s2">= </span><span class="s1">read_parquet</span><span class="s2">(</span><span class="s1">path</span><span class="s2">)</span>
+        <span class="s1">captured </span><span class="s2">= </span><span class="s1">capsys</span><span class="s2">.</span><span class="s1">readouterr</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">captured</span><span class="s2">.</span><span class="s1">out </span><span class="s2">== </span><span class="s3">&quot;Using pyarrow filesystem</span><span class="s0">\n</span><span class="s3">Using pyarrow filesystem</span><span class="s0">\n</span><span class="s3">&quot;</span>
+    <span class="s0">elif </span><span class="s1">format </span><span class="s2">== </span><span class="s3">&quot;markdown&quot;</span><span class="s2">:</span>
+        <span class="s1">pytest</span><span class="s2">.</span><span class="s1">importorskip</span><span class="s2">(</span><span class="s3">&quot;tabulate&quot;</span><span class="s2">)</span>
+        <span class="s1">df1</span><span class="s2">.</span><span class="s1">to_markdown</span><span class="s2">(</span><span class="s1">path</span><span class="s2">)</span>
+        <span class="s1">df2 </span><span class="s2">= </span><span class="s1">df1</span>
+
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">df1</span><span class="s2">[:]</span>
+    <span class="s0">if </span><span class="s1">format </span><span class="s0">in </span><span class="s2">[</span><span class="s3">&quot;csv&quot;</span><span class="s2">, </span><span class="s3">&quot;excel&quot;</span><span class="s2">, </span><span class="s3">&quot;json&quot;</span><span class="s2">]:</span>
+        <span class="s1">expected</span><span class="s2">[</span><span class="s3">&quot;dt&quot;</span><span class="s2">] = </span><span class="s1">expected</span><span class="s2">[</span><span class="s3">&quot;dt&quot;</span><span class="s2">].</span><span class="s1">dt</span><span class="s2">.</span><span class="s1">as_unit</span><span class="s2">(</span><span class="s3">&quot;us&quot;</span><span class="s2">)</span>
+
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_frame_equal</span><span class="s2">(</span><span class="s1">df2</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">assert_equal_zip_safe</span><span class="s2">(</span><span class="s1">result</span><span class="s2">: </span><span class="s1">bytes</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">: </span><span class="s1">bytes</span><span class="s2">, </span><span class="s1">compression</span><span class="s2">: </span><span class="s1">str</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    For zip compression, only compare the CRC-32 checksum of the file contents 
+    to avoid checking the time-dependent last-modified timestamp which 
+    in some CI builds is off-by-one 
+ 
+    See https://en.wikipedia.org/wiki/ZIP_(file_format)#File_headers 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">compression </span><span class="s2">== </span><span class="s3">&quot;zip&quot;</span><span class="s2">:</span>
+        <span class="s6"># Only compare the CRC checksum of the file contents</span>
+        <span class="s0">with </span><span class="s2">(</span>
+            <span class="s1">zipfile</span><span class="s2">.</span><span class="s1">ZipFile</span><span class="s2">(</span><span class="s1">BytesIO</span><span class="s2">(</span><span class="s1">result</span><span class="s2">)) </span><span class="s0">as </span><span class="s1">exp</span><span class="s2">,</span>
+            <span class="s1">zipfile</span><span class="s2">.</span><span class="s1">ZipFile</span><span class="s2">(</span><span class="s1">BytesIO</span><span class="s2">(</span><span class="s1">expected</span><span class="s2">)) </span><span class="s0">as </span><span class="s1">res</span><span class="s2">,</span>
+        <span class="s2">):</span>
+            <span class="s0">for </span><span class="s1">res_info</span><span class="s2">, </span><span class="s1">exp_info </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span><span class="s1">res</span><span class="s2">.</span><span class="s1">infolist</span><span class="s2">(), </span><span class="s1">exp</span><span class="s2">.</span><span class="s1">infolist</span><span class="s2">()):</span>
+                <span class="s0">assert </span><span class="s1">res_info</span><span class="s2">.</span><span class="s1">CRC </span><span class="s2">== </span><span class="s1">exp_info</span><span class="s2">.</span><span class="s1">CRC</span>
+    <span class="s0">elif </span><span class="s1">compression </span><span class="s2">== </span><span class="s3">&quot;tar&quot;</span><span class="s2">:</span>
+        <span class="s0">with </span><span class="s2">(</span>
+            <span class="s1">tarfile</span><span class="s2">.</span><span class="s1">open</span><span class="s2">(</span><span class="s1">fileobj</span><span class="s2">=</span><span class="s1">BytesIO</span><span class="s2">(</span><span class="s1">result</span><span class="s2">)) </span><span class="s0">as </span><span class="s1">tar_exp</span><span class="s2">,</span>
+            <span class="s1">tarfile</span><span class="s2">.</span><span class="s1">open</span><span class="s2">(</span><span class="s1">fileobj</span><span class="s2">=</span><span class="s1">BytesIO</span><span class="s2">(</span><span class="s1">expected</span><span class="s2">)) </span><span class="s0">as </span><span class="s1">tar_res</span><span class="s2">,</span>
+        <span class="s2">):</span>
+            <span class="s0">for </span><span class="s1">tar_res_info</span><span class="s2">, </span><span class="s1">tar_exp_info </span><span class="s0">in </span><span class="s1">zip</span><span class="s2">(</span>
+                <span class="s1">tar_res</span><span class="s2">.</span><span class="s1">getmembers</span><span class="s2">(), </span><span class="s1">tar_exp</span><span class="s2">.</span><span class="s1">getmembers</span><span class="s2">()</span>
+            <span class="s2">):</span>
+                <span class="s1">actual_file </span><span class="s2">= </span><span class="s1">tar_res</span><span class="s2">.</span><span class="s1">extractfile</span><span class="s2">(</span><span class="s1">tar_res_info</span><span class="s2">)</span>
+                <span class="s1">expected_file </span><span class="s2">= </span><span class="s1">tar_exp</span><span class="s2">.</span><span class="s1">extractfile</span><span class="s2">(</span><span class="s1">tar_exp_info</span><span class="s2">)</span>
+                <span class="s0">assert </span><span class="s2">(</span><span class="s1">actual_file </span><span class="s0">is None</span><span class="s2">) == (</span><span class="s1">expected_file </span><span class="s0">is None</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s1">actual_file </span><span class="s0">is not None and </span><span class="s1">expected_file </span><span class="s0">is not None</span><span class="s2">:</span>
+                    <span class="s0">assert </span><span class="s1">actual_file</span><span class="s2">.</span><span class="s1">read</span><span class="s2">() == </span><span class="s1">expected_file</span><span class="s2">.</span><span class="s1">read</span><span class="s2">()</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">assert </span><span class="s1">result </span><span class="s2">== </span><span class="s1">expected</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span><span class="s3">&quot;encoding&quot;</span><span class="s2">, [</span><span class="s3">&quot;utf-8&quot;</span><span class="s2">, </span><span class="s3">&quot;cp1251&quot;</span><span class="s2">])</span>
+<span class="s0">def </span><span class="s1">test_to_csv_compression_encoding_gcs</span><span class="s2">(</span>
+    <span class="s1">gcs_buffer</span><span class="s2">, </span><span class="s1">compression_only</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">, </span><span class="s1">compression_to_extension</span>
+<span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Compression and encoding should with GCS. 
+ 
+    GH 35677 (to_csv, compression), GH 26124 (to_csv, encoding), and 
+    GH 32392 (read_csv, encoding) 
+    &quot;&quot;&quot;</span>
+    <span class="s1">df </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span>
+        <span class="s5">1.1 </span><span class="s2">* </span><span class="s1">np</span><span class="s2">.</span><span class="s1">arange</span><span class="s2">(</span><span class="s5">120</span><span class="s2">).</span><span class="s1">reshape</span><span class="s2">((</span><span class="s5">30</span><span class="s2">, </span><span class="s5">4</span><span class="s2">)),</span>
+        <span class="s1">columns</span><span class="s2">=</span><span class="s1">Index</span><span class="s2">(</span><span class="s1">list</span><span class="s2">(</span><span class="s3">&quot;ABCD&quot;</span><span class="s2">)),</span>
+        <span class="s1">index</span><span class="s2">=</span><span class="s1">Index</span><span class="s2">([</span><span class="s3">f&quot;i-</span><span class="s0">{</span><span class="s1">i</span><span class="s0">}</span><span class="s3">&quot; </span><span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">30</span><span class="s2">)]),</span>
+    <span class="s2">)</span>
+
+    <span class="s6"># reference of compressed and encoded file</span>
+    <span class="s1">compression </span><span class="s2">= {</span><span class="s3">&quot;method&quot;</span><span class="s2">: </span><span class="s1">compression_only</span><span class="s2">}</span>
+    <span class="s0">if </span><span class="s1">compression_only </span><span class="s2">== </span><span class="s3">&quot;gzip&quot;</span><span class="s2">:</span>
+        <span class="s1">compression</span><span class="s2">[</span><span class="s3">&quot;mtime&quot;</span><span class="s2">] = </span><span class="s5">1  </span><span class="s6"># be reproducible</span>
+    <span class="s1">buffer </span><span class="s2">= </span><span class="s1">BytesIO</span><span class="s2">()</span>
+    <span class="s1">df</span><span class="s2">.</span><span class="s1">to_csv</span><span class="s2">(</span><span class="s1">buffer</span><span class="s2">, </span><span class="s1">compression</span><span class="s2">=</span><span class="s1">compression</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s1">encoding</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">&quot;wb&quot;</span><span class="s2">)</span>
+
+    <span class="s6"># write compressed file with explicit compression</span>
+    <span class="s1">path_gcs </span><span class="s2">= </span><span class="s3">&quot;gs://test/test.csv&quot;</span>
+    <span class="s1">df</span><span class="s2">.</span><span class="s1">to_csv</span><span class="s2">(</span><span class="s1">path_gcs</span><span class="s2">, </span><span class="s1">compression</span><span class="s2">=</span><span class="s1">compression</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s1">encoding</span><span class="s2">)</span>
+    <span class="s1">res </span><span class="s2">= </span><span class="s1">gcs_buffer</span><span class="s2">.</span><span class="s1">getvalue</span><span class="s2">()</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">buffer</span><span class="s2">.</span><span class="s1">getvalue</span><span class="s2">()</span>
+    <span class="s1">assert_equal_zip_safe</span><span class="s2">(</span><span class="s1">res</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">, </span><span class="s1">compression_only</span><span class="s2">)</span>
+
+    <span class="s1">read_df </span><span class="s2">= </span><span class="s1">read_csv</span><span class="s2">(</span>
+        <span class="s1">path_gcs</span><span class="s2">, </span><span class="s1">index_col</span><span class="s2">=</span><span class="s5">0</span><span class="s2">, </span><span class="s1">compression</span><span class="s2">=</span><span class="s1">compression_only</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s1">encoding</span>
+    <span class="s2">)</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_frame_equal</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s1">read_df</span><span class="s2">)</span>
+
+    <span class="s6"># write compressed file with implicit compression</span>
+    <span class="s1">file_ext </span><span class="s2">= </span><span class="s1">compression_to_extension</span><span class="s2">[</span><span class="s1">compression_only</span><span class="s2">]</span>
+    <span class="s1">compression</span><span class="s2">[</span><span class="s3">&quot;method&quot;</span><span class="s2">] = </span><span class="s3">&quot;infer&quot;</span>
+    <span class="s1">path_gcs </span><span class="s2">+= </span><span class="s3">f&quot;.</span><span class="s0">{</span><span class="s1">file_ext</span><span class="s0">}</span><span class="s3">&quot;</span>
+    <span class="s1">df</span><span class="s2">.</span><span class="s1">to_csv</span><span class="s2">(</span><span class="s1">path_gcs</span><span class="s2">, </span><span class="s1">compression</span><span class="s2">=</span><span class="s1">compression</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s1">encoding</span><span class="s2">)</span>
+
+    <span class="s1">res </span><span class="s2">= </span><span class="s1">gcs_buffer</span><span class="s2">.</span><span class="s1">getvalue</span><span class="s2">()</span>
+    <span class="s1">expected </span><span class="s2">= </span><span class="s1">buffer</span><span class="s2">.</span><span class="s1">getvalue</span><span class="s2">()</span>
+    <span class="s1">assert_equal_zip_safe</span><span class="s2">(</span><span class="s1">res</span><span class="s2">, </span><span class="s1">expected</span><span class="s2">, </span><span class="s1">compression_only</span><span class="s2">)</span>
+
+    <span class="s1">read_df </span><span class="s2">= </span><span class="s1">read_csv</span><span class="s2">(</span><span class="s1">path_gcs</span><span class="s2">, </span><span class="s1">index_col</span><span class="s2">=</span><span class="s5">0</span><span class="s2">, </span><span class="s1">compression</span><span class="s2">=</span><span class="s3">&quot;infer&quot;</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s1">encoding</span><span class="s2">)</span>
+    <span class="s1">tm</span><span class="s2">.</span><span class="s1">assert_frame_equal</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, </span><span class="s1">read_df</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_to_parquet_gcs_new_file</span><span class="s2">(</span><span class="s1">monkeypatch</span><span class="s2">, </span><span class="s1">tmpdir</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot;Regression test for writing to a not-yet-existent GCS Parquet file.&quot;&quot;&quot;</span>
+    <span class="s1">pytest</span><span class="s2">.</span><span class="s1">importorskip</span><span class="s2">(</span><span class="s3">&quot;fastparquet&quot;</span><span class="s2">)</span>
+    <span class="s1">pytest</span><span class="s2">.</span><span class="s1">importorskip</span><span class="s2">(</span><span class="s3">&quot;gcsfs&quot;</span><span class="s2">)</span>
+
+    <span class="s0">from </span><span class="s1">fsspec </span><span class="s0">import </span><span class="s1">AbstractFileSystem</span>
+
+    <span class="s1">df1 </span><span class="s2">= </span><span class="s1">DataFrame</span><span class="s2">(</span>
+        <span class="s2">{</span>
+            <span class="s3">&quot;int&quot;</span><span class="s2">: [</span><span class="s5">1</span><span class="s2">, </span><span class="s5">3</span><span class="s2">],</span>
+            <span class="s3">&quot;float&quot;</span><span class="s2">: [</span><span class="s5">2.0</span><span class="s2">, </span><span class="s1">np</span><span class="s2">.</span><span class="s1">nan</span><span class="s2">],</span>
+            <span class="s3">&quot;dt&quot;</span><span class="s2">: </span><span class="s1">date_range</span><span class="s2">(</span><span class="s3">&quot;2018-06-18&quot;</span><span class="s2">, </span><span class="s1">periods</span><span class="s2">=</span><span class="s5">2</span><span class="s2">),</span>
+        <span class="s2">}</span>
+    <span class="s2">)</span>
+
+    <span class="s0">class </span><span class="s1">MockGCSFileSystem</span><span class="s2">(</span><span class="s1">AbstractFileSystem</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">open</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">path</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s3">&quot;r&quot;</span><span class="s2">, *</span><span class="s1">args</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s3">&quot;w&quot; </span><span class="s0">not in </span><span class="s1">mode</span><span class="s2">:</span>
+                <span class="s0">raise </span><span class="s1">FileNotFoundError</span>
+            <span class="s0">return </span><span class="s1">open</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">tmpdir</span><span class="s2">, </span><span class="s3">&quot;test.parquet&quot;</span><span class="s2">), </span><span class="s1">mode</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s3">&quot;utf-8&quot;</span><span class="s2">)</span>
+
+    <span class="s1">monkeypatch</span><span class="s2">.</span><span class="s1">setattr</span><span class="s2">(</span><span class="s3">&quot;gcsfs.GCSFileSystem&quot;</span><span class="s2">, </span><span class="s1">MockGCSFileSystem</span><span class="s2">)</span>
+    <span class="s1">df1</span><span class="s2">.</span><span class="s1">to_parquet</span><span class="s2">(</span>
+        <span class="s3">&quot;gs://test/test.csv&quot;</span><span class="s2">, </span><span class="s1">index</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">engine</span><span class="s2">=</span><span class="s3">&quot;fastparquet&quot;</span><span class="s2">, </span><span class="s1">compression</span><span class="s2">=</span><span class="s0">None</span>
+    <span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">td</span><span class="s2">.</span><span class="s1">skip_if_installed</span><span class="s2">(</span><span class="s3">&quot;gcsfs&quot;</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_gcs_not_present_exception</span><span class="s2">():</span>
+    <span class="s0">with </span><span class="s1">tm</span><span class="s2">.</span><span class="s1">external_error_raised</span><span class="s2">(</span><span class="s1">ImportError</span><span class="s2">):</span>
+        <span class="s1">read_csv</span><span class="s2">(</span><span class="s3">&quot;gs://test/test.csv&quot;</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

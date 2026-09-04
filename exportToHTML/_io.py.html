@@ -1,0 +1,151 @@
+<html>
+<head>
+<title>_io.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #5f826b; font-style: italic;}
+.s5 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_io.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">gzip</span>
+<span class="s0">import </span><span class="s1">io</span>
+<span class="s0">import </span><span class="s1">tarfile</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s2">,</span>
+    <span class="s1">Any</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">import </span><span class="s1">zipfile</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">compat</span><span class="s2">.</span><span class="s1">_optional </span><span class="s0">import </span><span class="s1">import_optional_dependency</span>
+
+<span class="s0">import </span><span class="s1">pandas </span><span class="s0">as </span><span class="s1">pd</span>
+
+<span class="s0">if </span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">collections</span><span class="s2">.</span><span class="s1">abc </span><span class="s0">import </span><span class="s1">Callable</span>
+    <span class="s0">from </span><span class="s1">pathlib </span><span class="s0">import </span><span class="s1">Path</span>
+
+    <span class="s0">from </span><span class="s1">pandas </span><span class="s0">import </span><span class="s2">(</span>
+        <span class="s1">DataFrame</span><span class="s2">,</span>
+        <span class="s1">Series</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+<span class="s3"># ------------------------------------------------------------------</span>
+<span class="s3"># File-IO</span>
+
+
+<span class="s0">def </span><span class="s1">round_trip_pickle</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">: </span><span class="s1">Path</span><span class="s2">) </span><span class="s1">-&gt; DataFrame </span><span class="s2">| </span><span class="s1">Series</span><span class="s2">:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Pickle an object and then read it again. 
+ 
+    Parameters 
+    ---------- 
+    obj : any object 
+        The object to pickle and then re-read. 
+    path : str, path object or file-like object, default None 
+        The path where the pickled object is written and then read. 
+ 
+    Returns 
+    ------- 
+    pandas object 
+        The original object that was pickled and then re-read. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">pd</span><span class="s2">.</span><span class="s1">to_pickle</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">pd</span><span class="s2">.</span><span class="s1">read_pickle</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">round_trip_pathlib</span><span class="s2">(</span><span class="s1">writer</span><span class="s2">, </span><span class="s1">reader</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">: </span><span class="s1">Path</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Write an object to file specified by a pathlib.Path and read it back 
+ 
+    Parameters 
+    ---------- 
+    writer : callable bound to pandas object 
+        IO writing function (e.g. DataFrame.to_csv ) 
+    reader : callable 
+        IO reading function (e.g. pd.read_csv ) 
+    path : str, default None 
+        The path where the object is written and then read. 
+ 
+    Returns 
+    ------- 
+    pandas object 
+        The original object that was serialized and then re-read. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">writer</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+    <span class="s1">obj </span><span class="s2">= </span><span class="s1">reader</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">obj</span>
+
+
+<span class="s0">def </span><span class="s1">write_to_compressed</span><span class="s2">(</span><span class="s1">compression</span><span class="s2">, </span><span class="s1">path</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">data</span><span class="s2">, </span><span class="s1">dest</span><span class="s2">: </span><span class="s1">str </span><span class="s2">= </span><span class="s5">&quot;test&quot;</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Write data to a compressed file. 
+ 
+    Parameters 
+    ---------- 
+    compression : {'gzip', 'bz2', 'zip', 'xz', 'zstd'} 
+        The compression type to use. 
+    path : str 
+        The file path to write the data. 
+    data : str 
+        The data to write. 
+    dest : str, default &quot;test&quot; 
+        The destination file (for ZIP only) 
+ 
+    Raises 
+    ------ 
+    ValueError : An invalid compression value was passed in. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">args</span><span class="s2">: </span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">Any</span><span class="s2">, ...] = (</span><span class="s1">data</span><span class="s2">,)</span>
+    <span class="s1">mode </span><span class="s2">= </span><span class="s5">&quot;wb&quot;</span>
+    <span class="s1">method </span><span class="s2">= </span><span class="s5">&quot;write&quot;</span>
+    <span class="s1">compress_method</span><span class="s2">: </span><span class="s1">Callable</span>
+
+    <span class="s0">if </span><span class="s1">compression </span><span class="s2">== </span><span class="s5">&quot;zip&quot;</span><span class="s2">:</span>
+        <span class="s1">compress_method </span><span class="s2">= </span><span class="s1">zipfile</span><span class="s2">.</span><span class="s1">ZipFile</span>
+        <span class="s1">mode </span><span class="s2">= </span><span class="s5">&quot;w&quot;</span>
+        <span class="s1">args </span><span class="s2">= (</span><span class="s1">dest</span><span class="s2">, </span><span class="s1">data</span><span class="s2">)</span>
+        <span class="s1">method </span><span class="s2">= </span><span class="s5">&quot;writestr&quot;</span>
+    <span class="s0">elif </span><span class="s1">compression </span><span class="s2">== </span><span class="s5">&quot;tar&quot;</span><span class="s2">:</span>
+        <span class="s1">compress_method </span><span class="s2">= </span><span class="s1">tarfile</span><span class="s2">.</span><span class="s1">TarFile</span>
+        <span class="s1">mode </span><span class="s2">= </span><span class="s5">&quot;w&quot;</span>
+        <span class="s1">file </span><span class="s2">= </span><span class="s1">tarfile</span><span class="s2">.</span><span class="s1">TarInfo</span><span class="s2">(</span><span class="s1">name</span><span class="s2">=</span><span class="s1">dest</span><span class="s2">)</span>
+        <span class="s1">bytes </span><span class="s2">= </span><span class="s1">io</span><span class="s2">.</span><span class="s1">BytesIO</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+        <span class="s1">file</span><span class="s2">.</span><span class="s1">size </span><span class="s2">= </span><span class="s1">len</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+        <span class="s1">args </span><span class="s2">= (</span><span class="s1">file</span><span class="s2">, </span><span class="s1">bytes</span><span class="s2">)</span>
+        <span class="s1">method </span><span class="s2">= </span><span class="s5">&quot;addfile&quot;</span>
+    <span class="s0">elif </span><span class="s1">compression </span><span class="s2">== </span><span class="s5">&quot;gzip&quot;</span><span class="s2">:</span>
+        <span class="s1">compress_method </span><span class="s2">= </span><span class="s1">gzip</span><span class="s2">.</span><span class="s1">GzipFile</span>
+    <span class="s0">elif </span><span class="s1">compression </span><span class="s2">== </span><span class="s5">&quot;bz2&quot;</span><span class="s2">:</span>
+        <span class="s0">import </span><span class="s1">bz2</span>
+
+        <span class="s1">compress_method </span><span class="s2">= </span><span class="s1">bz2</span><span class="s2">.</span><span class="s1">BZ2File</span>
+    <span class="s0">elif </span><span class="s1">compression </span><span class="s2">== </span><span class="s5">&quot;zstd&quot;</span><span class="s2">:</span>
+        <span class="s1">compress_method </span><span class="s2">= </span><span class="s1">import_optional_dependency</span><span class="s2">(</span><span class="s5">&quot;zstandard&quot;</span><span class="s2">).</span><span class="s1">open</span>
+    <span class="s0">elif </span><span class="s1">compression </span><span class="s2">== </span><span class="s5">&quot;xz&quot;</span><span class="s2">:</span>
+        <span class="s0">import </span><span class="s1">lzma</span>
+
+        <span class="s1">compress_method </span><span class="s2">= </span><span class="s1">lzma</span><span class="s2">.</span><span class="s1">LZMAFile</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s5">f&quot;Unrecognized compression type: </span><span class="s0">{</span><span class="s1">compression</span><span class="s0">}</span><span class="s5">&quot;</span><span class="s2">)</span>
+
+    <span class="s3"># error: No overload variant of &quot;ZipFile&quot; matches argument types &quot;str&quot;, &quot;str&quot;</span>
+    <span class="s3"># error: No overload variant of &quot;BZ2File&quot; matches argument types &quot;str&quot;, &quot;str&quot;</span>
+    <span class="s3"># error: Argument &quot;mode&quot; to &quot;TarFile&quot; has incompatible type &quot;str&quot;;</span>
+    <span class="s3">#  expected &quot;Literal['r', 'a', 'w', 'x']</span>
+    <span class="s0">with </span><span class="s1">compress_method</span><span class="s2">(</span><span class="s1">path</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">=</span><span class="s1">mode</span><span class="s2">) </span><span class="s0">as </span><span class="s1">f</span><span class="s2">:  </span><span class="s3"># type: ignore[call-overload, arg-type]</span>
+        <span class="s1">getattr</span><span class="s2">(</span><span class="s1">f</span><span class="s2">, </span><span class="s1">method</span><span class="s2">)(*</span><span class="s1">args</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

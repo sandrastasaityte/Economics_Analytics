@@ -1,0 +1,994 @@
+<html>
+<head>
+<title>test_casting_unittests.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #7a7e85;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+.s7 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_casting_unittests.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+The tests exercise the casting machinery in a more low-level manner. 
+The reason is mostly to test a new implementation of the casting machinery. 
+ 
+Unlike most tests in NumPy, these are closer to unit-tests rather 
+than integration tests. 
+&quot;&quot;&quot;</span>
+
+<span class="s2">import </span><span class="s1">ctypes</span>
+<span class="s2">import </span><span class="s1">enum</span>
+<span class="s2">import </span><span class="s1">random</span>
+<span class="s2">import </span><span class="s1">textwrap</span>
+<span class="s2">import </span><span class="s1">warnings</span>
+
+<span class="s2">import </span><span class="s1">pytest</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+<span class="s2">from </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">_core</span><span class="s3">.</span><span class="s1">_multiarray_umath </span><span class="s2">import </span><span class="s1">_get_castingimpl </span><span class="s2">as </span><span class="s1">get_castingimpl</span>
+<span class="s2">from </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">lib</span><span class="s3">.</span><span class="s1">stride_tricks </span><span class="s2">import </span><span class="s1">as_strided</span>
+<span class="s2">from </span><span class="s1">numpy</span><span class="s3">.</span><span class="s1">testing </span><span class="s2">import </span><span class="s1">assert_array_equal</span><span class="s3">, </span><span class="s1">assert_equal</span>
+
+<span class="s4"># Simple skips object, parametric and long double (unsupported by struct)</span>
+<span class="s1">simple_dtypes </span><span class="s3">= </span><span class="s5">&quot;?bhilqBHILQefdFD&quot;</span>
+<span class="s2">if </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;l&quot;</span><span class="s3">).</span><span class="s1">itemsize </span><span class="s3">!= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;q&quot;</span><span class="s3">).</span><span class="s1">itemsize</span><span class="s3">:</span>
+    <span class="s4"># Remove l and L, the table was generated with 64bit linux in mind.</span>
+    <span class="s1">simple_dtypes </span><span class="s3">= </span><span class="s1">simple_dtypes</span><span class="s3">.</span><span class="s1">replace</span><span class="s3">(</span><span class="s5">&quot;l&quot;</span><span class="s3">, </span><span class="s5">&quot;&quot;</span><span class="s3">).</span><span class="s1">replace</span><span class="s3">(</span><span class="s5">&quot;L&quot;</span><span class="s3">, </span><span class="s5">&quot;&quot;</span><span class="s3">)</span>
+<span class="s1">simple_dtypes </span><span class="s3">= [</span><span class="s1">type</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">c</span><span class="s3">)) </span><span class="s2">for </span><span class="s1">c </span><span class="s2">in </span><span class="s1">simple_dtypes</span><span class="s3">]</span>
+
+
+<span class="s2">def </span><span class="s1">simple_dtype_instances</span><span class="s3">():</span>
+    <span class="s1">params </span><span class="s3">= []</span>
+    <span class="s2">for </span><span class="s1">dtype_class </span><span class="s2">in </span><span class="s1">simple_dtypes</span><span class="s3">:</span>
+        <span class="s1">dt </span><span class="s3">= </span><span class="s1">dtype_class</span><span class="s3">()</span>
+        <span class="s1">params</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">param</span><span class="s3">(</span><span class="s1">dt</span><span class="s3">, </span><span class="s1">id</span><span class="s3">=</span><span class="s1">str</span><span class="s3">(</span><span class="s1">dt</span><span class="s3">)))</span>
+        <span class="s2">if </span><span class="s1">dt</span><span class="s3">.</span><span class="s1">byteorder </span><span class="s3">!= </span><span class="s5">&quot;|&quot;</span><span class="s3">:</span>
+            <span class="s1">dt </span><span class="s3">= </span><span class="s1">dt</span><span class="s3">.</span><span class="s1">newbyteorder</span><span class="s3">()</span>
+            <span class="s1">params</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">param</span><span class="s3">(</span><span class="s1">dt</span><span class="s3">, </span><span class="s1">id</span><span class="s3">=</span><span class="s1">str</span><span class="s3">(</span><span class="s1">dt</span><span class="s3">)))</span>
+    <span class="s2">return </span><span class="s1">params</span>
+
+
+<span class="s2">def </span><span class="s1">get_expected_stringlength</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Returns the string length when casting the basic dtypes to strings. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">np</span><span class="s3">.</span><span class="s1">bool</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s6">5</span>
+    <span class="s2">if </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s2">in </span><span class="s5">&quot;iu&quot;</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">== </span><span class="s6">1</span><span class="s3">:</span>
+            <span class="s1">length </span><span class="s3">= </span><span class="s6">3</span>
+        <span class="s2">elif </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">== </span><span class="s6">2</span><span class="s3">:</span>
+            <span class="s1">length </span><span class="s3">= </span><span class="s6">5</span>
+        <span class="s2">elif </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">== </span><span class="s6">4</span><span class="s3">:</span>
+            <span class="s1">length </span><span class="s3">= </span><span class="s6">10</span>
+        <span class="s2">elif </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">== </span><span class="s6">8</span><span class="s3">:</span>
+            <span class="s1">length </span><span class="s3">= </span><span class="s6">20</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">AssertionError</span><span class="s3">(</span><span class="s5">f&quot;did not find expected length for </span><span class="s2">{</span><span class="s1">dtype</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">== </span><span class="s5">&quot;i&quot;</span><span class="s3">:</span>
+            <span class="s1">length </span><span class="s3">+= </span><span class="s6">1  </span><span class="s4"># adds one character for the sign</span>
+
+        <span class="s2">return </span><span class="s1">length</span>
+
+    <span class="s4"># Note: Can't do dtype comparison for longdouble on windows</span>
+    <span class="s2">if </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">char </span><span class="s3">== </span><span class="s5">&quot;g&quot;</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s6">48</span>
+    <span class="s2">elif </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">char </span><span class="s3">== </span><span class="s5">&quot;G&quot;</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s6">48 </span><span class="s3">* </span><span class="s6">2</span>
+    <span class="s2">elif </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">== </span><span class="s5">&quot;f&quot;</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s6">32  </span><span class="s4"># also for half apparently.</span>
+    <span class="s2">elif </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">== </span><span class="s5">&quot;c&quot;</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s6">32 </span><span class="s3">* </span><span class="s6">2</span>
+
+    <span class="s2">raise </span><span class="s1">AssertionError</span><span class="s3">(</span><span class="s5">f&quot;did not find expected length for </span><span class="s2">{</span><span class="s1">dtype</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">Casting</span><span class="s3">(</span><span class="s1">enum</span><span class="s3">.</span><span class="s1">IntEnum</span><span class="s3">):</span>
+    <span class="s1">no </span><span class="s3">= </span><span class="s6">0</span>
+    <span class="s1">equiv </span><span class="s3">= </span><span class="s6">1</span>
+    <span class="s1">safe </span><span class="s3">= </span><span class="s6">2</span>
+    <span class="s1">same_kind </span><span class="s3">= </span><span class="s6">3</span>
+    <span class="s1">unsafe </span><span class="s3">= </span><span class="s6">4</span>
+    <span class="s1">same_value </span><span class="s3">= </span><span class="s6">64</span>
+
+
+<span class="s1">same_value_dtypes </span><span class="s3">= </span><span class="s1">tuple</span><span class="s3">(</span><span class="s1">type</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">c</span><span class="s3">)) </span><span class="s2">for </span><span class="s1">c </span><span class="s2">in </span><span class="s5">&quot;?bhilqBHILQefdgFDG&quot;</span><span class="s3">)</span>
+
+<span class="s2">def </span><span class="s1">_get_cancast_table</span><span class="s3">():</span>
+    <span class="s1">table </span><span class="s3">= </span><span class="s1">textwrap</span><span class="s3">.</span><span class="s1">dedent</span><span class="s3">(</span><span class="s5">&quot;&quot;&quot; 
+        X ? b h i l q B H I L Q e f d g F D G S U V O M m 
+        ? # = = = = = = = = = = = = = = = = = = = = = . = 
+        b . # = = = = . . . . . = = = = = = = = = = = . = 
+        h . ~ # = = = . . . . . ~ = = = = = = = = = = . = 
+        i . ~ ~ # = = . . . . . ~ ~ = = ~ = = = = = = . = 
+        l . ~ ~ ~ # # . . . . . ~ ~ = = ~ = = = = = = . = 
+        q . ~ ~ ~ # # . . . . . ~ ~ = = ~ = = = = = = . = 
+        B . ~ = = = = # = = = = = = = = = = = = = = = . = 
+        H . ~ ~ = = = ~ # = = = ~ = = = = = = = = = = . = 
+        I . ~ ~ ~ = = ~ ~ # = = ~ ~ = = ~ = = = = = = . = 
+        L . ~ ~ ~ ~ ~ ~ ~ ~ # # ~ ~ = = ~ = = = = = = . ~ 
+        Q . ~ ~ ~ ~ ~ ~ ~ ~ # # ~ ~ = = ~ = = = = = = . ~ 
+        e . . . . . . . . . . . # = = = = = = = = = = . . 
+        f . . . . . . . . . . . ~ # = = = = = = = = = . . 
+        d . . . . . . . . . . . ~ ~ # = ~ = = = = = = . . 
+        g . . . . . . . . . . . ~ ~ ~ # ~ ~ = = = = = . . 
+        F . . . . . . . . . . . . . . . # = = = = = = . . 
+        D . . . . . . . . . . . . . . . ~ # = = = = = . . 
+        G . . . . . . . . . . . . . . . ~ ~ # = = = = . . 
+        S . . . . . . . . . . . . . . . . . . # = = = . . 
+        U . . . . . . . . . . . . . . . . . . . # = = . . 
+        V . . . . . . . . . . . . . . . . . . . . # = . . 
+        O . . . . . . . . . . . . . . . . . . . . = # . . 
+        M . . . . . . . . . . . . . . . . . . . . = = # . 
+        m . . . . . . . . . . . . . . . . . . . . = = . # 
+        &quot;&quot;&quot;</span><span class="s3">).</span><span class="s1">strip</span><span class="s3">().</span><span class="s1">split</span><span class="s3">(</span><span class="s5">&quot;</span><span class="s2">\n</span><span class="s5">&quot;</span><span class="s3">)</span>
+    <span class="s1">dtypes </span><span class="s3">= [</span><span class="s1">type</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">c</span><span class="s3">)) </span><span class="s2">for </span><span class="s1">c </span><span class="s2">in </span><span class="s1">table</span><span class="s3">[</span><span class="s6">0</span><span class="s3">][</span><span class="s6">2</span><span class="s3">::</span><span class="s6">2</span><span class="s3">]]</span>
+
+    <span class="s1">convert_cast </span><span class="s3">= {</span><span class="s5">&quot;.&quot;</span><span class="s3">: </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">unsafe</span><span class="s3">, </span><span class="s5">&quot;~&quot;</span><span class="s3">: </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">same_kind</span><span class="s3">,</span>
+                    <span class="s5">&quot;=&quot;</span><span class="s3">: </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">safe</span><span class="s3">, </span><span class="s5">&quot;#&quot;</span><span class="s3">: </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">equiv</span><span class="s3">,</span>
+                    <span class="s5">&quot; &quot;</span><span class="s3">: -</span><span class="s6">1</span><span class="s3">}</span>
+
+    <span class="s1">cancast </span><span class="s3">= {}</span>
+    <span class="s2">for </span><span class="s1">from_dt</span><span class="s3">, </span><span class="s1">row </span><span class="s2">in </span><span class="s1">zip</span><span class="s3">(</span><span class="s1">dtypes</span><span class="s3">, </span><span class="s1">table</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:]):</span>
+        <span class="s1">cancast</span><span class="s3">[</span><span class="s1">from_dt</span><span class="s3">] = {}</span>
+        <span class="s2">for </span><span class="s1">to_dt</span><span class="s3">, </span><span class="s1">c </span><span class="s2">in </span><span class="s1">zip</span><span class="s3">(</span><span class="s1">dtypes</span><span class="s3">, </span><span class="s1">row</span><span class="s3">[</span><span class="s6">2</span><span class="s3">::</span><span class="s6">2</span><span class="s3">]):</span>
+            <span class="s1">cancast</span><span class="s3">[</span><span class="s1">from_dt</span><span class="s3">][</span><span class="s1">to_dt</span><span class="s3">] = </span><span class="s1">convert_cast</span><span class="s3">[</span><span class="s1">c</span><span class="s3">]</span>
+            <span class="s4"># Of the types checked, numeric cast support same-value</span>
+            <span class="s2">if </span><span class="s1">from_dt </span><span class="s2">in </span><span class="s1">same_value_dtypes </span><span class="s2">and </span><span class="s1">to_dt </span><span class="s2">in </span><span class="s1">same_value_dtypes</span><span class="s3">:</span>
+                <span class="s1">cancast</span><span class="s3">[</span><span class="s1">from_dt</span><span class="s3">][</span><span class="s1">to_dt</span><span class="s3">] |= </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">same_value</span>
+
+    <span class="s2">return </span><span class="s1">cancast</span>
+
+
+<span class="s1">CAST_TABLE </span><span class="s3">= </span><span class="s1">_get_cancast_table</span><span class="s3">()</span>
+
+
+<span class="s2">class </span><span class="s1">TestChanges</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    These test cases exercise some behaviour changes 
+    &quot;&quot;&quot;</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;string&quot;</span><span class="s3">, [</span><span class="s5">&quot;S&quot;</span><span class="s3">, </span><span class="s5">&quot;U&quot;</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;floating&quot;</span><span class="s3">, [</span><span class="s5">&quot;e&quot;</span><span class="s3">, </span><span class="s5">&quot;f&quot;</span><span class="s3">, </span><span class="s5">&quot;d&quot;</span><span class="s3">, </span><span class="s5">&quot;g&quot;</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_float_to_string</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">floating</span><span class="s3">, </span><span class="s1">string</span><span class="s3">):</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">can_cast</span><span class="s3">(</span><span class="s1">floating</span><span class="s3">, </span><span class="s1">string</span><span class="s3">)</span>
+        <span class="s4"># 100 is long enough to hold any formatted floating</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">can_cast</span><span class="s3">(</span><span class="s1">floating</span><span class="s3">, </span><span class="s5">f&quot;</span><span class="s2">{</span><span class="s1">string</span><span class="s2">}</span><span class="s5">100&quot;</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_to_void</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4"># But in general, we do consider these safe:</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">can_cast</span><span class="s3">(</span><span class="s5">&quot;d&quot;</span><span class="s3">, </span><span class="s5">&quot;V&quot;</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">can_cast</span><span class="s3">(</span><span class="s5">&quot;S20&quot;</span><span class="s3">, </span><span class="s5">&quot;V&quot;</span><span class="s3">)</span>
+
+        <span class="s4"># Do not consider it a safe cast if the void is too smaller:</span>
+        <span class="s2">assert not </span><span class="s1">np</span><span class="s3">.</span><span class="s1">can_cast</span><span class="s3">(</span><span class="s5">&quot;d&quot;</span><span class="s3">, </span><span class="s5">&quot;V1&quot;</span><span class="s3">)</span>
+        <span class="s2">assert not </span><span class="s1">np</span><span class="s3">.</span><span class="s1">can_cast</span><span class="s3">(</span><span class="s5">&quot;S20&quot;</span><span class="s3">, </span><span class="s5">&quot;V1&quot;</span><span class="s3">)</span>
+        <span class="s2">assert not </span><span class="s1">np</span><span class="s3">.</span><span class="s1">can_cast</span><span class="s3">(</span><span class="s5">&quot;U1&quot;</span><span class="s3">, </span><span class="s5">&quot;V1&quot;</span><span class="s3">)</span>
+        <span class="s4"># Structured to unstructured is just like any other:</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">can_cast</span><span class="s3">(</span><span class="s5">&quot;d,i&quot;</span><span class="s3">, </span><span class="s5">&quot;V&quot;</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">&quot;same_kind&quot;</span><span class="s3">)</span>
+        <span class="s4"># Unstructured void to unstructured is actually no cast at all:</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">can_cast</span><span class="s3">(</span><span class="s5">&quot;V3&quot;</span><span class="s3">, </span><span class="s5">&quot;V&quot;</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">&quot;no&quot;</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">can_cast</span><span class="s3">(</span><span class="s5">&quot;V0&quot;</span><span class="s3">, </span><span class="s5">&quot;V&quot;</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">&quot;no&quot;</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">TestCasting</span><span class="s3">:</span>
+    <span class="s1">size </span><span class="s3">= </span><span class="s6">1500  </span><span class="s4"># Best larger than NPY_LOWLEVEL_BUFFER_BLOCKSIZE * itemsize</span>
+
+    <span class="s2">def </span><span class="s1">get_data</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dtype1</span><span class="s3">, </span><span class="s1">dtype2</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">dtype2 </span><span class="s2">is None or </span><span class="s1">dtype1</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">&gt;= </span><span class="s1">dtype2</span><span class="s3">.</span><span class="s1">itemsize</span><span class="s3">:</span>
+            <span class="s1">length </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">size </span><span class="s3">// </span><span class="s1">dtype1</span><span class="s3">.</span><span class="s1">itemsize</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">length </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">size </span><span class="s3">// </span><span class="s1">dtype2</span><span class="s3">.</span><span class="s1">itemsize</span>
+
+        <span class="s4"># Assume that the base array is well enough aligned for all inputs.</span>
+        <span class="s1">arr1 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty</span><span class="s3">(</span><span class="s1">length</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype1</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr1</span><span class="s3">.</span><span class="s1">flags</span><span class="s3">.</span><span class="s1">c_contiguous</span>
+        <span class="s2">assert </span><span class="s1">arr1</span><span class="s3">.</span><span class="s1">flags</span><span class="s3">.</span><span class="s1">aligned</span>
+
+        <span class="s1">values </span><span class="s3">= [</span><span class="s1">random</span><span class="s3">.</span><span class="s1">randrange</span><span class="s3">(-</span><span class="s6">128</span><span class="s3">, </span><span class="s6">128</span><span class="s3">) </span><span class="s2">for </span><span class="s1">_ </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s1">length</span><span class="s3">)]</span>
+
+        <span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">value </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">values</span><span class="s3">):</span>
+            <span class="s4"># Use item assignment to ensure this is not using casting:</span>
+            <span class="s2">if </span><span class="s1">value </span><span class="s3">&lt; </span><span class="s6">0 </span><span class="s2">and </span><span class="s1">dtype1</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">== </span><span class="s5">&quot;u&quot;</span><span class="s3">:</span>
+                <span class="s4"># Manually rollover unsigned integers (-1 -&gt; int.max)</span>
+                <span class="s1">value </span><span class="s3">= </span><span class="s1">value </span><span class="s3">+ </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s1">dtype1</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span>
+            <span class="s1">arr1</span><span class="s3">[</span><span class="s1">i</span><span class="s3">] = </span><span class="s1">value</span>
+
+        <span class="s2">if </span><span class="s1">dtype2 </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">dtype1</span><span class="s3">.</span><span class="s1">char </span><span class="s3">== </span><span class="s5">&quot;?&quot;</span><span class="s3">:</span>
+                <span class="s1">values </span><span class="s3">= [</span><span class="s1">bool</span><span class="s3">(</span><span class="s1">v</span><span class="s3">) </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">values</span><span class="s3">]</span>
+            <span class="s2">return </span><span class="s1">arr1</span><span class="s3">, </span><span class="s1">values</span>
+
+        <span class="s2">if </span><span class="s1">dtype2</span><span class="s3">.</span><span class="s1">char </span><span class="s3">== </span><span class="s5">&quot;?&quot;</span><span class="s3">:</span>
+            <span class="s1">values </span><span class="s3">= [</span><span class="s1">bool</span><span class="s3">(</span><span class="s1">v</span><span class="s3">) </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">values</span><span class="s3">]</span>
+
+        <span class="s1">arr2 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty</span><span class="s3">(</span><span class="s1">length</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">dtype2</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">arr2</span><span class="s3">.</span><span class="s1">flags</span><span class="s3">.</span><span class="s1">c_contiguous</span>
+        <span class="s2">assert </span><span class="s1">arr2</span><span class="s3">.</span><span class="s1">flags</span><span class="s3">.</span><span class="s1">aligned</span>
+
+        <span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">value </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">values</span><span class="s3">):</span>
+            <span class="s4"># Use item assignment to ensure this is not using casting:</span>
+            <span class="s2">if </span><span class="s1">value </span><span class="s3">&lt; </span><span class="s6">0 </span><span class="s2">and </span><span class="s1">dtype2</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">== </span><span class="s5">&quot;u&quot;</span><span class="s3">:</span>
+                <span class="s4"># Manually rollover unsigned integers (-1 -&gt; int.max)</span>
+                <span class="s1">value </span><span class="s3">= </span><span class="s1">value </span><span class="s3">+ </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s1">dtype2</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span>
+            <span class="s1">arr2</span><span class="s3">[</span><span class="s1">i</span><span class="s3">] = </span><span class="s1">value</span>
+
+        <span class="s2">return </span><span class="s1">arr1</span><span class="s3">, </span><span class="s1">arr2</span><span class="s3">, </span><span class="s1">values</span>
+
+    <span class="s2">def </span><span class="s1">get_data_variation</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">arr1</span><span class="s3">, </span><span class="s1">arr2</span><span class="s3">, </span><span class="s1">aligned</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">contig</span><span class="s3">=</span><span class="s2">True</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Returns a copy of arr1 that may be non-contiguous or unaligned, and a 
+        matching array for arr2 (although not a copy). 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">contig</span><span class="s3">:</span>
+            <span class="s1">stride1 </span><span class="s3">= </span><span class="s1">arr1</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize</span>
+            <span class="s1">stride2 </span><span class="s3">= </span><span class="s1">arr2</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize</span>
+        <span class="s2">elif </span><span class="s1">aligned</span><span class="s3">:</span>
+            <span class="s1">stride1 </span><span class="s3">= </span><span class="s6">2 </span><span class="s3">* </span><span class="s1">arr1</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize</span>
+            <span class="s1">stride2 </span><span class="s3">= </span><span class="s6">2 </span><span class="s3">* </span><span class="s1">arr2</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">stride1 </span><span class="s3">= </span><span class="s1">arr1</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">+ </span><span class="s6">1</span>
+            <span class="s1">stride2 </span><span class="s3">= </span><span class="s1">arr2</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">+ </span><span class="s6">1</span>
+
+        <span class="s1">max_size1 </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">arr1</span><span class="s3">) * </span><span class="s6">3 </span><span class="s3">* </span><span class="s1">arr1</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">+ </span><span class="s6">1</span>
+        <span class="s1">max_size2 </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">arr2</span><span class="s3">) * </span><span class="s6">3 </span><span class="s3">* </span><span class="s1">arr2</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">+ </span><span class="s6">1</span>
+        <span class="s1">from_bytes </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">zeros</span><span class="s3">(</span><span class="s1">max_size1</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint8</span><span class="s3">)</span>
+        <span class="s1">to_bytes </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">zeros</span><span class="s3">(</span><span class="s1">max_size2</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint8</span><span class="s3">)</span>
+
+        <span class="s4"># Sanity check that the above is large enough:</span>
+        <span class="s2">assert </span><span class="s1">stride1 </span><span class="s3">* </span><span class="s1">len</span><span class="s3">(</span><span class="s1">arr1</span><span class="s3">) &lt;= </span><span class="s1">from_bytes</span><span class="s3">.</span><span class="s1">nbytes</span>
+        <span class="s2">assert </span><span class="s1">stride2 </span><span class="s3">* </span><span class="s1">len</span><span class="s3">(</span><span class="s1">arr2</span><span class="s3">) &lt;= </span><span class="s1">to_bytes</span><span class="s3">.</span><span class="s1">nbytes</span>
+
+        <span class="s2">if </span><span class="s1">aligned</span><span class="s3">:</span>
+            <span class="s1">new1 </span><span class="s3">= </span><span class="s1">as_strided</span><span class="s3">(</span><span class="s1">from_bytes</span><span class="s3">[:-</span><span class="s6">1</span><span class="s3">].</span><span class="s1">view</span><span class="s3">(</span><span class="s1">arr1</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">),</span>
+                              <span class="s1">arr1</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">, (</span><span class="s1">stride1</span><span class="s3">,))</span>
+            <span class="s1">new2 </span><span class="s3">= </span><span class="s1">as_strided</span><span class="s3">(</span><span class="s1">to_bytes</span><span class="s3">[:-</span><span class="s6">1</span><span class="s3">].</span><span class="s1">view</span><span class="s3">(</span><span class="s1">arr2</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">),</span>
+                              <span class="s1">arr2</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">, (</span><span class="s1">stride2</span><span class="s3">,))</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">new1 </span><span class="s3">= </span><span class="s1">as_strided</span><span class="s3">(</span><span class="s1">from_bytes</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:].</span><span class="s1">view</span><span class="s3">(</span><span class="s1">arr1</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">),</span>
+                              <span class="s1">arr1</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">, (</span><span class="s1">stride1</span><span class="s3">,))</span>
+            <span class="s1">new2 </span><span class="s3">= </span><span class="s1">as_strided</span><span class="s3">(</span><span class="s1">to_bytes</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:].</span><span class="s1">view</span><span class="s3">(</span><span class="s1">arr2</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">),</span>
+                              <span class="s1">arr2</span><span class="s3">.</span><span class="s1">shape</span><span class="s3">, (</span><span class="s1">stride2</span><span class="s3">,))</span>
+
+        <span class="s1">new1</span><span class="s3">[...] = </span><span class="s1">arr1</span>
+
+        <span class="s2">if not </span><span class="s1">contig</span><span class="s3">:</span>
+            <span class="s4"># Ensure we did not overwrite bytes that should not be written:</span>
+            <span class="s1">offset </span><span class="s3">= </span><span class="s1">arr1</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s2">if </span><span class="s1">aligned </span><span class="s2">else </span><span class="s6">0</span>
+            <span class="s1">buf </span><span class="s3">= </span><span class="s1">from_bytes</span><span class="s3">[</span><span class="s1">offset</span><span class="s3">::</span><span class="s1">stride1</span><span class="s3">].</span><span class="s1">tobytes</span><span class="s3">()</span>
+            <span class="s2">assert </span><span class="s1">buf</span><span class="s3">.</span><span class="s1">count</span><span class="s3">(</span><span class="s7">b&quot;</span><span class="s2">\0</span><span class="s7">&quot;</span><span class="s3">) == </span><span class="s1">len</span><span class="s3">(</span><span class="s1">buf</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">contig</span><span class="s3">:</span>
+            <span class="s2">assert </span><span class="s1">new1</span><span class="s3">.</span><span class="s1">flags</span><span class="s3">.</span><span class="s1">c_contiguous</span>
+            <span class="s2">assert </span><span class="s1">new2</span><span class="s3">.</span><span class="s1">flags</span><span class="s3">.</span><span class="s1">c_contiguous</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">assert not </span><span class="s1">new1</span><span class="s3">.</span><span class="s1">flags</span><span class="s3">.</span><span class="s1">c_contiguous</span>
+            <span class="s2">assert not </span><span class="s1">new2</span><span class="s3">.</span><span class="s1">flags</span><span class="s3">.</span><span class="s1">c_contiguous</span>
+
+        <span class="s2">if </span><span class="s1">aligned</span><span class="s3">:</span>
+            <span class="s2">assert </span><span class="s1">new1</span><span class="s3">.</span><span class="s1">flags</span><span class="s3">.</span><span class="s1">aligned</span>
+            <span class="s2">assert </span><span class="s1">new2</span><span class="s3">.</span><span class="s1">flags</span><span class="s3">.</span><span class="s1">aligned</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">assert not </span><span class="s1">new1</span><span class="s3">.</span><span class="s1">flags</span><span class="s3">.</span><span class="s1">aligned </span><span class="s2">or </span><span class="s1">new1</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">alignment </span><span class="s3">== </span><span class="s6">1</span>
+            <span class="s2">assert not </span><span class="s1">new2</span><span class="s3">.</span><span class="s1">flags</span><span class="s3">.</span><span class="s1">aligned </span><span class="s2">or </span><span class="s1">new2</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">alignment </span><span class="s3">== </span><span class="s6">1</span>
+
+        <span class="s2">return </span><span class="s1">new1</span><span class="s3">, </span><span class="s1">new2</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;from_Dt&quot;</span><span class="s3">, </span><span class="s1">simple_dtypes</span><span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_simple_cancast</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">from_Dt</span><span class="s3">):</span>
+        <span class="s2">for </span><span class="s1">to_Dt </span><span class="s2">in </span><span class="s1">simple_dtypes</span><span class="s3">:</span>
+            <span class="s1">cast </span><span class="s3">= </span><span class="s1">get_castingimpl</span><span class="s3">(</span><span class="s1">from_Dt</span><span class="s3">, </span><span class="s1">to_Dt</span><span class="s3">)</span>
+
+            <span class="s2">for </span><span class="s1">from_dt </span><span class="s2">in </span><span class="s3">[</span><span class="s1">from_Dt</span><span class="s3">(), </span><span class="s1">from_Dt</span><span class="s3">().</span><span class="s1">newbyteorder</span><span class="s3">()]:</span>
+                <span class="s1">default </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">.</span><span class="s1">_resolve_descriptors</span><span class="s3">((</span><span class="s1">from_dt</span><span class="s3">, </span><span class="s2">None</span><span class="s3">))[</span><span class="s6">1</span><span class="s3">][</span><span class="s6">1</span><span class="s3">]</span>
+                <span class="s2">assert </span><span class="s1">default </span><span class="s3">== </span><span class="s1">to_Dt</span><span class="s3">()</span>
+                <span class="s2">del </span><span class="s1">default</span>
+
+                <span class="s2">for </span><span class="s1">to_dt </span><span class="s2">in </span><span class="s3">[</span><span class="s1">to_Dt</span><span class="s3">(), </span><span class="s1">to_Dt</span><span class="s3">().</span><span class="s1">newbyteorder</span><span class="s3">()]:</span>
+                    <span class="s1">casting</span><span class="s3">, (</span><span class="s1">from_res</span><span class="s3">, </span><span class="s1">to_res</span><span class="s3">), </span><span class="s1">view_off </span><span class="s3">= (</span>
+                            <span class="s1">cast</span><span class="s3">.</span><span class="s1">_resolve_descriptors</span><span class="s3">((</span><span class="s1">from_dt</span><span class="s3">, </span><span class="s1">to_dt</span><span class="s3">)))</span>
+                    <span class="s2">assert </span><span class="s1">type</span><span class="s3">(</span><span class="s1">from_res</span><span class="s3">) </span><span class="s2">is </span><span class="s1">from_Dt</span>
+                    <span class="s2">assert </span><span class="s1">type</span><span class="s3">(</span><span class="s1">to_res</span><span class="s3">) </span><span class="s2">is </span><span class="s1">to_Dt</span>
+                    <span class="s2">if </span><span class="s1">view_off </span><span class="s2">is not None</span><span class="s3">:</span>
+                        <span class="s4"># If a view is acceptable, this is &quot;no&quot; casting</span>
+                        <span class="s4"># and byte order must be matching.</span>
+                        <span class="s2">assert </span><span class="s1">casting </span><span class="s3">== </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">no </span><span class="s3">| </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">same_value</span>
+                        <span class="s4"># The above table lists this as &quot;equivalent&quot;, perhaps</span>
+                        <span class="s4"># with &quot;same_value&quot;</span>
+                        <span class="s1">v </span><span class="s3">= </span><span class="s1">CAST_TABLE</span><span class="s3">[</span><span class="s1">from_Dt</span><span class="s3">][</span><span class="s1">to_Dt</span><span class="s3">] &amp; ~</span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">same_value</span>
+                        <span class="s2">assert </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">equiv </span><span class="s3">== </span><span class="s1">v</span>
+                        <span class="s4"># Note that to_res may not be the same as from_dt</span>
+                        <span class="s2">assert </span><span class="s1">from_res</span><span class="s3">.</span><span class="s1">isnative </span><span class="s3">== </span><span class="s1">to_res</span><span class="s3">.</span><span class="s1">isnative</span>
+                    <span class="s2">else</span><span class="s3">:</span>
+                        <span class="s2">if </span><span class="s1">from_Dt </span><span class="s3">== </span><span class="s1">to_Dt</span><span class="s3">:</span>
+                            <span class="s4"># Note that to_res may not be the same as from_dt</span>
+                            <span class="s2">assert </span><span class="s1">from_res</span><span class="s3">.</span><span class="s1">isnative </span><span class="s3">!= </span><span class="s1">to_res</span><span class="s3">.</span><span class="s1">isnative</span>
+                        <span class="s2">assert </span><span class="s1">casting </span><span class="s3">== </span><span class="s1">CAST_TABLE</span><span class="s3">[</span><span class="s1">from_Dt</span><span class="s3">][</span><span class="s1">to_Dt</span><span class="s3">]</span>
+
+                    <span class="s2">if </span><span class="s1">from_Dt </span><span class="s2">is </span><span class="s1">to_Dt</span><span class="s3">:</span>
+                        <span class="s2">assert </span><span class="s1">from_dt </span><span class="s2">is </span><span class="s1">from_res</span>
+                        <span class="s2">assert </span><span class="s1">to_dt </span><span class="s2">is </span><span class="s1">to_res</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">filterwarnings</span><span class="s3">(</span><span class="s5">&quot;ignore::numpy.exceptions.ComplexWarning&quot;</span><span class="s3">)</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;from_dt&quot;</span><span class="s3">, </span><span class="s1">simple_dtype_instances</span><span class="s3">())</span>
+    <span class="s2">def </span><span class="s1">test_simple_direct_casts</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">from_dt</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        This test checks numeric direct casts for dtypes supported also by the 
+        struct module (plus complex).  It tries to be test a wide range of 
+        inputs, but skips over possibly undefined behaviour (e.g. int rollover). 
+        Longdouble and CLongdouble are tested, but only using double precision. 
+ 
+        If this test creates issues, it should possibly just be simplified 
+        or even removed (checking whether unaligned/non-contiguous casts give 
+        the same results is useful, though). 
+        &quot;&quot;&quot;</span>
+        <span class="s2">for </span><span class="s1">to_dt </span><span class="s2">in </span><span class="s1">simple_dtype_instances</span><span class="s3">():</span>
+            <span class="s1">to_dt </span><span class="s3">= </span><span class="s1">to_dt</span><span class="s3">.</span><span class="s1">values</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]</span>
+            <span class="s1">cast </span><span class="s3">= </span><span class="s1">get_castingimpl</span><span class="s3">(</span><span class="s1">type</span><span class="s3">(</span><span class="s1">from_dt</span><span class="s3">), </span><span class="s1">type</span><span class="s3">(</span><span class="s1">to_dt</span><span class="s3">))</span>
+
+            <span class="s4"># print(&quot;from_dt&quot;, from_dt, &quot;to_dt&quot;, to_dt)</span>
+            <span class="s1">casting</span><span class="s3">, (</span><span class="s1">from_res</span><span class="s3">, </span><span class="s1">to_res</span><span class="s3">), </span><span class="s1">view_off </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">.</span><span class="s1">_resolve_descriptors</span><span class="s3">(</span>
+                <span class="s3">(</span><span class="s1">from_dt</span><span class="s3">, </span><span class="s1">to_dt</span><span class="s3">))</span>
+
+            <span class="s2">if </span><span class="s1">from_res </span><span class="s2">is not </span><span class="s1">from_dt </span><span class="s2">or </span><span class="s1">to_res </span><span class="s2">is not </span><span class="s1">to_dt</span><span class="s3">:</span>
+                <span class="s4"># Do not test this case, it is handled in multiple steps,</span>
+                <span class="s4"># each of which should is tested individually.</span>
+                <span class="s2">return</span>
+
+            <span class="s1">safe </span><span class="s3">= </span><span class="s1">casting </span><span class="s3">&lt;= </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">safe</span>
+            <span class="s2">del </span><span class="s1">from_res</span><span class="s3">, </span><span class="s1">to_res</span><span class="s3">, </span><span class="s1">casting</span>
+
+            <span class="s1">arr1</span><span class="s3">, </span><span class="s1">arr2</span><span class="s3">, </span><span class="s1">values </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">get_data</span><span class="s3">(</span><span class="s1">from_dt</span><span class="s3">, </span><span class="s1">to_dt</span><span class="s3">)</span>
+
+            <span class="s4"># print(&quot;2&quot;, arr1, arr2, cast)</span>
+            <span class="s1">cast</span><span class="s3">.</span><span class="s1">_simple_strided_call</span><span class="s3">((</span><span class="s1">arr1</span><span class="s3">, </span><span class="s1">arr2</span><span class="s3">))</span>
+            <span class="s4"># print(&quot;3&quot;)</span>
+
+            <span class="s4"># Check via python list</span>
+            <span class="s2">assert </span><span class="s1">arr2</span><span class="s3">.</span><span class="s1">tolist</span><span class="s3">() == </span><span class="s1">values</span>
+
+            <span class="s4"># Check that the same results are achieved for strided loops</span>
+            <span class="s1">arr1_o</span><span class="s3">, </span><span class="s1">arr2_o </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">get_data_variation</span><span class="s3">(</span><span class="s1">arr1</span><span class="s3">, </span><span class="s1">arr2</span><span class="s3">, </span><span class="s2">True</span><span class="s3">, </span><span class="s2">False</span><span class="s3">)</span>
+            <span class="s1">cast</span><span class="s3">.</span><span class="s1">_simple_strided_call</span><span class="s3">((</span><span class="s1">arr1_o</span><span class="s3">, </span><span class="s1">arr2_o</span><span class="s3">))</span>
+
+            <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">arr2_o</span><span class="s3">, </span><span class="s1">arr2</span><span class="s3">)</span>
+            <span class="s2">assert </span><span class="s1">arr2_o</span><span class="s3">.</span><span class="s1">tobytes</span><span class="s3">() == </span><span class="s1">arr2</span><span class="s3">.</span><span class="s1">tobytes</span><span class="s3">()</span>
+
+            <span class="s4"># Check if alignment makes a difference, but only if supported</span>
+            <span class="s4"># and only if the alignment can be wrong</span>
+            <span class="s2">if </span><span class="s3">((</span><span class="s1">from_dt</span><span class="s3">.</span><span class="s1">alignment </span><span class="s3">== </span><span class="s6">1 </span><span class="s2">and </span><span class="s1">to_dt</span><span class="s3">.</span><span class="s1">alignment </span><span class="s3">== </span><span class="s6">1</span><span class="s3">) </span><span class="s2">or</span>
+                    <span class="s2">not </span><span class="s1">cast</span><span class="s3">.</span><span class="s1">_supports_unaligned</span><span class="s3">):</span>
+                <span class="s2">return</span>
+
+            <span class="s1">arr1_o</span><span class="s3">, </span><span class="s1">arr2_o </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">get_data_variation</span><span class="s3">(</span><span class="s1">arr1</span><span class="s3">, </span><span class="s1">arr2</span><span class="s3">, </span><span class="s2">False</span><span class="s3">, </span><span class="s2">True</span><span class="s3">)</span>
+            <span class="s1">cast</span><span class="s3">.</span><span class="s1">_simple_strided_call</span><span class="s3">((</span><span class="s1">arr1_o</span><span class="s3">, </span><span class="s1">arr2_o</span><span class="s3">))</span>
+
+            <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">arr2_o</span><span class="s3">, </span><span class="s1">arr2</span><span class="s3">)</span>
+            <span class="s2">assert </span><span class="s1">arr2_o</span><span class="s3">.</span><span class="s1">tobytes</span><span class="s3">() == </span><span class="s1">arr2</span><span class="s3">.</span><span class="s1">tobytes</span><span class="s3">()</span>
+
+            <span class="s1">arr1_o</span><span class="s3">, </span><span class="s1">arr2_o </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">get_data_variation</span><span class="s3">(</span><span class="s1">arr1</span><span class="s3">, </span><span class="s1">arr2</span><span class="s3">, </span><span class="s2">False</span><span class="s3">, </span><span class="s2">False</span><span class="s3">)</span>
+            <span class="s1">cast</span><span class="s3">.</span><span class="s1">_simple_strided_call</span><span class="s3">((</span><span class="s1">arr1_o</span><span class="s3">, </span><span class="s1">arr2_o</span><span class="s3">))</span>
+
+            <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">arr2_o</span><span class="s3">, </span><span class="s1">arr2</span><span class="s3">)</span>
+            <span class="s2">assert </span><span class="s1">arr2_o</span><span class="s3">.</span><span class="s1">tobytes</span><span class="s3">() == </span><span class="s1">arr2</span><span class="s3">.</span><span class="s1">tobytes</span><span class="s3">()</span>
+
+            <span class="s2">del </span><span class="s1">arr1_o</span><span class="s3">, </span><span class="s1">arr2_o</span><span class="s3">, </span><span class="s1">cast</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;from_Dt&quot;</span><span class="s3">, </span><span class="s1">simple_dtypes</span><span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_numeric_to_times</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">from_Dt</span><span class="s3">):</span>
+        <span class="s4"># We currently only implement contiguous loops, so only need to</span>
+        <span class="s4"># test those.</span>
+        <span class="s1">from_dt </span><span class="s3">= </span><span class="s1">from_Dt</span><span class="s3">()</span>
+
+        <span class="s1">time_dtypes </span><span class="s3">= [</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;M8&quot;</span><span class="s3">), </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;M8[ms]&quot;</span><span class="s3">), </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;M8[4D]&quot;</span><span class="s3">),</span>
+                       <span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;m8&quot;</span><span class="s3">), </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;m8[ms]&quot;</span><span class="s3">), </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;m8[4D]&quot;</span><span class="s3">)]</span>
+        <span class="s2">for </span><span class="s1">time_dt </span><span class="s2">in </span><span class="s1">time_dtypes</span><span class="s3">:</span>
+            <span class="s1">cast </span><span class="s3">= </span><span class="s1">get_castingimpl</span><span class="s3">(</span><span class="s1">type</span><span class="s3">(</span><span class="s1">from_dt</span><span class="s3">), </span><span class="s1">type</span><span class="s3">(</span><span class="s1">time_dt</span><span class="s3">))</span>
+
+            <span class="s1">casting</span><span class="s3">, (</span><span class="s1">from_res</span><span class="s3">, </span><span class="s1">to_res</span><span class="s3">), </span><span class="s1">view_off </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">.</span><span class="s1">_resolve_descriptors</span><span class="s3">(</span>
+                <span class="s3">(</span><span class="s1">from_dt</span><span class="s3">, </span><span class="s1">time_dt</span><span class="s3">))</span>
+
+            <span class="s2">assert </span><span class="s1">from_res </span><span class="s2">is </span><span class="s1">from_dt</span>
+            <span class="s2">assert </span><span class="s1">to_res </span><span class="s2">is </span><span class="s1">time_dt</span>
+            <span class="s2">del </span><span class="s1">from_res</span><span class="s3">, </span><span class="s1">to_res</span>
+
+            <span class="s2">assert </span><span class="s1">casting </span><span class="s3">&amp; </span><span class="s1">CAST_TABLE</span><span class="s3">[</span><span class="s1">from_Dt</span><span class="s3">][</span><span class="s1">type</span><span class="s3">(</span><span class="s1">time_dt</span><span class="s3">)]</span>
+            <span class="s2">assert </span><span class="s1">view_off </span><span class="s2">is None</span>
+
+            <span class="s1">int64_dt </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">)</span>
+            <span class="s1">arr1</span><span class="s3">, </span><span class="s1">arr2</span><span class="s3">, </span><span class="s1">values </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">get_data</span><span class="s3">(</span><span class="s1">from_dt</span><span class="s3">, </span><span class="s1">int64_dt</span><span class="s3">)</span>
+            <span class="s1">arr2 </span><span class="s3">= </span><span class="s1">arr2</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s1">time_dt</span><span class="s3">)</span>
+            <span class="s1">arr2</span><span class="s3">[...] = </span><span class="s1">np</span><span class="s3">.</span><span class="s1">datetime64</span><span class="s3">(</span><span class="s5">&quot;NaT&quot;</span><span class="s3">, </span><span class="s5">&quot;D&quot;</span><span class="s3">)</span>
+
+            <span class="s2">if </span><span class="s1">time_dt </span><span class="s3">== </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;M8&quot;</span><span class="s3">):</span>
+                <span class="s4"># This is a bit of a strange path, and could probably be removed</span>
+                <span class="s1">arr1</span><span class="s3">[-</span><span class="s6">1</span><span class="s3">] = </span><span class="s6">0  </span><span class="s4"># ensure at least one value is not NaT</span>
+
+                <span class="s4"># The cast currently succeeds, but the values are invalid:</span>
+                <span class="s1">cast</span><span class="s3">.</span><span class="s1">_simple_strided_call</span><span class="s3">((</span><span class="s1">arr1</span><span class="s3">, </span><span class="s1">arr2</span><span class="s3">))</span>
+                <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">):</span>
+                    <span class="s1">str</span><span class="s3">(</span><span class="s1">arr2</span><span class="s3">[-</span><span class="s6">1</span><span class="s3">])  </span><span class="s4"># e.g. conversion to string fails</span>
+                <span class="s2">return</span>
+
+            <span class="s1">cast</span><span class="s3">.</span><span class="s1">_simple_strided_call</span><span class="s3">((</span><span class="s1">arr1</span><span class="s3">, </span><span class="s1">arr2</span><span class="s3">))</span>
+
+            <span class="s2">assert </span><span class="s3">[</span><span class="s1">int</span><span class="s3">(</span><span class="s1">v</span><span class="s3">) </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">arr2</span><span class="s3">.</span><span class="s1">tolist</span><span class="s3">()] == </span><span class="s1">values</span>
+
+            <span class="s4"># Check that the same results are achieved for strided loops</span>
+            <span class="s1">arr1_o</span><span class="s3">, </span><span class="s1">arr2_o </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">get_data_variation</span><span class="s3">(</span><span class="s1">arr1</span><span class="s3">, </span><span class="s1">arr2</span><span class="s3">, </span><span class="s2">True</span><span class="s3">, </span><span class="s2">False</span><span class="s3">)</span>
+            <span class="s1">cast</span><span class="s3">.</span><span class="s1">_simple_strided_call</span><span class="s3">((</span><span class="s1">arr1_o</span><span class="s3">, </span><span class="s1">arr2_o</span><span class="s3">))</span>
+
+            <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">arr2_o</span><span class="s3">, </span><span class="s1">arr2</span><span class="s3">)</span>
+            <span class="s2">assert </span><span class="s1">arr2_o</span><span class="s3">.</span><span class="s1">tobytes</span><span class="s3">() == </span><span class="s1">arr2</span><span class="s3">.</span><span class="s1">tobytes</span><span class="s3">()</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+            <span class="s3">[</span><span class="s5">&quot;from_dt&quot;</span><span class="s3">, </span><span class="s5">&quot;to_dt&quot;</span><span class="s3">, </span><span class="s5">&quot;expected_casting&quot;</span><span class="s3">, </span><span class="s5">&quot;expected_view_off&quot;</span><span class="s3">,</span>
+             <span class="s5">&quot;nom&quot;</span><span class="s3">, </span><span class="s5">&quot;denom&quot;</span><span class="s3">],</span>
+            <span class="s3">[(</span><span class="s5">&quot;M8[ns]&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">no</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">),</span>
+             <span class="s3">(</span><span class="s1">str</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;M8[ns]&quot;</span><span class="s3">).</span><span class="s1">newbyteorder</span><span class="s3">()), </span><span class="s2">None</span><span class="s3">,</span>
+                  <span class="s1">Casting</span><span class="s3">.</span><span class="s1">equiv</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">),</span>
+             <span class="s3">(</span><span class="s5">&quot;M8&quot;</span><span class="s3">, </span><span class="s5">&quot;M8[ms]&quot;</span><span class="s3">, </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">safe</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">),</span>
+             <span class="s4"># should be invalid cast:</span>
+             <span class="s3">(</span><span class="s5">&quot;M8[ms]&quot;</span><span class="s3">, </span><span class="s5">&quot;M8&quot;</span><span class="s3">, </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">unsafe</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">),</span>
+             <span class="s3">(</span><span class="s5">&quot;M8[5ms]&quot;</span><span class="s3">, </span><span class="s5">&quot;M8[5ms]&quot;</span><span class="s3">, </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">no</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">),</span>
+             <span class="s3">(</span><span class="s5">&quot;M8[ns]&quot;</span><span class="s3">, </span><span class="s5">&quot;M8[ms]&quot;</span><span class="s3">, </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">same_kind</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s6">10</span><span class="s3">**</span><span class="s6">6</span><span class="s3">),</span>
+             <span class="s3">(</span><span class="s5">&quot;M8[ms]&quot;</span><span class="s3">, </span><span class="s5">&quot;M8[ns]&quot;</span><span class="s3">, </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">safe</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s6">10</span><span class="s3">**</span><span class="s6">6</span><span class="s3">, </span><span class="s6">1</span><span class="s3">),</span>
+             <span class="s3">(</span><span class="s5">&quot;M8[ms]&quot;</span><span class="s3">, </span><span class="s5">&quot;M8[7ms]&quot;</span><span class="s3">, </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">same_kind</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s6">7</span><span class="s3">),</span>
+             <span class="s3">(</span><span class="s5">&quot;M8[4D]&quot;</span><span class="s3">, </span><span class="s5">&quot;M8[1M]&quot;</span><span class="s3">, </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">same_kind</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s2">None</span><span class="s3">,</span>
+                  <span class="s4"># give full values based on NumPy 1.19.x</span>
+                  <span class="s3">[-</span><span class="s6">2</span><span class="s3">**</span><span class="s6">63</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, -</span><span class="s6">1</span><span class="s3">, </span><span class="s6">1314</span><span class="s3">, -</span><span class="s6">1315</span><span class="s3">, </span><span class="s6">564442610</span><span class="s3">]),</span>
+             <span class="s3">(</span><span class="s5">&quot;m8[ns]&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">no</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">),</span>
+             <span class="s3">(</span><span class="s1">str</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;m8[ns]&quot;</span><span class="s3">).</span><span class="s1">newbyteorder</span><span class="s3">()), </span><span class="s2">None</span><span class="s3">,</span>
+                  <span class="s1">Casting</span><span class="s3">.</span><span class="s1">equiv</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">),</span>
+             <span class="s3">(</span><span class="s5">&quot;m8&quot;</span><span class="s3">, </span><span class="s5">&quot;m8[ms]&quot;</span><span class="s3">, </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">safe</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">),</span>
+             <span class="s4"># should be invalid cast:</span>
+             <span class="s3">(</span><span class="s5">&quot;m8[5ms]&quot;</span><span class="s3">, </span><span class="s5">&quot;m8[5ms]&quot;</span><span class="s3">, </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">no</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">),</span>
+             <span class="s3">(</span><span class="s5">&quot;m8[ns]&quot;</span><span class="s3">, </span><span class="s5">&quot;m8[ms]&quot;</span><span class="s3">, </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">same_kind</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s6">10</span><span class="s3">**</span><span class="s6">6</span><span class="s3">),</span>
+             <span class="s3">(</span><span class="s5">&quot;m8[ms]&quot;</span><span class="s3">, </span><span class="s5">&quot;m8[ns]&quot;</span><span class="s3">, </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">safe</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s6">10</span><span class="s3">**</span><span class="s6">6</span><span class="s3">, </span><span class="s6">1</span><span class="s3">),</span>
+             <span class="s3">(</span><span class="s5">&quot;m8[ms]&quot;</span><span class="s3">, </span><span class="s5">&quot;m8[7ms]&quot;</span><span class="s3">, </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">same_kind</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s6">7</span><span class="s3">),</span>
+             <span class="s3">(</span><span class="s5">&quot;m8[4D]&quot;</span><span class="s3">, </span><span class="s5">&quot;m8[1M]&quot;</span><span class="s3">, </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">unsafe</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s2">None</span><span class="s3">,</span>
+                  <span class="s4"># give full values based on NumPy 1.19.x</span>
+                  <span class="s3">[-</span><span class="s6">2</span><span class="s3">**</span><span class="s6">63</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, </span><span class="s6">1314</span><span class="s3">, -</span><span class="s6">1315</span><span class="s3">, </span><span class="s6">564442610</span><span class="s3">])])</span>
+    <span class="s2">def </span><span class="s1">test_time_to_time</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">from_dt</span><span class="s3">, </span><span class="s1">to_dt</span><span class="s3">,</span>
+                          <span class="s1">expected_casting</span><span class="s3">, </span><span class="s1">expected_view_off</span><span class="s3">,</span>
+                          <span class="s1">nom</span><span class="s3">, </span><span class="s1">denom</span><span class="s3">):</span>
+        <span class="s1">from_dt </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">from_dt</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">to_dt </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">to_dt </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">to_dt</span><span class="s3">)</span>
+
+        <span class="s4"># Test a few values for casting (results generated with NumPy 1.19)</span>
+        <span class="s1">values </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([-</span><span class="s6">2</span><span class="s3">**</span><span class="s6">63</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s6">2</span><span class="s3">**</span><span class="s6">63 </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s6">10000</span><span class="s3">, -</span><span class="s6">10000</span><span class="s3">, </span><span class="s6">2</span><span class="s3">**</span><span class="s6">32</span><span class="s3">])</span>
+        <span class="s1">values </span><span class="s3">= </span><span class="s1">values</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">).</span><span class="s1">newbyteorder</span><span class="s3">(</span><span class="s1">from_dt</span><span class="s3">.</span><span class="s1">byteorder</span><span class="s3">))</span>
+        <span class="s2">assert </span><span class="s1">values</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">byteorder </span><span class="s3">== </span><span class="s1">from_dt</span><span class="s3">.</span><span class="s1">byteorder</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">isnat</span><span class="s3">(</span><span class="s1">values</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s1">from_dt</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">])</span>
+
+        <span class="s1">DType </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">from_dt</span><span class="s3">)</span>
+        <span class="s1">cast </span><span class="s3">= </span><span class="s1">get_castingimpl</span><span class="s3">(</span><span class="s1">DType</span><span class="s3">, </span><span class="s1">DType</span><span class="s3">)</span>
+        <span class="s1">casting</span><span class="s3">, (</span><span class="s1">from_res</span><span class="s3">, </span><span class="s1">to_res</span><span class="s3">), </span><span class="s1">view_off </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">.</span><span class="s1">_resolve_descriptors</span><span class="s3">(</span>
+                <span class="s3">(</span><span class="s1">from_dt</span><span class="s3">, </span><span class="s1">to_dt</span><span class="s3">))</span>
+        <span class="s2">assert </span><span class="s1">from_res </span><span class="s2">is </span><span class="s1">from_dt</span>
+        <span class="s2">assert </span><span class="s1">to_res </span><span class="s2">is </span><span class="s1">to_dt </span><span class="s2">or </span><span class="s1">to_dt </span><span class="s2">is None</span>
+        <span class="s2">assert </span><span class="s1">casting </span><span class="s3">== </span><span class="s1">expected_casting</span>
+        <span class="s2">assert </span><span class="s1">view_off </span><span class="s3">== </span><span class="s1">expected_view_off</span>
+
+        <span class="s2">if </span><span class="s1">nom </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">expected_out </span><span class="s3">= (</span><span class="s1">values </span><span class="s3">* </span><span class="s1">nom </span><span class="s3">// </span><span class="s1">denom</span><span class="s3">).</span><span class="s1">view</span><span class="s3">(</span><span class="s1">to_res</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">to_dt </span><span class="s3">== </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;M8&quot;</span><span class="s3">):</span>
+                <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">warns</span><span class="s3">(</span>
+                    <span class="s1">DeprecationWarning</span><span class="s3">,</span>
+                    <span class="s1">match</span><span class="s3">=</span><span class="s5">&quot;The 'generic' unit for NumPy timedelta is deprecated&quot;</span><span class="s3">,</span>
+                <span class="s3">):</span>
+                    <span class="s1">expected_out</span><span class="s3">[</span><span class="s6">0</span><span class="s3">] = </span><span class="s5">&quot;NaT&quot;</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">expected_out</span><span class="s3">[</span><span class="s6">0</span><span class="s3">] = </span><span class="s5">&quot;NaT&quot;</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">expected_out </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty_like</span><span class="s3">(</span><span class="s1">values</span><span class="s3">)</span>
+            <span class="s1">expected_out</span><span class="s3">[...] = </span><span class="s1">denom</span>
+            <span class="s1">expected_out </span><span class="s3">= </span><span class="s1">expected_out</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s1">to_dt</span><span class="s3">)</span>
+
+        <span class="s1">orig_arr </span><span class="s3">= </span><span class="s1">values</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s1">from_dt</span><span class="s3">)</span>
+        <span class="s1">orig_out </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty_like</span><span class="s3">(</span><span class="s1">expected_out</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">casting </span><span class="s3">== </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">unsafe </span><span class="s2">and </span><span class="s3">(</span><span class="s1">to_dt </span><span class="s3">== </span><span class="s5">&quot;m8&quot; </span><span class="s2">or </span><span class="s1">to_dt </span><span class="s3">== </span><span class="s5">&quot;M8&quot;</span><span class="s3">):</span>
+            <span class="s4"># Casting from non-generic to generic units is an error and should</span>
+            <span class="s4"># probably be reported as an invalid cast earlier.</span>
+            <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">):</span>
+                <span class="s1">cast</span><span class="s3">.</span><span class="s1">_simple_strided_call</span><span class="s3">((</span><span class="s1">orig_arr</span><span class="s3">, </span><span class="s1">orig_out</span><span class="s3">))</span>
+            <span class="s2">return</span>
+
+        <span class="s2">for </span><span class="s1">aligned </span><span class="s2">in </span><span class="s3">[</span><span class="s2">True</span><span class="s3">, </span><span class="s2">True</span><span class="s3">]:</span>
+            <span class="s2">for </span><span class="s1">contig </span><span class="s2">in </span><span class="s3">[</span><span class="s2">True</span><span class="s3">, </span><span class="s2">True</span><span class="s3">]:</span>
+                <span class="s1">arr</span><span class="s3">, </span><span class="s1">out </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">get_data_variation</span><span class="s3">(</span>
+                        <span class="s1">orig_arr</span><span class="s3">, </span><span class="s1">orig_out</span><span class="s3">, </span><span class="s1">aligned</span><span class="s3">, </span><span class="s1">contig</span><span class="s3">)</span>
+                <span class="s1">out</span><span class="s3">[...] = </span><span class="s6">0</span>
+                <span class="s2">try</span><span class="s3">:</span>
+                    <span class="s1">cast</span><span class="s3">.</span><span class="s1">_simple_strided_call</span><span class="s3">((</span><span class="s1">arr</span><span class="s3">, </span><span class="s1">out</span><span class="s3">))</span>
+                <span class="s2">except </span><span class="s1">OverflowError</span><span class="s3">:</span>
+                    <span class="s4"># Extreme values (e.g. INT64_MAX) can overflow when</span>
+                    <span class="s4"># scaled by the unit conversion factor. gh-16352</span>
+                    <span class="s2">break</span>
+                <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">out</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">), </span><span class="s1">expected_out</span><span class="s3">.</span><span class="s1">view</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">))</span>
+
+    <span class="s2">def </span><span class="s1">string_with_modified_length</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">change_length</span><span class="s3">):</span>
+        <span class="s1">fact </span><span class="s3">= </span><span class="s6">1 </span><span class="s2">if </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">char </span><span class="s3">== </span><span class="s5">&quot;S&quot; </span><span class="s2">else </span><span class="s6">4</span>
+        <span class="s1">length </span><span class="s3">= </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">// </span><span class="s1">fact </span><span class="s3">+ </span><span class="s1">change_length</span>
+        <span class="s2">return </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">f&quot;</span><span class="s2">{</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">byteorder</span><span class="s2">}{</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">char</span><span class="s2">}{</span><span class="s1">length</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;other_DT&quot;</span><span class="s3">, </span><span class="s1">simple_dtypes</span><span class="s3">)</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;string_char&quot;</span><span class="s3">, [</span><span class="s5">&quot;S&quot;</span><span class="s3">, </span><span class="s5">&quot;U&quot;</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_string_cancast</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other_DT</span><span class="s3">, </span><span class="s1">string_char</span><span class="s3">):</span>
+        <span class="s1">fact </span><span class="s3">= </span><span class="s6">1 </span><span class="s2">if </span><span class="s1">string_char </span><span class="s3">== </span><span class="s5">&quot;S&quot; </span><span class="s2">else </span><span class="s6">4</span>
+
+        <span class="s1">string_DT </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">string_char</span><span class="s3">))</span>
+        <span class="s1">cast </span><span class="s3">= </span><span class="s1">get_castingimpl</span><span class="s3">(</span><span class="s1">other_DT</span><span class="s3">, </span><span class="s1">string_DT</span><span class="s3">)</span>
+
+        <span class="s1">other_dt </span><span class="s3">= </span><span class="s1">other_DT</span><span class="s3">()</span>
+        <span class="s1">expected_length </span><span class="s3">= </span><span class="s1">get_expected_stringlength</span><span class="s3">(</span><span class="s1">other_dt</span><span class="s3">)</span>
+        <span class="s1">string_dt </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">f&quot;</span><span class="s2">{</span><span class="s1">string_char</span><span class="s2">}{</span><span class="s1">expected_length</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s3">)</span>
+
+        <span class="s1">safety</span><span class="s3">, (</span><span class="s1">res_other_dt</span><span class="s3">, </span><span class="s1">res_dt</span><span class="s3">), </span><span class="s1">view_off </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">.</span><span class="s1">_resolve_descriptors</span><span class="s3">(</span>
+                <span class="s3">(</span><span class="s1">other_dt</span><span class="s3">, </span><span class="s2">None</span><span class="s3">))</span>
+        <span class="s2">assert </span><span class="s1">res_dt</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">== </span><span class="s1">expected_length </span><span class="s3">* </span><span class="s1">fact</span>
+        <span class="s2">assert </span><span class="s1">safety </span><span class="s3">== </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">safe  </span><span class="s4"># we consider to string casts &quot;safe&quot;</span>
+        <span class="s2">assert </span><span class="s1">view_off </span><span class="s2">is None</span>
+        <span class="s2">assert </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">res_dt</span><span class="s3">, </span><span class="s1">string_DT</span><span class="s3">)</span>
+
+        <span class="s4"># These casts currently implement changing the string length, so</span>
+        <span class="s4"># check the cast-safety for too long/fixed string lengths:</span>
+        <span class="s2">for </span><span class="s1">change_length </span><span class="s2">in </span><span class="s3">[-</span><span class="s6">1</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, </span><span class="s6">1</span><span class="s3">]:</span>
+            <span class="s2">if </span><span class="s1">change_length </span><span class="s3">&gt;= </span><span class="s6">0</span><span class="s3">:</span>
+                <span class="s1">expected_safety </span><span class="s3">= </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">safe</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">expected_safety </span><span class="s3">= </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">same_kind</span>
+
+            <span class="s1">to_dt </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">string_with_modified_length</span><span class="s3">(</span><span class="s1">string_dt</span><span class="s3">, </span><span class="s1">change_length</span><span class="s3">)</span>
+            <span class="s1">safety</span><span class="s3">, (</span><span class="s1">_</span><span class="s3">, </span><span class="s1">res_dt</span><span class="s3">), </span><span class="s1">view_off </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">.</span><span class="s1">_resolve_descriptors</span><span class="s3">(</span>
+                    <span class="s3">(</span><span class="s1">other_dt</span><span class="s3">, </span><span class="s1">to_dt</span><span class="s3">))</span>
+            <span class="s2">assert </span><span class="s1">res_dt </span><span class="s2">is </span><span class="s1">to_dt</span>
+            <span class="s2">assert </span><span class="s1">safety </span><span class="s3">== </span><span class="s1">expected_safety</span>
+            <span class="s2">assert </span><span class="s1">view_off </span><span class="s2">is None</span>
+
+        <span class="s4"># The opposite direction is always considered unsafe:</span>
+        <span class="s1">cast </span><span class="s3">= </span><span class="s1">get_castingimpl</span><span class="s3">(</span><span class="s1">string_DT</span><span class="s3">, </span><span class="s1">other_DT</span><span class="s3">)</span>
+
+        <span class="s1">safety</span><span class="s3">, </span><span class="s1">_</span><span class="s3">, </span><span class="s1">view_off </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">.</span><span class="s1">_resolve_descriptors</span><span class="s3">((</span><span class="s1">string_dt</span><span class="s3">, </span><span class="s1">other_dt</span><span class="s3">))</span>
+        <span class="s2">assert </span><span class="s1">safety </span><span class="s3">== </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">unsafe</span>
+        <span class="s2">assert </span><span class="s1">view_off </span><span class="s2">is None</span>
+
+        <span class="s1">cast </span><span class="s3">= </span><span class="s1">get_castingimpl</span><span class="s3">(</span><span class="s1">string_DT</span><span class="s3">, </span><span class="s1">other_DT</span><span class="s3">)</span>
+        <span class="s1">safety</span><span class="s3">, (</span><span class="s1">_</span><span class="s3">, </span><span class="s1">res_dt</span><span class="s3">), </span><span class="s1">view_off </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">.</span><span class="s1">_resolve_descriptors</span><span class="s3">(</span>
+            <span class="s3">(</span><span class="s1">string_dt</span><span class="s3">, </span><span class="s2">None</span><span class="s3">))</span>
+        <span class="s2">assert </span><span class="s1">safety </span><span class="s3">== </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">unsafe</span>
+        <span class="s2">assert </span><span class="s1">view_off </span><span class="s2">is None</span>
+        <span class="s2">assert </span><span class="s1">other_dt </span><span class="s2">is </span><span class="s1">res_dt  </span><span class="s4"># returns the singleton for simple dtypes</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;string_char&quot;</span><span class="s3">, [</span><span class="s5">&quot;S&quot;</span><span class="s3">, </span><span class="s5">&quot;U&quot;</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;other_dt&quot;</span><span class="s3">, </span><span class="s1">simple_dtype_instances</span><span class="s3">())</span>
+    <span class="s2">def </span><span class="s1">test_simple_string_casts_roundtrip</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other_dt</span><span class="s3">, </span><span class="s1">string_char</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Tests casts from and to string by checking the roundtripping property. 
+ 
+        The test also covers some string to string casts (but not all). 
+ 
+        If this test creates issues, it should possibly just be simplified 
+        or even removed (checking whether unaligned/non-contiguous casts give 
+        the same results is useful, though). 
+        &quot;&quot;&quot;</span>
+        <span class="s1">string_DT </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">string_char</span><span class="s3">))</span>
+
+        <span class="s1">cast </span><span class="s3">= </span><span class="s1">get_castingimpl</span><span class="s3">(</span><span class="s1">type</span><span class="s3">(</span><span class="s1">other_dt</span><span class="s3">), </span><span class="s1">string_DT</span><span class="s3">)</span>
+        <span class="s1">cast_back </span><span class="s3">= </span><span class="s1">get_castingimpl</span><span class="s3">(</span><span class="s1">string_DT</span><span class="s3">, </span><span class="s1">type</span><span class="s3">(</span><span class="s1">other_dt</span><span class="s3">))</span>
+        <span class="s1">_</span><span class="s3">, (</span><span class="s1">res_other_dt</span><span class="s3">, </span><span class="s1">string_dt</span><span class="s3">), </span><span class="s1">_ </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">.</span><span class="s1">_resolve_descriptors</span><span class="s3">(</span>
+                <span class="s3">(</span><span class="s1">other_dt</span><span class="s3">, </span><span class="s2">None</span><span class="s3">))</span>
+
+        <span class="s2">if </span><span class="s1">res_other_dt </span><span class="s2">is not </span><span class="s1">other_dt</span><span class="s3">:</span>
+            <span class="s4"># do not support non-native byteorder, skip test in that case</span>
+            <span class="s2">assert </span><span class="s1">other_dt</span><span class="s3">.</span><span class="s1">byteorder </span><span class="s3">!= </span><span class="s1">res_other_dt</span><span class="s3">.</span><span class="s1">byteorder</span>
+            <span class="s2">return</span>
+
+        <span class="s1">orig_arr</span><span class="s3">, </span><span class="s1">values </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">get_data</span><span class="s3">(</span><span class="s1">other_dt</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+        <span class="s1">str_arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">zeros</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">orig_arr</span><span class="s3">), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">string_dt</span><span class="s3">)</span>
+        <span class="s1">string_dt_short </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">string_with_modified_length</span><span class="s3">(</span><span class="s1">string_dt</span><span class="s3">, -</span><span class="s6">1</span><span class="s3">)</span>
+        <span class="s1">str_arr_short </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">zeros</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">orig_arr</span><span class="s3">), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">string_dt_short</span><span class="s3">)</span>
+        <span class="s1">string_dt_long </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">string_with_modified_length</span><span class="s3">(</span><span class="s1">string_dt</span><span class="s3">, </span><span class="s6">1</span><span class="s3">)</span>
+        <span class="s1">str_arr_long </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">zeros</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">orig_arr</span><span class="s3">), </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">string_dt_long</span><span class="s3">)</span>
+
+        <span class="s2">assert not </span><span class="s1">cast</span><span class="s3">.</span><span class="s1">_supports_unaligned  </span><span class="s4"># if support is added, should test</span>
+        <span class="s2">assert not </span><span class="s1">cast_back</span><span class="s3">.</span><span class="s1">_supports_unaligned</span>
+
+        <span class="s2">for </span><span class="s1">contig </span><span class="s2">in </span><span class="s3">[</span><span class="s2">True</span><span class="s3">, </span><span class="s2">False</span><span class="s3">]:</span>
+            <span class="s1">other_arr</span><span class="s3">, </span><span class="s1">str_arr </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">get_data_variation</span><span class="s3">(</span>
+                <span class="s1">orig_arr</span><span class="s3">, </span><span class="s1">str_arr</span><span class="s3">, </span><span class="s2">True</span><span class="s3">, </span><span class="s1">contig</span><span class="s3">)</span>
+            <span class="s1">_</span><span class="s3">, </span><span class="s1">str_arr_short </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">get_data_variation</span><span class="s3">(</span>
+                <span class="s1">orig_arr</span><span class="s3">, </span><span class="s1">str_arr_short</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">(), </span><span class="s2">True</span><span class="s3">, </span><span class="s1">contig</span><span class="s3">)</span>
+            <span class="s1">_</span><span class="s3">, </span><span class="s1">str_arr_long </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">get_data_variation</span><span class="s3">(</span>
+                <span class="s1">orig_arr</span><span class="s3">, </span><span class="s1">str_arr_long</span><span class="s3">, </span><span class="s2">True</span><span class="s3">, </span><span class="s1">contig</span><span class="s3">)</span>
+
+            <span class="s1">cast</span><span class="s3">.</span><span class="s1">_simple_strided_call</span><span class="s3">((</span><span class="s1">other_arr</span><span class="s3">, </span><span class="s1">str_arr</span><span class="s3">))</span>
+
+            <span class="s1">cast</span><span class="s3">.</span><span class="s1">_simple_strided_call</span><span class="s3">((</span><span class="s1">other_arr</span><span class="s3">, </span><span class="s1">str_arr_short</span><span class="s3">))</span>
+            <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">str_arr</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">string_dt_short</span><span class="s3">), </span><span class="s1">str_arr_short</span><span class="s3">)</span>
+
+            <span class="s1">cast</span><span class="s3">.</span><span class="s1">_simple_strided_call</span><span class="s3">((</span><span class="s1">other_arr</span><span class="s3">, </span><span class="s1">str_arr_long</span><span class="s3">))</span>
+            <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">str_arr</span><span class="s3">, </span><span class="s1">str_arr_long</span><span class="s3">)</span>
+
+            <span class="s2">if </span><span class="s1">other_dt</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">== </span><span class="s5">&quot;b&quot;</span><span class="s3">:</span>
+                <span class="s4"># Booleans do not roundtrip</span>
+                <span class="s2">continue</span>
+
+            <span class="s1">other_arr</span><span class="s3">[...] = </span><span class="s6">0</span>
+            <span class="s1">cast_back</span><span class="s3">.</span><span class="s1">_simple_strided_call</span><span class="s3">((</span><span class="s1">str_arr</span><span class="s3">, </span><span class="s1">other_arr</span><span class="s3">))</span>
+            <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">orig_arr</span><span class="s3">, </span><span class="s1">other_arr</span><span class="s3">)</span>
+
+            <span class="s1">other_arr</span><span class="s3">[...] = </span><span class="s6">0</span>
+            <span class="s1">cast_back</span><span class="s3">.</span><span class="s1">_simple_strided_call</span><span class="s3">((</span><span class="s1">str_arr_long</span><span class="s3">, </span><span class="s1">other_arr</span><span class="s3">))</span>
+            <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">orig_arr</span><span class="s3">, </span><span class="s1">other_arr</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;other_dt&quot;</span><span class="s3">, [</span><span class="s5">&quot;S8&quot;</span><span class="s3">, </span><span class="s5">&quot;&lt;U8&quot;</span><span class="s3">, </span><span class="s5">&quot;&gt;U8&quot;</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;string_char&quot;</span><span class="s3">, [</span><span class="s5">&quot;S&quot;</span><span class="s3">, </span><span class="s5">&quot;U&quot;</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_string_to_string_cancast</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other_dt</span><span class="s3">, </span><span class="s1">string_char</span><span class="s3">):</span>
+        <span class="s1">other_dt </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">other_dt</span><span class="s3">)</span>
+
+        <span class="s1">fact </span><span class="s3">= </span><span class="s6">1 </span><span class="s2">if </span><span class="s1">string_char </span><span class="s3">== </span><span class="s5">&quot;S&quot; </span><span class="s2">else </span><span class="s6">4</span>
+        <span class="s1">div </span><span class="s3">= </span><span class="s6">1 </span><span class="s2">if </span><span class="s1">other_dt</span><span class="s3">.</span><span class="s1">char </span><span class="s3">== </span><span class="s5">&quot;S&quot; </span><span class="s2">else </span><span class="s6">4</span>
+
+        <span class="s1">string_DT </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">string_char</span><span class="s3">))</span>
+        <span class="s1">cast </span><span class="s3">= </span><span class="s1">get_castingimpl</span><span class="s3">(</span><span class="s1">type</span><span class="s3">(</span><span class="s1">other_dt</span><span class="s3">), </span><span class="s1">string_DT</span><span class="s3">)</span>
+
+        <span class="s1">expected_length </span><span class="s3">= </span><span class="s1">other_dt</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">// </span><span class="s1">div</span>
+        <span class="s1">string_dt </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">f&quot;</span><span class="s2">{</span><span class="s1">string_char</span><span class="s2">}{</span><span class="s1">expected_length</span><span class="s2">}</span><span class="s5">&quot;</span><span class="s3">)</span>
+
+        <span class="s1">safety</span><span class="s3">, (</span><span class="s1">res_other_dt</span><span class="s3">, </span><span class="s1">res_dt</span><span class="s3">), </span><span class="s1">view_off </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">.</span><span class="s1">_resolve_descriptors</span><span class="s3">(</span>
+                <span class="s3">(</span><span class="s1">other_dt</span><span class="s3">, </span><span class="s2">None</span><span class="s3">))</span>
+        <span class="s2">assert </span><span class="s1">res_dt</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">== </span><span class="s1">expected_length </span><span class="s3">* </span><span class="s1">fact</span>
+        <span class="s2">assert </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">res_dt</span><span class="s3">, </span><span class="s1">string_DT</span><span class="s3">)</span>
+
+        <span class="s1">expected_view_off </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">if </span><span class="s1">other_dt</span><span class="s3">.</span><span class="s1">char </span><span class="s3">== </span><span class="s1">string_char</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">other_dt</span><span class="s3">.</span><span class="s1">isnative</span><span class="s3">:</span>
+                <span class="s1">expected_safety </span><span class="s3">= </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">no</span>
+                <span class="s1">expected_view_off </span><span class="s3">= </span><span class="s6">0</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">expected_safety </span><span class="s3">= </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">equiv</span>
+        <span class="s2">elif </span><span class="s1">string_char </span><span class="s3">== </span><span class="s5">&quot;U&quot;</span><span class="s3">:</span>
+            <span class="s1">expected_safety </span><span class="s3">= </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">safe</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">expected_safety </span><span class="s3">= </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">unsafe</span>
+
+        <span class="s2">assert </span><span class="s1">view_off </span><span class="s3">== </span><span class="s1">expected_view_off</span>
+        <span class="s2">assert </span><span class="s1">expected_safety </span><span class="s3">== </span><span class="s1">safety</span>
+
+        <span class="s2">for </span><span class="s1">change_length </span><span class="s2">in </span><span class="s3">[-</span><span class="s6">1</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, </span><span class="s6">1</span><span class="s3">]:</span>
+            <span class="s1">to_dt </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">string_with_modified_length</span><span class="s3">(</span><span class="s1">string_dt</span><span class="s3">, </span><span class="s1">change_length</span><span class="s3">)</span>
+            <span class="s1">safety</span><span class="s3">, (</span><span class="s1">_</span><span class="s3">, </span><span class="s1">res_dt</span><span class="s3">), </span><span class="s1">view_off </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">.</span><span class="s1">_resolve_descriptors</span><span class="s3">(</span>
+                    <span class="s3">(</span><span class="s1">other_dt</span><span class="s3">, </span><span class="s1">to_dt</span><span class="s3">))</span>
+
+            <span class="s2">assert </span><span class="s1">res_dt </span><span class="s2">is </span><span class="s1">to_dt</span>
+            <span class="s2">if </span><span class="s1">change_length </span><span class="s3">&lt;= </span><span class="s6">0</span><span class="s3">:</span>
+                <span class="s2">assert </span><span class="s1">view_off </span><span class="s3">== </span><span class="s1">expected_view_off</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s2">assert </span><span class="s1">view_off </span><span class="s2">is None</span>
+            <span class="s2">if </span><span class="s1">expected_safety </span><span class="s3">== </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">unsafe</span><span class="s3">:</span>
+                <span class="s2">assert </span><span class="s1">safety </span><span class="s3">== </span><span class="s1">expected_safety</span>
+            <span class="s2">elif </span><span class="s1">change_length </span><span class="s3">&lt; </span><span class="s6">0</span><span class="s3">:</span>
+                <span class="s2">assert </span><span class="s1">safety </span><span class="s3">== </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">same_kind</span>
+            <span class="s2">elif </span><span class="s1">change_length </span><span class="s3">== </span><span class="s6">0</span><span class="s3">:</span>
+                <span class="s2">assert </span><span class="s1">safety </span><span class="s3">== </span><span class="s1">expected_safety</span>
+            <span class="s2">elif </span><span class="s1">change_length </span><span class="s3">&gt; </span><span class="s6">0</span><span class="s3">:</span>
+                <span class="s2">assert </span><span class="s1">safety </span><span class="s3">== </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">safe</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;order1&quot;</span><span class="s3">, [</span><span class="s5">&quot;&gt;&quot;</span><span class="s3">, </span><span class="s5">&quot;&lt;&quot;</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;order2&quot;</span><span class="s3">, [</span><span class="s5">&quot;&gt;&quot;</span><span class="s3">, </span><span class="s5">&quot;&lt;&quot;</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_unicode_byteswapped_cast</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">order1</span><span class="s3">, </span><span class="s1">order2</span><span class="s3">):</span>
+        <span class="s4"># Very specific tests (not using the castingimpl directly)</span>
+        <span class="s4"># that tests unicode bytedwaps including for unaligned array data.</span>
+        <span class="s1">dtype1 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">f&quot;</span><span class="s2">{</span><span class="s1">order1</span><span class="s2">}</span><span class="s5">U30&quot;</span><span class="s3">)</span>
+        <span class="s1">dtype2 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">f&quot;</span><span class="s2">{</span><span class="s1">order2</span><span class="s2">}</span><span class="s5">U30&quot;</span><span class="s3">)</span>
+        <span class="s1">data1 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty</span><span class="s3">(</span><span class="s6">30 </span><span class="s3">* </span><span class="s6">4 </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint8</span><span class="s3">)[</span><span class="s6">1</span><span class="s3">:].</span><span class="s1">view</span><span class="s3">(</span><span class="s1">dtype1</span><span class="s3">)</span>
+        <span class="s1">data2 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty</span><span class="s3">(</span><span class="s6">30 </span><span class="s3">* </span><span class="s6">4 </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">uint8</span><span class="s3">)[</span><span class="s6">1</span><span class="s3">:].</span><span class="s1">view</span><span class="s3">(</span><span class="s1">dtype2</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">dtype1</span><span class="s3">.</span><span class="s1">alignment </span><span class="s3">!= </span><span class="s6">1</span><span class="s3">:</span>
+            <span class="s4"># alignment should always be &gt;1, but skip the check if not</span>
+            <span class="s2">assert not </span><span class="s1">data1</span><span class="s3">.</span><span class="s1">flags</span><span class="s3">.</span><span class="s1">aligned</span>
+            <span class="s2">assert not </span><span class="s1">data2</span><span class="s3">.</span><span class="s1">flags</span><span class="s3">.</span><span class="s1">aligned</span>
+
+        <span class="s1">element </span><span class="s3">= </span><span class="s5">&quot;this is a ünicode string‽&quot;</span>
+        <span class="s1">data1</span><span class="s3">[()] = </span><span class="s1">element</span>
+        <span class="s4"># Test both `data1` and `data1.copy()`  (which should be aligned)</span>
+        <span class="s2">for </span><span class="s1">data </span><span class="s2">in </span><span class="s3">[</span><span class="s1">data1</span><span class="s3">, </span><span class="s1">data1</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()]:</span>
+            <span class="s1">data2</span><span class="s3">[...] = </span><span class="s1">data1</span>
+            <span class="s2">assert </span><span class="s1">data2</span><span class="s3">[()] == </span><span class="s1">element</span>
+            <span class="s2">assert </span><span class="s1">data2</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()[()] == </span><span class="s1">element</span>
+
+    <span class="s2">def </span><span class="s1">test_void_to_string_special_case</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4"># Cover a small special case in void to string casting that could</span>
+        <span class="s4"># probably just as well be turned into an error (compare</span>
+        <span class="s4"># `test_object_to_parametric_internal_error` below).</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;V5&quot;</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s5">&quot;S&quot;</span><span class="s3">).</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">== </span><span class="s6">5</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s5">&quot;V5&quot;</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s5">&quot;U&quot;</span><span class="s3">).</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">== </span><span class="s6">4 </span><span class="s3">* </span><span class="s6">5</span>
+
+    <span class="s2">def </span><span class="s1">test_object_to_parametric_internal_error</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4"># We reject casting from object to a parametric type, without</span>
+        <span class="s4"># figuring out the correct instance first.</span>
+        <span class="s1">object_dtype </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">))</span>
+        <span class="s1">other_dtype </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">str</span><span class="s3">))</span>
+        <span class="s1">cast </span><span class="s3">= </span><span class="s1">get_castingimpl</span><span class="s3">(</span><span class="s1">object_dtype</span><span class="s3">, </span><span class="s1">other_dtype</span><span class="s3">)</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">TypeError</span><span class="s3">,</span>
+                    <span class="s1">match</span><span class="s3">=</span><span class="s5">&quot;casting from object to the parametric DType&quot;</span><span class="s3">):</span>
+            <span class="s1">cast</span><span class="s3">.</span><span class="s1">_resolve_descriptors</span><span class="s3">((</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;O&quot;</span><span class="s3">), </span><span class="s2">None</span><span class="s3">))</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;dtype&quot;</span><span class="s3">, </span><span class="s1">simple_dtype_instances</span><span class="s3">())</span>
+    <span class="s2">def </span><span class="s1">test_object_and_simple_resolution</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">):</span>
+        <span class="s4"># Simple test to exercise the cast when no instance is specified</span>
+        <span class="s1">object_dtype </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">))</span>
+        <span class="s1">cast </span><span class="s3">= </span><span class="s1">get_castingimpl</span><span class="s3">(</span><span class="s1">object_dtype</span><span class="s3">, </span><span class="s1">type</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">))</span>
+
+        <span class="s1">safety</span><span class="s3">, (</span><span class="s1">_</span><span class="s3">, </span><span class="s1">res_dt</span><span class="s3">), </span><span class="s1">view_off </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">.</span><span class="s1">_resolve_descriptors</span><span class="s3">(</span>
+                <span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;O&quot;</span><span class="s3">), </span><span class="s1">dtype</span><span class="s3">))</span>
+        <span class="s2">assert </span><span class="s1">safety </span><span class="s3">== </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">unsafe</span>
+        <span class="s2">assert </span><span class="s1">view_off </span><span class="s2">is None</span>
+        <span class="s2">assert </span><span class="s1">res_dt </span><span class="s2">is </span><span class="s1">dtype</span>
+
+        <span class="s1">safety</span><span class="s3">, (</span><span class="s1">_</span><span class="s3">, </span><span class="s1">res_dt</span><span class="s3">), </span><span class="s1">view_off </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">.</span><span class="s1">_resolve_descriptors</span><span class="s3">(</span>
+                <span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;O&quot;</span><span class="s3">), </span><span class="s2">None</span><span class="s3">))</span>
+        <span class="s2">assert </span><span class="s1">safety </span><span class="s3">== </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">unsafe</span>
+        <span class="s2">assert </span><span class="s1">view_off </span><span class="s2">is None</span>
+        <span class="s2">assert </span><span class="s1">res_dt </span><span class="s3">== </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">newbyteorder</span><span class="s3">(</span><span class="s5">&quot;=&quot;</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;dtype&quot;</span><span class="s3">, </span><span class="s1">simple_dtype_instances</span><span class="s3">())</span>
+    <span class="s2">def </span><span class="s1">test_simple_to_object_resolution</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">):</span>
+        <span class="s4"># Simple test to exercise the cast when no instance is specified</span>
+        <span class="s1">object_dtype </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">))</span>
+        <span class="s1">cast </span><span class="s3">= </span><span class="s1">get_castingimpl</span><span class="s3">(</span><span class="s1">type</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">), </span><span class="s1">object_dtype</span><span class="s3">)</span>
+
+        <span class="s1">safety</span><span class="s3">, (</span><span class="s1">_</span><span class="s3">, </span><span class="s1">res_dt</span><span class="s3">), </span><span class="s1">view_off </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">.</span><span class="s1">_resolve_descriptors</span><span class="s3">(</span>
+                <span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s2">None</span><span class="s3">))</span>
+        <span class="s2">assert </span><span class="s1">safety </span><span class="s3">== </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">safe</span>
+        <span class="s2">assert </span><span class="s1">view_off </span><span class="s2">is None</span>
+        <span class="s2">assert </span><span class="s1">res_dt </span><span class="s2">is </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s5">&quot;O&quot;</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;casting&quot;</span><span class="s3">, [</span><span class="s5">&quot;no&quot;</span><span class="s3">, </span><span class="s5">&quot;unsafe&quot;</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_void_and_structured_with_subarray</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">):</span>
+        <span class="s4"># test case corresponding to gh-19325</span>
+        <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">([(</span><span class="s5">&quot;foo&quot;</span><span class="s3">, </span><span class="s5">&quot;&lt;f4&quot;</span><span class="s3">, (</span><span class="s6">3</span><span class="s3">, </span><span class="s6">2</span><span class="s3">))])</span>
+        <span class="s1">expected </span><span class="s3">= </span><span class="s1">casting </span><span class="s3">== </span><span class="s5">&quot;unsafe&quot;</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">can_cast</span><span class="s3">(</span><span class="s5">&quot;V4&quot;</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s1">casting</span><span class="s3">) == </span><span class="s1">expected</span>
+        <span class="s2">assert </span><span class="s1">np</span><span class="s3">.</span><span class="s1">can_cast</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s5">&quot;V4&quot;</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s1">casting</span><span class="s3">) == </span><span class="s1">expected</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">([</span><span class="s5">&quot;to_dt&quot;</span><span class="s3">, </span><span class="s5">&quot;expected_off&quot;</span><span class="s3">],</span>
+            <span class="s3">[  </span><span class="s4"># Same as `from_dt` but with both fields shifted:</span>
+             <span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">({</span><span class="s5">&quot;names&quot;</span><span class="s3">: [</span><span class="s5">&quot;a&quot;</span><span class="s3">, </span><span class="s5">&quot;b&quot;</span><span class="s3">], </span><span class="s5">&quot;formats&quot;</span><span class="s3">: [</span><span class="s5">&quot;i4&quot;</span><span class="s3">, </span><span class="s5">&quot;f4&quot;</span><span class="s3">],</span>
+                        <span class="s5">&quot;offsets&quot;</span><span class="s3">: [</span><span class="s6">0</span><span class="s3">, </span><span class="s6">4</span><span class="s3">]}), </span><span class="s6">2</span><span class="s3">),</span>
+             <span class="s4"># Additional change of the names</span>
+             <span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">({</span><span class="s5">&quot;names&quot;</span><span class="s3">: [</span><span class="s5">&quot;b&quot;</span><span class="s3">, </span><span class="s5">&quot;a&quot;</span><span class="s3">], </span><span class="s5">&quot;formats&quot;</span><span class="s3">: [</span><span class="s5">&quot;i4&quot;</span><span class="s3">, </span><span class="s5">&quot;f4&quot;</span><span class="s3">],</span>
+                        <span class="s5">&quot;offsets&quot;</span><span class="s3">: [</span><span class="s6">0</span><span class="s3">, </span><span class="s6">4</span><span class="s3">]}), </span><span class="s6">2</span><span class="s3">),</span>
+             <span class="s4"># Incompatible field offset change</span>
+             <span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">({</span><span class="s5">&quot;names&quot;</span><span class="s3">: [</span><span class="s5">&quot;b&quot;</span><span class="s3">, </span><span class="s5">&quot;a&quot;</span><span class="s3">], </span><span class="s5">&quot;formats&quot;</span><span class="s3">: [</span><span class="s5">&quot;i4&quot;</span><span class="s3">, </span><span class="s5">&quot;f4&quot;</span><span class="s3">],</span>
+                        <span class="s5">&quot;offsets&quot;</span><span class="s3">: [</span><span class="s6">0</span><span class="s3">, </span><span class="s6">6</span><span class="s3">]}), </span><span class="s2">None</span><span class="s3">)])</span>
+    <span class="s2">def </span><span class="s1">test_structured_field_offsets</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">to_dt</span><span class="s3">, </span><span class="s1">expected_off</span><span class="s3">):</span>
+        <span class="s4"># This checks the cast-safety and view offset for swapped and &quot;shifted&quot;</span>
+        <span class="s4"># fields which are viewable</span>
+        <span class="s1">from_dt </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">({</span><span class="s5">&quot;names&quot;</span><span class="s3">: [</span><span class="s5">&quot;a&quot;</span><span class="s3">, </span><span class="s5">&quot;b&quot;</span><span class="s3">],</span>
+                            <span class="s5">&quot;formats&quot;</span><span class="s3">: [</span><span class="s5">&quot;i4&quot;</span><span class="s3">, </span><span class="s5">&quot;f4&quot;</span><span class="s3">],</span>
+                            <span class="s5">&quot;offsets&quot;</span><span class="s3">: [</span><span class="s6">2</span><span class="s3">, </span><span class="s6">6</span><span class="s3">]})</span>
+        <span class="s1">cast </span><span class="s3">= </span><span class="s1">get_castingimpl</span><span class="s3">(</span><span class="s1">type</span><span class="s3">(</span><span class="s1">from_dt</span><span class="s3">), </span><span class="s1">type</span><span class="s3">(</span><span class="s1">to_dt</span><span class="s3">))</span>
+        <span class="s1">safety</span><span class="s3">, </span><span class="s1">_</span><span class="s3">, </span><span class="s1">view_off </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">.</span><span class="s1">_resolve_descriptors</span><span class="s3">((</span><span class="s1">from_dt</span><span class="s3">, </span><span class="s1">to_dt</span><span class="s3">))</span>
+        <span class="s2">if </span><span class="s1">from_dt</span><span class="s3">.</span><span class="s1">names </span><span class="s3">== </span><span class="s1">to_dt</span><span class="s3">.</span><span class="s1">names</span><span class="s3">:</span>
+            <span class="s2">assert </span><span class="s1">safety </span><span class="s3">== </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">equiv</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">assert </span><span class="s1">safety </span><span class="s3">== </span><span class="s1">Casting</span><span class="s3">.</span><span class="s1">safe</span>
+        <span class="s4"># Shifting the original data pointer by -2 will align both by</span>
+        <span class="s4"># effectively adding 2 bytes of spacing before `from_dt`.</span>
+        <span class="s2">assert </span><span class="s1">view_off </span><span class="s3">== </span><span class="s1">expected_off</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">((</span><span class="s5">&quot;from_dt&quot;</span><span class="s3">, </span><span class="s5">&quot;to_dt&quot;</span><span class="s3">, </span><span class="s5">&quot;expected_off&quot;</span><span class="s3">), [</span>
+            <span class="s4"># Subarray cases:</span>
+            <span class="s3">(</span><span class="s5">&quot;i&quot;</span><span class="s3">, </span><span class="s5">&quot;(1,1)i&quot;</span><span class="s3">, </span><span class="s6">0</span><span class="s3">),</span>
+            <span class="s3">(</span><span class="s5">&quot;(1,1)i&quot;</span><span class="s3">, </span><span class="s5">&quot;i&quot;</span><span class="s3">, </span><span class="s6">0</span><span class="s3">),</span>
+            <span class="s3">(</span><span class="s5">&quot;(2,1)i&quot;</span><span class="s3">, </span><span class="s5">&quot;(2,1)i&quot;</span><span class="s3">, </span><span class="s6">0</span><span class="s3">),</span>
+            <span class="s4"># field cases (field to field is tested explicitly also):</span>
+            <span class="s4"># Not considered viewable, because a negative offset would allow</span>
+            <span class="s4"># may structured dtype to indirectly access invalid memory.</span>
+            <span class="s3">(</span><span class="s5">&quot;i&quot;</span><span class="s3">, {</span><span class="s5">&quot;names&quot;</span><span class="s3">: [</span><span class="s5">&quot;a&quot;</span><span class="s3">], </span><span class="s5">&quot;formats&quot;</span><span class="s3">: [</span><span class="s5">&quot;i&quot;</span><span class="s3">], </span><span class="s5">&quot;offsets&quot;</span><span class="s3">: [</span><span class="s6">2</span><span class="s3">]}, </span><span class="s2">None</span><span class="s3">),</span>
+            <span class="s3">({</span><span class="s5">&quot;names&quot;</span><span class="s3">: [</span><span class="s5">&quot;a&quot;</span><span class="s3">], </span><span class="s5">&quot;formats&quot;</span><span class="s3">: [</span><span class="s5">&quot;i&quot;</span><span class="s3">], </span><span class="s5">&quot;offsets&quot;</span><span class="s3">: [</span><span class="s6">2</span><span class="s3">]}, </span><span class="s5">&quot;i&quot;</span><span class="s3">, </span><span class="s6">2</span><span class="s3">),</span>
+            <span class="s4"># Currently considered not viewable, due to multiple fields</span>
+            <span class="s4"># even though they overlap (maybe we should not allow that?)</span>
+            <span class="s3">(</span><span class="s5">&quot;i&quot;</span><span class="s3">, {</span><span class="s5">&quot;names&quot;</span><span class="s3">: [</span><span class="s5">&quot;a&quot;</span><span class="s3">, </span><span class="s5">&quot;b&quot;</span><span class="s3">], </span><span class="s5">&quot;formats&quot;</span><span class="s3">: [</span><span class="s5">&quot;i&quot;</span><span class="s3">, </span><span class="s5">&quot;i&quot;</span><span class="s3">], </span><span class="s5">&quot;offsets&quot;</span><span class="s3">: [</span><span class="s6">2</span><span class="s3">, </span><span class="s6">2</span><span class="s3">]},</span>
+             <span class="s2">None</span><span class="s3">),</span>
+            <span class="s4"># different number of fields can't work, should probably just fail</span>
+            <span class="s4"># so it never reports &quot;viewable&quot;:</span>
+            <span class="s3">(</span><span class="s5">&quot;i,i&quot;</span><span class="s3">, </span><span class="s5">&quot;i,i,i&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">),</span>
+            <span class="s4"># Unstructured void cases:</span>
+            <span class="s3">(</span><span class="s5">&quot;i4&quot;</span><span class="s3">, </span><span class="s5">&quot;V3&quot;</span><span class="s3">, </span><span class="s6">0</span><span class="s3">),  </span><span class="s4"># void smaller or equal</span>
+            <span class="s3">(</span><span class="s5">&quot;i4&quot;</span><span class="s3">, </span><span class="s5">&quot;V4&quot;</span><span class="s3">, </span><span class="s6">0</span><span class="s3">),  </span><span class="s4"># void smaller or equal</span>
+            <span class="s3">(</span><span class="s5">&quot;i4&quot;</span><span class="s3">, </span><span class="s5">&quot;V10&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">),  </span><span class="s4"># void is larger (no view)</span>
+            <span class="s3">(</span><span class="s5">&quot;O&quot;</span><span class="s3">, </span><span class="s5">&quot;V4&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">),  </span><span class="s4"># currently reject objects for view here.</span>
+            <span class="s3">(</span><span class="s5">&quot;O&quot;</span><span class="s3">, </span><span class="s5">&quot;V8&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">),  </span><span class="s4"># currently reject objects for view here.</span>
+            <span class="s3">(</span><span class="s5">&quot;V4&quot;</span><span class="s3">, </span><span class="s5">&quot;V3&quot;</span><span class="s3">, </span><span class="s6">0</span><span class="s3">),</span>
+            <span class="s3">(</span><span class="s5">&quot;V4&quot;</span><span class="s3">, </span><span class="s5">&quot;V4&quot;</span><span class="s3">, </span><span class="s6">0</span><span class="s3">),</span>
+            <span class="s3">(</span><span class="s5">&quot;V3&quot;</span><span class="s3">, </span><span class="s5">&quot;V4&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">),</span>
+            <span class="s4"># Note that currently void-to-other cast goes via byte-strings</span>
+            <span class="s4"># and is not a &quot;view&quot; based cast like the opposite direction:</span>
+            <span class="s3">(</span><span class="s5">&quot;V4&quot;</span><span class="s3">, </span><span class="s5">&quot;i4&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">),</span>
+            <span class="s4"># completely invalid/impossible cast:</span>
+            <span class="s3">(</span><span class="s5">&quot;i,i&quot;</span><span class="s3">, </span><span class="s5">&quot;i,i,i&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">),</span>
+        <span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_structured_view_offsets_parametric</span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">, </span><span class="s1">from_dt</span><span class="s3">, </span><span class="s1">to_dt</span><span class="s3">, </span><span class="s1">expected_off</span><span class="s3">):</span>
+        <span class="s4"># TODO: While this test is fairly thorough, right now, it does not</span>
+        <span class="s4"># really test some paths that may have nonzero offsets (they don't</span>
+        <span class="s4"># really exists).</span>
+        <span class="s1">from_dt </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">from_dt</span><span class="s3">)</span>
+        <span class="s1">to_dt </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">to_dt</span><span class="s3">)</span>
+        <span class="s1">cast </span><span class="s3">= </span><span class="s1">get_castingimpl</span><span class="s3">(</span><span class="s1">type</span><span class="s3">(</span><span class="s1">from_dt</span><span class="s3">), </span><span class="s1">type</span><span class="s3">(</span><span class="s1">to_dt</span><span class="s3">))</span>
+        <span class="s1">_</span><span class="s3">, </span><span class="s1">_</span><span class="s3">, </span><span class="s1">view_off </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">.</span><span class="s1">_resolve_descriptors</span><span class="s3">((</span><span class="s1">from_dt</span><span class="s3">, </span><span class="s1">to_dt</span><span class="s3">))</span>
+        <span class="s2">assert </span><span class="s1">view_off </span><span class="s3">== </span><span class="s1">expected_off</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;dtype&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">typecodes</span><span class="s3">[</span><span class="s5">&quot;All&quot;</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_object_casts_NULL_None_equivalence</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">):</span>
+        <span class="s4"># None to &lt;other&gt; casts may succeed or fail, but a NULL'ed array must</span>
+        <span class="s4"># behave the same as one filled with None's.</span>
+        <span class="s1">arr_normal </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s2">None</span><span class="s3">] * </span><span class="s6">5</span><span class="s3">)</span>
+        <span class="s1">arr_NULLs </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty_like</span><span class="s3">(</span><span class="s1">arr_normal</span><span class="s3">)</span>
+        <span class="s1">ctypes</span><span class="s3">.</span><span class="s1">memset</span><span class="s3">(</span><span class="s1">arr_NULLs</span><span class="s3">.</span><span class="s1">ctypes</span><span class="s3">.</span><span class="s1">data</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, </span><span class="s1">arr_NULLs</span><span class="s3">.</span><span class="s1">nbytes</span><span class="s3">)</span>
+        <span class="s4"># If the check fails (maybe it should) the test would lose its purpose:</span>
+        <span class="s2">assert </span><span class="s1">arr_NULLs</span><span class="s3">.</span><span class="s1">tobytes</span><span class="s3">() == </span><span class="s7">b&quot;</span><span class="s2">\x00</span><span class="s7">&quot; </span><span class="s3">* </span><span class="s1">arr_NULLs</span><span class="s3">.</span><span class="s1">nbytes</span>
+
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">dtype </span><span class="s3">== </span><span class="s5">&quot;M&quot;</span><span class="s3">:</span>
+                <span class="s1">dtype </span><span class="s3">= </span><span class="s5">&quot;M[D]&quot;</span>
+            <span class="s1">expected </span><span class="s3">= </span><span class="s1">arr_normal</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s1">TypeError</span><span class="s3">:</span>
+            <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">TypeError</span><span class="s3">):</span>
+                <span class="s1">arr_NULLs</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">expected</span><span class="s3">, </span><span class="s1">arr_NULLs</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">))</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;dtype&quot;</span><span class="s3">,</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">typecodes</span><span class="s3">[</span><span class="s5">&quot;AllInteger&quot;</span><span class="s3">] + </span><span class="s1">np</span><span class="s3">.</span><span class="s1">typecodes</span><span class="s3">[</span><span class="s5">&quot;AllFloat&quot;</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_nonstandard_bool_to_other</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">):</span>
+        <span class="s4"># simple test for casting bool_ to numeric types, which should not</span>
+        <span class="s4"># expose the detail that NumPy bools can sometimes take values other</span>
+        <span class="s4"># than 0 and 1.  See also gh-19514.</span>
+        <span class="s1">nonstandard_bools </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s6">0</span><span class="s3">, </span><span class="s6">3</span><span class="s3">, -</span><span class="s6">7</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int8</span><span class="s3">).</span><span class="s1">view</span><span class="s3">(</span><span class="s1">bool</span><span class="s3">)</span>
+        <span class="s1">res </span><span class="s3">= </span><span class="s1">nonstandard_bools</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s1">expected </span><span class="s3">= [</span><span class="s6">0</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">]</span>
+        <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">res</span><span class="s3">, </span><span class="s1">expected</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;to_dtype&quot;</span><span class="s3">,</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">typecodes</span><span class="s3">[</span><span class="s5">&quot;AllInteger&quot;</span><span class="s3">] + </span><span class="s1">np</span><span class="s3">.</span><span class="s1">typecodes</span><span class="s3">[</span><span class="s5">&quot;AllFloat&quot;</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;from_dtype&quot;</span><span class="s3">,</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">typecodes</span><span class="s3">[</span><span class="s5">&quot;AllInteger&quot;</span><span class="s3">] + </span><span class="s1">np</span><span class="s3">.</span><span class="s1">typecodes</span><span class="s3">[</span><span class="s5">&quot;AllFloat&quot;</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">filterwarnings</span><span class="s3">(</span><span class="s5">&quot;ignore::numpy.exceptions.ComplexWarning&quot;</span><span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_same_value_overflow</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">from_dtype</span><span class="s3">, </span><span class="s1">to_dtype</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">from_dtype </span><span class="s3">== </span><span class="s1">to_dtype</span><span class="s3">:</span>
+            <span class="s2">return</span>
+        <span class="s1">top1 </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s1">top2 </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">top1 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s1">from_dtype</span><span class="s3">).</span><span class="s1">max</span>
+        <span class="s2">except </span><span class="s1">ValueError</span><span class="s3">:</span>
+            <span class="s1">top1 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">finfo</span><span class="s3">(</span><span class="s1">from_dtype</span><span class="s3">).</span><span class="s1">max</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">top2 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s1">to_dtype</span><span class="s3">).</span><span class="s1">max</span>
+        <span class="s2">except </span><span class="s1">ValueError</span><span class="s3">:</span>
+            <span class="s1">top2 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">finfo</span><span class="s3">(</span><span class="s1">to_dtype</span><span class="s3">).</span><span class="s1">max</span>
+        <span class="s4"># No need to test if top2 &gt; top1, since the test will also do the</span>
+        <span class="s4"># reverse dtype matching. Catch then warning if the comparison warns,</span>
+        <span class="s4"># i.e. np.int16(65535) &lt; np.float16(6.55e4)</span>
+        <span class="s2">with </span><span class="s1">warnings</span><span class="s3">.</span><span class="s1">catch_warnings</span><span class="s3">(</span><span class="s1">record</span><span class="s3">=</span><span class="s2">True</span><span class="s3">):</span>
+            <span class="s1">warnings</span><span class="s3">.</span><span class="s1">simplefilter</span><span class="s3">(</span><span class="s5">&quot;always&quot;</span><span class="s3">, </span><span class="s1">RuntimeWarning</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">top2 </span><span class="s3">&gt;= </span><span class="s1">top1</span><span class="s3">:</span>
+                <span class="s4"># will be tested when the dtypes are reversed</span>
+                <span class="s2">return</span>
+        <span class="s4"># Happy path</span>
+        <span class="s1">arr1 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s6">0</span><span class="s3">] * </span><span class="s6">10</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">from_dtype</span><span class="s3">)</span>
+        <span class="s1">arr2 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s6">0</span><span class="s3">] * </span><span class="s6">10</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">to_dtype</span><span class="s3">)</span>
+        <span class="s1">arr1_astype </span><span class="s3">= </span><span class="s1">arr1</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">to_dtype</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">)</span>
+        <span class="s1">assert_equal</span><span class="s3">(</span><span class="s1">arr1_astype</span><span class="s3">, </span><span class="s1">arr2</span><span class="s3">, </span><span class="s1">strict</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+        <span class="s4"># Make it overflow, both aligned and unaligned</span>
+        <span class="s1">arr1</span><span class="s3">[</span><span class="s6">0</span><span class="s3">] = </span><span class="s1">top1</span>
+        <span class="s1">aligned </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty</span><span class="s3">(</span><span class="s1">arr1</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">* </span><span class="s1">arr1</span><span class="s3">.</span><span class="s1">size </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">'uint8'</span><span class="s3">)</span>
+        <span class="s1">unaligned </span><span class="s3">= </span><span class="s1">aligned</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:].</span><span class="s1">view</span><span class="s3">(</span><span class="s1">arr1</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s1">unaligned</span><span class="s3">[:] = </span><span class="s1">arr1</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">):</span>
+            <span class="s4"># Casting float to float with overflow should raise</span>
+            <span class="s4"># RuntimeWarning (fperror)</span>
+            <span class="s4"># Casting float to int with overflow sometimes raises</span>
+            <span class="s4"># RuntimeWarning (fperror)</span>
+            <span class="s4"># Casting with overflow  and 'same_value', should raise ValueError</span>
+            <span class="s2">with </span><span class="s1">warnings</span><span class="s3">.</span><span class="s1">catch_warnings</span><span class="s3">(</span><span class="s1">record</span><span class="s3">=</span><span class="s2">True</span><span class="s3">) </span><span class="s2">as </span><span class="s1">w</span><span class="s3">:</span>
+                <span class="s1">warnings</span><span class="s3">.</span><span class="s1">simplefilter</span><span class="s3">(</span><span class="s5">&quot;always&quot;</span><span class="s3">, </span><span class="s1">RuntimeWarning</span><span class="s3">)</span>
+                <span class="s1">arr1</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">to_dtype</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">)</span>
+            <span class="s2">assert </span><span class="s1">len</span><span class="s3">(</span><span class="s1">w</span><span class="s3">) &lt; </span><span class="s6">2</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">):</span>
+            <span class="s4"># again, unaligned</span>
+            <span class="s2">with </span><span class="s1">warnings</span><span class="s3">.</span><span class="s1">catch_warnings</span><span class="s3">(</span><span class="s1">record</span><span class="s3">=</span><span class="s2">True</span><span class="s3">) </span><span class="s2">as </span><span class="s1">w</span><span class="s3">:</span>
+                <span class="s1">warnings</span><span class="s3">.</span><span class="s1">simplefilter</span><span class="s3">(</span><span class="s5">&quot;always&quot;</span><span class="s3">, </span><span class="s1">RuntimeWarning</span><span class="s3">)</span>
+                <span class="s1">unaligned</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">to_dtype</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">)</span>
+            <span class="s2">assert </span><span class="s1">len</span><span class="s3">(</span><span class="s1">w</span><span class="s3">) &lt; </span><span class="s6">2</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;to_dtype&quot;</span><span class="s3">,</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">typecodes</span><span class="s3">[</span><span class="s5">&quot;AllInteger&quot;</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;from_dtype&quot;</span><span class="s3">,</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">typecodes</span><span class="s3">[</span><span class="s5">&quot;AllFloat&quot;</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">filterwarnings</span><span class="s3">(</span><span class="s5">&quot;ignore::RuntimeWarning&quot;</span><span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_same_value_float_to_int</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">from_dtype</span><span class="s3">, </span><span class="s1">to_dtype</span><span class="s3">):</span>
+        <span class="s4"># Should not raise, since the values can round trip</span>
+        <span class="s1">arr1 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">arange</span><span class="s3">(</span><span class="s6">10</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">from_dtype</span><span class="s3">)</span>
+        <span class="s1">aligned </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">empty</span><span class="s3">(</span><span class="s1">arr1</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">* </span><span class="s1">arr1</span><span class="s3">.</span><span class="s1">size </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">'uint8'</span><span class="s3">)</span>
+        <span class="s1">unaligned </span><span class="s3">= </span><span class="s1">aligned</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:].</span><span class="s1">view</span><span class="s3">(</span><span class="s1">arr1</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">)</span>
+        <span class="s1">unaligned</span><span class="s3">[:] = </span><span class="s1">arr1</span>
+        <span class="s1">arr2 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">arange</span><span class="s3">(</span><span class="s6">10</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">to_dtype</span><span class="s3">)</span>
+        <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">arr1</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">to_dtype</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">), </span><span class="s1">arr2</span><span class="s3">)</span>
+        <span class="s1">assert_array_equal</span><span class="s3">(</span><span class="s1">unaligned</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">to_dtype</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">), </span><span class="s1">arr2</span><span class="s3">)</span>
+
+        <span class="s4"># Should raise, since values cannot round trip. Might warn too about</span>
+        <span class="s4"># FPE errors</span>
+        <span class="s1">arr1_66 </span><span class="s3">= </span><span class="s1">arr1 </span><span class="s3">+ </span><span class="s6">0.666</span>
+        <span class="s1">unaligned_66 </span><span class="s3">= </span><span class="s1">unaligned </span><span class="s3">+ </span><span class="s6">0.66</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">):</span>
+            <span class="s1">arr1_66</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">to_dtype</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">)</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">):</span>
+            <span class="s1">unaligned_66</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">to_dtype</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;to_dtype&quot;</span><span class="s3">,</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">typecodes</span><span class="s3">[</span><span class="s5">&quot;AllInteger&quot;</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;from_dtype&quot;</span><span class="s3">,</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">typecodes</span><span class="s3">[</span><span class="s5">&quot;AllFloat&quot;</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">filterwarnings</span><span class="s3">(</span><span class="s5">&quot;ignore::RuntimeWarning&quot;</span><span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_same_value_float_to_int_scalar</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">from_dtype</span><span class="s3">, </span><span class="s1">to_dtype</span><span class="s3">):</span>
+        <span class="s4"># Should not raise, since the values can round trip</span>
+        <span class="s1">s1 </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s6">10</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">from_dtype</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">s1</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">to_dtype</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">) == </span><span class="s6">10</span>
+
+        <span class="s4"># Should raise, since values cannot round trip</span>
+        <span class="s1">s1_66 </span><span class="s3">= </span><span class="s1">s1 </span><span class="s3">+ </span><span class="s6">0.666</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">):</span>
+            <span class="s1">s1_66</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">to_dtype</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span><span class="s5">&quot;value&quot;</span><span class="s3">, [</span><span class="s1">np</span><span class="s3">.</span><span class="s1">nan</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">inf</span><span class="s3">, -</span><span class="s1">np</span><span class="s3">.</span><span class="s1">inf</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">filterwarnings</span><span class="s3">(</span><span class="s5">&quot;ignore::numpy.exceptions.ComplexWarning&quot;</span><span class="s3">)</span>
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">filterwarnings</span><span class="s3">(</span><span class="s5">&quot;ignore::RuntimeWarning&quot;</span><span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_same_value_naninf</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">value</span><span class="s3">):</span>
+        <span class="s4"># These work, but may trigger FPE warnings on macOS</span>
+        <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">value</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">half</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">cdouble</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">)</span>
+        <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">value</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">half</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">double</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">)</span>
+        <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">value</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">float32</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">cdouble</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">)</span>
+        <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">value</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">float32</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">double</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">)</span>
+        <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">value</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">float32</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">half</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">)</span>
+        <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">value</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">complex64</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">half</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">)</span>
+        <span class="s4"># These fail</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">):</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">value</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">half</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">)</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">):</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">value</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">complex64</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">)</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">):</span>
+            <span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">value</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">float32</span><span class="s3">).</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">filterwarnings</span><span class="s3">(</span><span class="s5">&quot;ignore::numpy.exceptions.ComplexWarning&quot;</span><span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">test_same_value_complex</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">arr </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">complex</span><span class="s3">(</span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">)], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">cdouble</span><span class="s3">)</span>
+        <span class="s4"># This works</span>
+        <span class="s1">arr</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">complex64</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">)</span>
+        <span class="s4"># Casting with a non-zero imag part fails</span>
+        <span class="s2">with </span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">raises</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">):</span>
+            <span class="s1">arr</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">float32</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_same_value_scalar</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">i </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s6">123</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">)</span>
+        <span class="s1">f </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">(</span><span class="s6">123</span><span class="s3">, </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">np</span><span class="s3">.</span><span class="s1">float64</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">i</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">float64</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">) == </span><span class="s1">f</span>
+        <span class="s2">assert </span><span class="s1">f</span><span class="s3">.</span><span class="s1">astype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">int64</span><span class="s3">, </span><span class="s1">casting</span><span class="s3">=</span><span class="s5">'same_value'</span><span class="s3">) == </span><span class="s1">f</span>
+</pre>
+</body>
+</html>

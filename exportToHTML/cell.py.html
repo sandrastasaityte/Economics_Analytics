@@ -1,0 +1,263 @@
+<html>
+<head>
+<title>cell.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+cell.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright (c) 2010-2024 openpyxl</span>
+
+<span class="s2">&quot;&quot;&quot; 
+Collection of utilities used within the package and also available for client code 
+&quot;&quot;&quot;</span>
+<span class="s3">from </span><span class="s1">functools </span><span class="s3">import </span><span class="s1">lru_cache</span>
+<span class="s3">from </span><span class="s1">itertools </span><span class="s3">import </span><span class="s1">chain</span><span class="s4">, </span><span class="s1">product</span>
+<span class="s3">from </span><span class="s1">string </span><span class="s3">import </span><span class="s1">ascii_uppercase</span><span class="s4">, </span><span class="s1">digits</span>
+<span class="s3">import </span><span class="s1">re</span>
+
+<span class="s3">from </span><span class="s4">.</span><span class="s1">exceptions </span><span class="s3">import </span><span class="s1">CellCoordinatesException</span>
+
+<span class="s0"># constants</span>
+<span class="s1">COORD_RE </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">r'^[$]?([A-Za-z]{1,3})[$]?(\d+)$'</span><span class="s4">)</span>
+<span class="s1">COL_RANGE </span><span class="s4">= </span><span class="s5">&quot;&quot;&quot;[A-Z]{1,3}:[A-Z]{1,3}:&quot;&quot;&quot;</span>
+<span class="s1">ROW_RANGE </span><span class="s4">= </span><span class="s5">r&quot;&quot;&quot;\d+:\d+:&quot;&quot;&quot;</span>
+<span class="s1">RANGE_EXPR </span><span class="s4">= </span><span class="s5">r&quot;&quot;&quot; 
+[$]?(?P&lt;min_col&gt;[A-Za-z]{1,3})? 
+[$]?(?P&lt;min_row&gt;\d+)? 
+(:[$]?(?P&lt;max_col&gt;[A-Za-z]{1,3})? 
+[$]?(?P&lt;max_row&gt;\d+)?)? 
+&quot;&quot;&quot;</span>
+<span class="s1">ABSOLUTE_RE </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">'^' </span><span class="s4">+ </span><span class="s1">RANGE_EXPR </span><span class="s4">+</span><span class="s5">'$'</span><span class="s4">, </span><span class="s1">re</span><span class="s4">.</span><span class="s1">VERBOSE</span><span class="s4">)</span>
+<span class="s1">SHEET_TITLE </span><span class="s4">= </span><span class="s5">r&quot;&quot;&quot; 
+(('(?P&lt;quoted&gt;([^']|'')*)')|(?P&lt;notquoted&gt;[^'^ ^!]*))!&quot;&quot;&quot;</span>
+<span class="s1">SHEETRANGE_RE </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">&quot;&quot;&quot;{0}(?P&lt;cells&gt;{1})(?=,?)&quot;&quot;&quot;</span><span class="s4">.</span><span class="s1">format</span><span class="s4">(</span>
+    <span class="s1">SHEET_TITLE</span><span class="s4">, </span><span class="s1">RANGE_EXPR</span><span class="s4">), </span><span class="s1">re</span><span class="s4">.</span><span class="s1">VERBOSE</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">get_column_interval</span><span class="s4">(</span><span class="s1">start</span><span class="s4">, </span><span class="s1">end</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Given the start and end columns, return all the columns in the series. 
+ 
+    The start and end columns can be either column letters or 1-based 
+    indexes. 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">start</span><span class="s4">, </span><span class="s1">str</span><span class="s4">):</span>
+        <span class="s1">start </span><span class="s4">= </span><span class="s1">column_index_from_string</span><span class="s4">(</span><span class="s1">start</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">end</span><span class="s4">, </span><span class="s1">str</span><span class="s4">):</span>
+        <span class="s1">end </span><span class="s4">= </span><span class="s1">column_index_from_string</span><span class="s4">(</span><span class="s1">end</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s4">[</span><span class="s1">get_column_letter</span><span class="s4">(</span><span class="s1">x</span><span class="s4">) </span><span class="s3">for </span><span class="s1">x </span><span class="s3">in </span><span class="s1">range</span><span class="s4">(</span><span class="s1">start</span><span class="s4">, </span><span class="s1">end </span><span class="s4">+ </span><span class="s6">1</span><span class="s4">)]</span>
+
+
+<span class="s3">def </span><span class="s1">coordinate_from_string</span><span class="s4">(</span><span class="s1">coord_string</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Convert a coordinate string like 'B12' to a tuple ('B', 12)&quot;&quot;&quot;</span>
+    <span class="s1">match </span><span class="s4">= </span><span class="s1">COORD_RE</span><span class="s4">.</span><span class="s1">match</span><span class="s4">(</span><span class="s1">coord_string</span><span class="s4">)</span>
+    <span class="s3">if not </span><span class="s1">match</span><span class="s4">:</span>
+        <span class="s1">msg </span><span class="s4">= </span><span class="s5">f&quot;Invalid cell coordinates (</span><span class="s3">{</span><span class="s1">coord_string</span><span class="s3">}</span><span class="s5">)&quot;</span>
+        <span class="s3">raise </span><span class="s1">CellCoordinatesException</span><span class="s4">(</span><span class="s1">msg</span><span class="s4">)</span>
+    <span class="s1">column</span><span class="s4">, </span><span class="s1">row </span><span class="s4">= </span><span class="s1">match</span><span class="s4">.</span><span class="s1">groups</span><span class="s4">()</span>
+    <span class="s1">row </span><span class="s4">= </span><span class="s1">int</span><span class="s4">(</span><span class="s1">row</span><span class="s4">)</span>
+    <span class="s3">if not </span><span class="s1">row</span><span class="s4">:</span>
+        <span class="s1">msg </span><span class="s4">= </span><span class="s5">f&quot;There is no row 0 (</span><span class="s3">{</span><span class="s1">coord_string</span><span class="s3">}</span><span class="s5">)&quot;</span>
+        <span class="s3">raise </span><span class="s1">CellCoordinatesException</span><span class="s4">(</span><span class="s1">msg</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">column</span><span class="s4">, </span><span class="s1">row</span>
+
+
+<span class="s3">def </span><span class="s1">absolute_coordinate</span><span class="s4">(</span><span class="s1">coord_string</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Convert a coordinate to an absolute coordinate string (B12 -&gt; $B$12)&quot;&quot;&quot;</span>
+    <span class="s1">m </span><span class="s4">= </span><span class="s1">ABSOLUTE_RE</span><span class="s4">.</span><span class="s1">match</span><span class="s4">(</span><span class="s1">coord_string</span><span class="s4">)</span>
+    <span class="s3">if not </span><span class="s1">m</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s5">f&quot;</span><span class="s3">{</span><span class="s1">coord_string</span><span class="s3">} </span><span class="s5">is not a valid coordinate range&quot;</span><span class="s4">)</span>
+
+    <span class="s1">d </span><span class="s4">= </span><span class="s1">m</span><span class="s4">.</span><span class="s1">groupdict</span><span class="s4">(</span><span class="s5">''</span><span class="s4">)</span>
+    <span class="s3">for </span><span class="s1">k</span><span class="s4">, </span><span class="s1">v </span><span class="s3">in </span><span class="s1">d</span><span class="s4">.</span><span class="s1">items</span><span class="s4">():</span>
+        <span class="s3">if </span><span class="s1">v</span><span class="s4">:</span>
+            <span class="s1">d</span><span class="s4">[</span><span class="s1">k</span><span class="s4">] = </span><span class="s5">f&quot;$</span><span class="s3">{</span><span class="s1">v</span><span class="s3">}</span><span class="s5">&quot;</span>
+
+    <span class="s3">if </span><span class="s1">d</span><span class="s4">[</span><span class="s5">'max_col'</span><span class="s4">] </span><span class="s3">or </span><span class="s1">d</span><span class="s4">[</span><span class="s5">'max_row'</span><span class="s4">]:</span>
+        <span class="s1">fmt </span><span class="s4">= </span><span class="s5">&quot;{min_col}{min_row}:{max_col}{max_row}&quot;</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s1">fmt </span><span class="s4">= </span><span class="s5">&quot;{min_col}{min_row}&quot;</span>
+    <span class="s3">return </span><span class="s1">fmt</span><span class="s4">.</span><span class="s1">format</span><span class="s4">(**</span><span class="s1">d</span><span class="s4">)</span>
+
+
+<span class="s1">__decimal_to_alpha </span><span class="s4">= [</span><span class="s5">&quot;&quot;</span><span class="s4">] + </span><span class="s1">list</span><span class="s4">(</span><span class="s1">ascii_uppercase</span><span class="s4">)</span>
+
+<span class="s4">@</span><span class="s1">lru_cache</span><span class="s4">(</span><span class="s1">maxsize</span><span class="s4">=</span><span class="s3">None</span><span class="s4">)</span>
+<span class="s3">def </span><span class="s1">get_column_letter</span><span class="s4">(</span><span class="s1">col_idx</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Convert decimal column position to its ASCII (base 26) form. 
+ 
+    Because column indices are 1-based, strides are actually pow(26, n) + 26 
+    Hence, a correction is applied between pow(26, n) and pow(26, 2) + 26 to 
+    prevent and additional column letter being prepended 
+ 
+    &quot;A&quot; == 1 == pow(26, 0) 
+    &quot;Z&quot; == 26 == pow(26, 0) + 26 // decimal equivalent 10 
+    &quot;AA&quot; == 27 == pow(26, 1) + 1 
+    &quot;ZZ&quot; == 702 == pow(26, 2) + 26 // decimal equivalent 100 
+    &quot;&quot;&quot;</span>
+
+    <span class="s3">if not </span><span class="s6">1 </span><span class="s4">&lt;= </span><span class="s1">col_idx </span><span class="s4">&lt;= </span><span class="s6">18278</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s5">&quot;Invalid column index {0}&quot;</span><span class="s4">.</span><span class="s1">format</span><span class="s4">(</span><span class="s1">col_idx</span><span class="s4">))</span>
+
+    <span class="s1">result </span><span class="s4">= []</span>
+
+    <span class="s3">if </span><span class="s1">col_idx </span><span class="s4">&lt; </span><span class="s6">26</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">__decimal_to_alpha</span><span class="s4">[</span><span class="s1">col_idx</span><span class="s4">]</span>
+
+    <span class="s3">while </span><span class="s1">col_idx</span><span class="s4">:</span>
+        <span class="s1">col_idx</span><span class="s4">, </span><span class="s1">remainder </span><span class="s4">= </span><span class="s1">divmod</span><span class="s4">(</span><span class="s1">col_idx</span><span class="s4">, </span><span class="s6">26</span><span class="s4">)</span>
+        <span class="s1">result</span><span class="s4">.</span><span class="s1">insert</span><span class="s4">(</span><span class="s6">0</span><span class="s4">, </span><span class="s1">__decimal_to_alpha</span><span class="s4">[</span><span class="s1">remainder</span><span class="s4">])</span>
+        <span class="s3">if not </span><span class="s1">remainder</span><span class="s4">:</span>
+            <span class="s1">col_idx </span><span class="s4">-= </span><span class="s6">1</span>
+            <span class="s1">result</span><span class="s4">.</span><span class="s1">insert</span><span class="s4">(</span><span class="s6">0</span><span class="s4">, </span><span class="s5">&quot;Z&quot;</span><span class="s4">)</span>
+
+    <span class="s3">return </span><span class="s5">&quot;&quot;</span><span class="s4">.</span><span class="s1">join</span><span class="s4">(</span><span class="s1">result</span><span class="s4">)</span>
+
+
+<span class="s1">__alpha_to_decimal </span><span class="s4">= {</span><span class="s1">letter</span><span class="s4">:</span><span class="s1">pos </span><span class="s3">for </span><span class="s1">pos</span><span class="s4">, </span><span class="s1">letter </span><span class="s3">in </span><span class="s1">enumerate</span><span class="s4">(</span><span class="s1">ascii_uppercase</span><span class="s4">, </span><span class="s6">1</span><span class="s4">)}</span>
+<span class="s1">__powers </span><span class="s4">= (</span><span class="s6">1</span><span class="s4">, </span><span class="s6">26</span><span class="s4">, </span><span class="s6">676</span><span class="s4">)</span>
+
+<span class="s4">@</span><span class="s1">lru_cache</span><span class="s4">(</span><span class="s1">maxsize</span><span class="s4">=</span><span class="s3">None</span><span class="s4">)</span>
+<span class="s3">def </span><span class="s1">column_index_from_string</span><span class="s4">(</span><span class="s1">col</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Convert ASCII column name (base 26) to decimal with 1-based index 
+ 
+    Characters represent descending multiples of powers of 26 
+ 
+    &quot;AFZ&quot; == 26 * pow(26, 0) + 6 * pow(26, 1) + 1 * pow(26, 2) 
+    &quot;&quot;&quot;</span>
+    <span class="s1">error_msg </span><span class="s4">= </span><span class="s5">f&quot;'</span><span class="s3">{</span><span class="s1">col</span><span class="s3">}</span><span class="s5">' is not a valid column name. Column names are from A to ZZZ&quot;</span>
+    <span class="s3">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">col</span><span class="s4">) &gt; </span><span class="s6">3</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s1">error_msg</span><span class="s4">)</span>
+    <span class="s1">idx </span><span class="s4">= </span><span class="s6">0</span>
+    <span class="s1">col </span><span class="s4">= </span><span class="s1">reversed</span><span class="s4">(</span><span class="s1">col</span><span class="s4">.</span><span class="s1">upper</span><span class="s4">())</span>
+    <span class="s3">for </span><span class="s1">letter</span><span class="s4">, </span><span class="s1">power </span><span class="s3">in </span><span class="s1">zip</span><span class="s4">(</span><span class="s1">col</span><span class="s4">, </span><span class="s1">__powers</span><span class="s4">):</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">pos </span><span class="s4">= </span><span class="s1">__alpha_to_decimal</span><span class="s4">[</span><span class="s1">letter</span><span class="s4">]</span>
+        <span class="s3">except </span><span class="s1">KeyError</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s1">error_msg</span><span class="s4">)</span>
+        <span class="s1">idx </span><span class="s4">+= </span><span class="s1">pos </span><span class="s4">* </span><span class="s1">power</span>
+    <span class="s3">if not </span><span class="s6">0 </span><span class="s4">&lt; </span><span class="s1">idx </span><span class="s4">&lt; </span><span class="s6">18279</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s1">error_msg</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">idx</span>
+
+
+<span class="s3">def </span><span class="s1">range_boundaries</span><span class="s4">(</span><span class="s1">range_string</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Convert a range string into a tuple of boundaries: 
+    (min_col, min_row, max_col, max_row) 
+    Cell coordinates will be converted into a range with the cell at both end 
+    &quot;&quot;&quot;</span>
+    <span class="s1">msg </span><span class="s4">= </span><span class="s5">&quot;{0} is not a valid coordinate or range&quot;</span><span class="s4">.</span><span class="s1">format</span><span class="s4">(</span><span class="s1">range_string</span><span class="s4">)</span>
+    <span class="s1">m </span><span class="s4">= </span><span class="s1">ABSOLUTE_RE</span><span class="s4">.</span><span class="s1">match</span><span class="s4">(</span><span class="s1">range_string</span><span class="s4">)</span>
+    <span class="s3">if not </span><span class="s1">m</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s1">msg</span><span class="s4">)</span>
+
+    <span class="s1">min_col</span><span class="s4">, </span><span class="s1">min_row</span><span class="s4">, </span><span class="s1">sep</span><span class="s4">, </span><span class="s1">max_col</span><span class="s4">, </span><span class="s1">max_row </span><span class="s4">= </span><span class="s1">m</span><span class="s4">.</span><span class="s1">groups</span><span class="s4">()</span>
+
+    <span class="s3">if </span><span class="s1">sep</span><span class="s4">:</span>
+        <span class="s1">cols </span><span class="s4">= </span><span class="s1">min_col</span><span class="s4">, </span><span class="s1">max_col</span>
+        <span class="s1">rows </span><span class="s4">= </span><span class="s1">min_row</span><span class="s4">, </span><span class="s1">max_row</span>
+
+        <span class="s3">if not </span><span class="s4">(</span>
+            <span class="s1">all</span><span class="s4">(</span><span class="s1">cols </span><span class="s4">+ </span><span class="s1">rows</span><span class="s4">) </span><span class="s3">or</span>
+            <span class="s1">all</span><span class="s4">(</span><span class="s1">cols</span><span class="s4">) </span><span class="s3">and not </span><span class="s1">any</span><span class="s4">(</span><span class="s1">rows</span><span class="s4">) </span><span class="s3">or</span>
+            <span class="s1">all</span><span class="s4">(</span><span class="s1">rows</span><span class="s4">) </span><span class="s3">and not </span><span class="s1">any</span><span class="s4">(</span><span class="s1">cols</span><span class="s4">)</span>
+        <span class="s4">):</span>
+            <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s1">msg</span><span class="s4">)</span>
+
+    <span class="s3">if </span><span class="s1">min_col </span><span class="s3">is not None</span><span class="s4">:</span>
+        <span class="s1">min_col </span><span class="s4">= </span><span class="s1">column_index_from_string</span><span class="s4">(</span><span class="s1">min_col</span><span class="s4">)</span>
+
+    <span class="s3">if </span><span class="s1">min_row </span><span class="s3">is not None</span><span class="s4">:</span>
+        <span class="s1">min_row </span><span class="s4">= </span><span class="s1">int</span><span class="s4">(</span><span class="s1">min_row</span><span class="s4">)</span>
+
+    <span class="s3">if </span><span class="s1">max_col </span><span class="s3">is not None</span><span class="s4">:</span>
+        <span class="s1">max_col </span><span class="s4">= </span><span class="s1">column_index_from_string</span><span class="s4">(</span><span class="s1">max_col</span><span class="s4">)</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s1">max_col </span><span class="s4">= </span><span class="s1">min_col</span>
+
+    <span class="s3">if </span><span class="s1">max_row </span><span class="s3">is not None</span><span class="s4">:</span>
+        <span class="s1">max_row </span><span class="s4">= </span><span class="s1">int</span><span class="s4">(</span><span class="s1">max_row</span><span class="s4">)</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s1">max_row </span><span class="s4">= </span><span class="s1">min_row</span>
+
+    <span class="s3">return </span><span class="s1">min_col</span><span class="s4">, </span><span class="s1">min_row</span><span class="s4">, </span><span class="s1">max_col</span><span class="s4">, </span><span class="s1">max_row</span>
+
+
+<span class="s3">def </span><span class="s1">rows_from_range</span><span class="s4">(</span><span class="s1">range_string</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Get individual addresses for every cell in a range. 
+    Yields one row at a time. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">min_col</span><span class="s4">, </span><span class="s1">min_row</span><span class="s4">, </span><span class="s1">max_col</span><span class="s4">, </span><span class="s1">max_row </span><span class="s4">= </span><span class="s1">range_boundaries</span><span class="s4">(</span><span class="s1">range_string</span><span class="s4">)</span>
+    <span class="s1">rows </span><span class="s4">= </span><span class="s1">range</span><span class="s4">(</span><span class="s1">min_row</span><span class="s4">, </span><span class="s1">max_row </span><span class="s4">+ </span><span class="s6">1</span><span class="s4">)</span>
+    <span class="s1">cols </span><span class="s4">= [</span><span class="s1">get_column_letter</span><span class="s4">(</span><span class="s1">col</span><span class="s4">) </span><span class="s3">for </span><span class="s1">col </span><span class="s3">in </span><span class="s1">range</span><span class="s4">(</span><span class="s1">min_col</span><span class="s4">, </span><span class="s1">max_col </span><span class="s4">+ </span><span class="s6">1</span><span class="s4">)]</span>
+    <span class="s3">for </span><span class="s1">row </span><span class="s3">in </span><span class="s1">rows</span><span class="s4">:</span>
+        <span class="s3">yield </span><span class="s1">tuple</span><span class="s4">(</span><span class="s5">'{0}{1}'</span><span class="s4">.</span><span class="s1">format</span><span class="s4">(</span><span class="s1">col</span><span class="s4">, </span><span class="s1">row</span><span class="s4">) </span><span class="s3">for </span><span class="s1">col </span><span class="s3">in </span><span class="s1">cols</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">cols_from_range</span><span class="s4">(</span><span class="s1">range_string</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Get individual addresses for every cell in a range. 
+    Yields one row at a time. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">min_col</span><span class="s4">, </span><span class="s1">min_row</span><span class="s4">, </span><span class="s1">max_col</span><span class="s4">, </span><span class="s1">max_row </span><span class="s4">= </span><span class="s1">range_boundaries</span><span class="s4">(</span><span class="s1">range_string</span><span class="s4">)</span>
+    <span class="s1">rows </span><span class="s4">= </span><span class="s1">range</span><span class="s4">(</span><span class="s1">min_row</span><span class="s4">, </span><span class="s1">max_row</span><span class="s4">+</span><span class="s6">1</span><span class="s4">)</span>
+    <span class="s1">cols </span><span class="s4">= (</span><span class="s1">get_column_letter</span><span class="s4">(</span><span class="s1">col</span><span class="s4">) </span><span class="s3">for </span><span class="s1">col </span><span class="s3">in </span><span class="s1">range</span><span class="s4">(</span><span class="s1">min_col</span><span class="s4">, </span><span class="s1">max_col</span><span class="s4">+</span><span class="s6">1</span><span class="s4">))</span>
+    <span class="s3">for </span><span class="s1">col </span><span class="s3">in </span><span class="s1">cols</span><span class="s4">:</span>
+        <span class="s3">yield </span><span class="s1">tuple</span><span class="s4">(</span><span class="s5">'{0}{1}'</span><span class="s4">.</span><span class="s1">format</span><span class="s4">(</span><span class="s1">col</span><span class="s4">, </span><span class="s1">row</span><span class="s4">) </span><span class="s3">for </span><span class="s1">row </span><span class="s3">in </span><span class="s1">rows</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">coordinate_to_tuple</span><span class="s4">(</span><span class="s1">coordinate</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Convert an Excel style coordinate to (row, column) tuple 
+    &quot;&quot;&quot;</span>
+    <span class="s3">for </span><span class="s1">idx</span><span class="s4">, </span><span class="s1">c </span><span class="s3">in </span><span class="s1">enumerate</span><span class="s4">(</span><span class="s1">coordinate</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">c </span><span class="s3">in </span><span class="s1">digits</span><span class="s4">:</span>
+            <span class="s3">break</span>
+    <span class="s1">col </span><span class="s4">= </span><span class="s1">coordinate</span><span class="s4">[:</span><span class="s1">idx</span><span class="s4">]</span>
+    <span class="s1">row </span><span class="s4">= </span><span class="s1">coordinate</span><span class="s4">[</span><span class="s1">idx</span><span class="s4">:]</span>
+    <span class="s3">return </span><span class="s1">int</span><span class="s4">(</span><span class="s1">row</span><span class="s4">), </span><span class="s1">column_index_from_string</span><span class="s4">(</span><span class="s1">col</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">range_to_tuple</span><span class="s4">(</span><span class="s1">range_string</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Convert a worksheet range to the sheetname and maximum and minimum 
+    coordinate indices 
+    &quot;&quot;&quot;</span>
+    <span class="s1">m </span><span class="s4">= </span><span class="s1">SHEETRANGE_RE</span><span class="s4">.</span><span class="s1">match</span><span class="s4">(</span><span class="s1">range_string</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">m </span><span class="s3">is None</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s5">&quot;Value must be of the form sheetname!A1:E4&quot;</span><span class="s4">)</span>
+    <span class="s1">sheetname </span><span class="s4">= </span><span class="s1">m</span><span class="s4">.</span><span class="s1">group</span><span class="s4">(</span><span class="s5">&quot;quoted&quot;</span><span class="s4">) </span><span class="s3">or </span><span class="s1">m</span><span class="s4">.</span><span class="s1">group</span><span class="s4">(</span><span class="s5">&quot;notquoted&quot;</span><span class="s4">)</span>
+    <span class="s1">cells </span><span class="s4">= </span><span class="s1">m</span><span class="s4">.</span><span class="s1">group</span><span class="s4">(</span><span class="s5">&quot;cells&quot;</span><span class="s4">)</span>
+    <span class="s1">boundaries </span><span class="s4">= </span><span class="s1">range_boundaries</span><span class="s4">(</span><span class="s1">cells</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">sheetname</span><span class="s4">, </span><span class="s1">boundaries</span>
+
+
+<span class="s3">def </span><span class="s1">quote_sheetname</span><span class="s4">(</span><span class="s1">sheetname</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Add quotes around sheetnames if they contain spaces. 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s5">&quot;'&quot; </span><span class="s3">in </span><span class="s1">sheetname</span><span class="s4">:</span>
+        <span class="s1">sheetname </span><span class="s4">= </span><span class="s1">sheetname</span><span class="s4">.</span><span class="s1">replace</span><span class="s4">(</span><span class="s5">&quot;'&quot;</span><span class="s4">, </span><span class="s5">&quot;''&quot;</span><span class="s4">)</span>
+
+    <span class="s1">sheetname </span><span class="s4">= </span><span class="s5">u&quot;'{0}'&quot;</span><span class="s4">.</span><span class="s1">format</span><span class="s4">(</span><span class="s1">sheetname</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">sheetname</span>
+</pre>
+</body>
+</html>

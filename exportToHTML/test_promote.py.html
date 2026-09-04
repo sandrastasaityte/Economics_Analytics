@@ -1,0 +1,554 @@
+<html>
+<head>
+<title>test_promote.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #7a7e85;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+.s7 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_promote.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+These test the method maybe_promote from core/dtypes/cast.py 
+&quot;&quot;&quot;</span>
+
+<span class="s2">import </span><span class="s1">datetime</span>
+<span class="s2">from </span><span class="s1">decimal </span><span class="s2">import </span><span class="s1">Decimal</span>
+
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+<span class="s2">import </span><span class="s1">pytest</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_libs</span><span class="s3">.</span><span class="s1">tslibs </span><span class="s2">import </span><span class="s1">NaT</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">cast </span><span class="s2">import </span><span class="s1">maybe_promote</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">common </span><span class="s2">import </span><span class="s1">is_scalar</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">dtypes </span><span class="s2">import </span><span class="s1">DatetimeTZDtype</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">missing </span><span class="s2">import </span><span class="s1">isna</span>
+
+<span class="s2">import </span><span class="s1">pandas </span><span class="s2">as </span><span class="s1">pd</span>
+
+
+<span class="s2">def </span><span class="s1">_check_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">, </span><span class="s1">exp_val_for_scalar</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Auxiliary function to unify testing of scalar/array promotion. 
+ 
+    Parameters 
+    ---------- 
+    dtype : dtype 
+        The value to pass on as the first argument to maybe_promote. 
+    fill_value : scalar 
+        The value to pass on as the second argument to maybe_promote as 
+        a scalar. 
+    expected_dtype : dtype 
+        The expected dtype returned by maybe_promote (by design this is the 
+        same regardless of whether fill_value was passed as a scalar or in an 
+        array!). 
+    exp_val_for_scalar : scalar 
+        The expected value for the (potentially upcast) fill_value returned by 
+        maybe_promote. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">assert </span><span class="s1">is_scalar</span><span class="s3">(</span><span class="s1">fill_value</span><span class="s3">)</span>
+
+    <span class="s4"># here, we pass on fill_value as a scalar directly; the expected value</span>
+    <span class="s4"># returned from maybe_promote is fill_value, potentially upcast to the</span>
+    <span class="s4"># returned dtype.</span>
+    <span class="s1">result_dtype</span><span class="s3">, </span><span class="s1">result_fill_value </span><span class="s3">= </span><span class="s1">maybe_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">)</span>
+    <span class="s1">expected_fill_value </span><span class="s3">= </span><span class="s1">exp_val_for_scalar</span>
+
+    <span class="s2">assert </span><span class="s1">result_dtype </span><span class="s3">== </span><span class="s1">expected_dtype</span>
+    <span class="s1">_assert_match</span><span class="s3">(</span><span class="s1">result_fill_value</span><span class="s3">, </span><span class="s1">expected_fill_value</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_assert_match</span><span class="s3">(</span><span class="s1">result_fill_value</span><span class="s3">, </span><span class="s1">expected_fill_value</span><span class="s3">):</span>
+    <span class="s4"># GH#23982/25425 require the same type in addition to equality/NA-ness</span>
+    <span class="s1">res_type </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">result_fill_value</span><span class="s3">)</span>
+    <span class="s1">ex_type </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">expected_fill_value</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">result_fill_value</span><span class="s3">, </span><span class="s5">&quot;dtype&quot;</span><span class="s3">):</span>
+        <span class="s4"># Compare types in a way that is robust to platform-specific</span>
+        <span class="s4">#  idiosyncrasies where e.g. sometimes we get &quot;ulonglong&quot; as an alias</span>
+        <span class="s4">#  for &quot;uint64&quot; or &quot;intc&quot; as an alias for &quot;int32&quot;</span>
+        <span class="s2">assert </span><span class="s1">result_fill_value</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">== </span><span class="s1">expected_fill_value</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind</span>
+        <span class="s2">assert </span><span class="s1">result_fill_value</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize </span><span class="s3">== </span><span class="s1">expected_fill_value</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">itemsize</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s4"># On some builds, type comparison fails, e.g. np.int32 != np.int32</span>
+        <span class="s2">assert </span><span class="s1">res_type </span><span class="s3">== </span><span class="s1">ex_type </span><span class="s2">or </span><span class="s1">res_type</span><span class="s3">.</span><span class="s1">__name__ </span><span class="s3">== </span><span class="s1">ex_type</span><span class="s3">.</span><span class="s1">__name__</span>
+
+    <span class="s1">match_value </span><span class="s3">= </span><span class="s1">result_fill_value </span><span class="s3">== </span><span class="s1">expected_fill_value</span>
+    <span class="s2">if </span><span class="s1">match_value </span><span class="s2">is </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">NA</span><span class="s3">:</span>
+        <span class="s1">match_value </span><span class="s3">= </span><span class="s2">False</span>
+
+    <span class="s4"># Note: type check above ensures that we have the _same_ NA value</span>
+    <span class="s4"># for missing values, None == None (which is checked</span>
+    <span class="s4"># through match_value above), but np.nan != np.nan and pd.NaT != pd.NaT</span>
+    <span class="s1">match_missing </span><span class="s3">= </span><span class="s1">isna</span><span class="s3">(</span><span class="s1">result_fill_value</span><span class="s3">) </span><span class="s2">and </span><span class="s1">isna</span><span class="s3">(</span><span class="s1">expected_fill_value</span><span class="s3">)</span>
+
+    <span class="s2">assert </span><span class="s1">match_value </span><span class="s2">or </span><span class="s1">match_missing</span>
+
+
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+    <span class="s5">&quot;dtype, fill_value, expected_dtype&quot;</span><span class="s3">,</span>
+    <span class="s3">[</span>
+        <span class="s4"># size 8</span>
+        <span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int8&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int16&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">, -</span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int8&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int16&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+        <span class="s4"># keep signed-ness as long as possible</span>
+        <span class="s3">(</span><span class="s5">&quot;uint8&quot;</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint8&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint8&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;uint8&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint16&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint16&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;uint16&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;uint32&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;uint64&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+        <span class="s4"># max of uint8 cannot be contained in int8</span>
+        <span class="s3">(</span><span class="s5">&quot;uint8&quot;</span><span class="s3">, -</span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int16&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int16&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint8&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+        <span class="s4"># size 16</span>
+        <span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int16&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int16&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">, -</span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int16&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int16&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint16&quot;</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint16&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint16&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;uint8&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint16&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint16&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;uint16&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;uint32&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;uint64&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint16&quot;</span><span class="s3">, -</span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint16&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+        <span class="s4"># size 32</span>
+        <span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">, -</span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint32&quot;</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;uint8&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;uint16&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;uint32&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;uint64&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint32&quot;</span><span class="s3">, -</span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint32&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+        <span class="s4"># size 64</span>
+        <span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">, -</span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;int64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint64&quot;</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;uint8&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;uint16&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;uint32&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;uint64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;uint64&quot;</span><span class="s3">).</span><span class="s1">max </span><span class="s3">+ </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint64&quot;</span><span class="s3">, -</span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int8&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int16&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int32&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;uint64&quot;</span><span class="s3">, </span><span class="s1">np</span><span class="s3">.</span><span class="s1">iinfo</span><span class="s3">(</span><span class="s5">&quot;int64&quot;</span><span class="s3">).</span><span class="s1">min </span><span class="s3">- </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;object&quot;</span><span class="s3">),</span>
+    <span class="s3">],</span>
+<span class="s3">)</span>
+<span class="s2">def </span><span class="s1">test_maybe_promote_int_with_int</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">):</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+    <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">expected_dtype</span><span class="s3">)</span>
+
+    <span class="s4"># output is not a generic int, but corresponds to expected_dtype</span>
+    <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">fill_value</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">expected_dtype</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]</span>
+
+    <span class="s1">_check_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">, </span><span class="s1">exp_val_for_scalar</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">test_maybe_promote_int_with_float</span><span class="s3">(</span><span class="s1">any_int_numpy_dtype</span><span class="s3">, </span><span class="s1">float_numpy_dtype</span><span class="s3">):</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">any_int_numpy_dtype</span><span class="s3">)</span>
+    <span class="s1">fill_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">float_numpy_dtype</span><span class="s3">)</span>
+
+    <span class="s4"># create array of given dtype; casts &quot;1&quot; to correct dtype</span>
+    <span class="s1">fill_value </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s6">1</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">fill_dtype</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]</span>
+
+    <span class="s4"># filling int with float always upcasts to float64</span>
+    <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">float64</span>
+    <span class="s4"># fill_value can be different float type</span>
+    <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">float64</span><span class="s3">(</span><span class="s1">fill_value</span><span class="s3">)</span>
+
+    <span class="s1">_check_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">, </span><span class="s1">exp_val_for_scalar</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">test_maybe_promote_float_with_int</span><span class="s3">(</span><span class="s1">float_numpy_dtype</span><span class="s3">, </span><span class="s1">any_int_numpy_dtype</span><span class="s3">):</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">float_numpy_dtype</span><span class="s3">)</span>
+    <span class="s1">fill_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">any_int_numpy_dtype</span><span class="s3">)</span>
+
+    <span class="s4"># create array of given dtype; casts &quot;1&quot; to correct dtype</span>
+    <span class="s1">fill_value </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s6">1</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">fill_dtype</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]</span>
+
+    <span class="s4"># filling float with int always keeps float dtype</span>
+    <span class="s4"># because: np.finfo('float32').max &gt; np.iinfo('uint64').max</span>
+    <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">dtype</span>
+    <span class="s4"># output is not a generic float, but corresponds to expected_dtype</span>
+    <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">fill_value</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">expected_dtype</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]</span>
+
+    <span class="s1">_check_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">, </span><span class="s1">exp_val_for_scalar</span><span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+    <span class="s5">&quot;dtype, fill_value, expected_dtype&quot;</span><span class="s3">,</span>
+    <span class="s3">[</span>
+        <span class="s4"># float filled with float</span>
+        <span class="s3">(</span><span class="s5">&quot;float32&quot;</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;float32&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;float32&quot;</span><span class="s3">, </span><span class="s1">float</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">finfo</span><span class="s3">(</span><span class="s5">&quot;float32&quot;</span><span class="s3">).</span><span class="s1">max</span><span class="s3">) * </span><span class="s6">1.1</span><span class="s3">, </span><span class="s5">&quot;float64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;float64&quot;</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;float64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;float64&quot;</span><span class="s3">, </span><span class="s1">float</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">finfo</span><span class="s3">(</span><span class="s5">&quot;float32&quot;</span><span class="s3">).</span><span class="s1">max</span><span class="s3">) * </span><span class="s6">1.1</span><span class="s3">, </span><span class="s5">&quot;float64&quot;</span><span class="s3">),</span>
+        <span class="s4"># complex filled with float</span>
+        <span class="s3">(</span><span class="s5">&quot;complex64&quot;</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;complex64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;complex64&quot;</span><span class="s3">, </span><span class="s1">float</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">finfo</span><span class="s3">(</span><span class="s5">&quot;float32&quot;</span><span class="s3">).</span><span class="s1">max</span><span class="s3">) * </span><span class="s6">1.1</span><span class="s3">, </span><span class="s5">&quot;complex128&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;complex128&quot;</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s5">&quot;complex128&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;complex128&quot;</span><span class="s3">, </span><span class="s1">float</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">finfo</span><span class="s3">(</span><span class="s5">&quot;float32&quot;</span><span class="s3">).</span><span class="s1">max</span><span class="s3">) * </span><span class="s6">1.1</span><span class="s3">, </span><span class="s5">&quot;complex128&quot;</span><span class="s3">),</span>
+        <span class="s4"># float filled with complex</span>
+        <span class="s3">(</span><span class="s5">&quot;float32&quot;</span><span class="s3">, </span><span class="s6">1 </span><span class="s3">+ </span><span class="s6">1j</span><span class="s3">, </span><span class="s5">&quot;complex64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;float32&quot;</span><span class="s3">, </span><span class="s1">float</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">finfo</span><span class="s3">(</span><span class="s5">&quot;float32&quot;</span><span class="s3">).</span><span class="s1">max</span><span class="s3">) * (</span><span class="s6">1.1 </span><span class="s3">+ </span><span class="s6">1j</span><span class="s3">), </span><span class="s5">&quot;complex128&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;float64&quot;</span><span class="s3">, </span><span class="s6">1 </span><span class="s3">+ </span><span class="s6">1j</span><span class="s3">, </span><span class="s5">&quot;complex128&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;float64&quot;</span><span class="s3">, </span><span class="s1">float</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">finfo</span><span class="s3">(</span><span class="s5">&quot;float32&quot;</span><span class="s3">).</span><span class="s1">max</span><span class="s3">) * (</span><span class="s6">1.1 </span><span class="s3">+ </span><span class="s6">1j</span><span class="s3">), </span><span class="s5">&quot;complex128&quot;</span><span class="s3">),</span>
+        <span class="s4"># complex filled with complex</span>
+        <span class="s3">(</span><span class="s5">&quot;complex64&quot;</span><span class="s3">, </span><span class="s6">1 </span><span class="s3">+ </span><span class="s6">1j</span><span class="s3">, </span><span class="s5">&quot;complex64&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;complex64&quot;</span><span class="s3">, </span><span class="s1">float</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">finfo</span><span class="s3">(</span><span class="s5">&quot;float32&quot;</span><span class="s3">).</span><span class="s1">max</span><span class="s3">) * (</span><span class="s6">1.1 </span><span class="s3">+ </span><span class="s6">1j</span><span class="s3">), </span><span class="s5">&quot;complex128&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;complex128&quot;</span><span class="s3">, </span><span class="s6">1 </span><span class="s3">+ </span><span class="s6">1j</span><span class="s3">, </span><span class="s5">&quot;complex128&quot;</span><span class="s3">),</span>
+        <span class="s3">(</span><span class="s5">&quot;complex128&quot;</span><span class="s3">, </span><span class="s1">float</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">finfo</span><span class="s3">(</span><span class="s5">&quot;float32&quot;</span><span class="s3">).</span><span class="s1">max</span><span class="s3">) * (</span><span class="s6">1.1 </span><span class="s3">+ </span><span class="s6">1j</span><span class="s3">), </span><span class="s5">&quot;complex128&quot;</span><span class="s3">),</span>
+    <span class="s3">],</span>
+<span class="s3">)</span>
+<span class="s2">def </span><span class="s1">test_maybe_promote_float_with_float</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">):</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">)</span>
+    <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">expected_dtype</span><span class="s3">)</span>
+
+    <span class="s4"># output is not a generic float, but corresponds to expected_dtype</span>
+    <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">fill_value</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">expected_dtype</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]</span>
+
+    <span class="s1">_check_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">, </span><span class="s1">exp_val_for_scalar</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">test_maybe_promote_bool_with_any</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">):</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">bool</span><span class="s3">)</span>
+    <span class="s1">fill_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">)</span>
+
+    <span class="s4"># create array of given dtype; casts &quot;1&quot; to correct dtype</span>
+    <span class="s1">fill_value </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s6">1</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">fill_dtype</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]</span>
+
+    <span class="s4"># filling bool with anything but bool casts to object</span>
+    <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">) </span><span class="s2">if </span><span class="s1">fill_dtype </span><span class="s3">!= </span><span class="s1">bool </span><span class="s2">else </span><span class="s1">fill_dtype</span>
+    <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">fill_value</span>
+
+    <span class="s1">_check_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">, </span><span class="s1">exp_val_for_scalar</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">test_maybe_promote_any_with_bool</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">):</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">)</span>
+    <span class="s1">fill_value </span><span class="s3">= </span><span class="s2">True</span>
+
+    <span class="s4"># filling anything but bool with bool casts to object</span>
+    <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">) </span><span class="s2">if </span><span class="s1">dtype </span><span class="s3">!= </span><span class="s1">bool </span><span class="s2">else </span><span class="s1">dtype</span>
+    <span class="s4"># output is not a generic bool, but corresponds to expected_dtype</span>
+    <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">fill_value</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">expected_dtype</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]</span>
+
+    <span class="s1">_check_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">, </span><span class="s1">exp_val_for_scalar</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">test_maybe_promote_bytes_with_any</span><span class="s3">(</span><span class="s1">bytes_dtype</span><span class="s3">, </span><span class="s1">any_numpy_dtype</span><span class="s3">):</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">bytes_dtype</span><span class="s3">)</span>
+    <span class="s1">fill_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">)</span>
+
+    <span class="s4"># create array of given dtype; casts &quot;1&quot; to correct dtype</span>
+    <span class="s1">fill_value </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s6">1</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">fill_dtype</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]</span>
+
+    <span class="s4"># we never use bytes dtype internally, always promote to object</span>
+    <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">object_</span><span class="s3">)</span>
+    <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">fill_value</span>
+
+    <span class="s1">_check_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">, </span><span class="s1">exp_val_for_scalar</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">test_maybe_promote_any_with_bytes</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">):</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">)</span>
+
+    <span class="s4"># create array of given dtype</span>
+    <span class="s1">fill_value </span><span class="s3">= </span><span class="s7">b&quot;abc&quot;</span>
+
+    <span class="s4"># we never use bytes dtype internally, always promote to object</span>
+    <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">object_</span><span class="s3">)</span>
+    <span class="s4"># output is not a generic bytes, but corresponds to expected_dtype</span>
+    <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s1">fill_value</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">expected_dtype</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]</span>
+
+    <span class="s1">_check_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">, </span><span class="s1">exp_val_for_scalar</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">test_maybe_promote_datetime64_with_any</span><span class="s3">(</span><span class="s1">datetime64_dtype</span><span class="s3">, </span><span class="s1">any_numpy_dtype</span><span class="s3">):</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">datetime64_dtype</span><span class="s3">)</span>
+    <span class="s1">fill_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">)</span>
+
+    <span class="s4"># create array of given dtype; casts &quot;1&quot; to correct dtype</span>
+    <span class="s1">fill_value </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s6">1</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">fill_dtype</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]</span>
+
+    <span class="s4"># filling datetime with anything but datetime casts to object</span>
+    <span class="s2">if </span><span class="s1">fill_dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">== </span><span class="s5">&quot;M&quot;</span><span class="s3">:</span>
+        <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">dtype</span>
+        <span class="s4"># for datetime dtypes, scalar values get cast to to_datetime64</span>
+        <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Timestamp</span><span class="s3">(</span><span class="s1">fill_value</span><span class="s3">).</span><span class="s1">to_datetime64</span><span class="s3">()</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">)</span>
+        <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">fill_value</span>
+
+    <span class="s1">_check_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">, </span><span class="s1">exp_val_for_scalar</span><span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+    <span class="s5">&quot;fill_value&quot;</span><span class="s3">,</span>
+    <span class="s3">[</span>
+        <span class="s1">pd</span><span class="s3">.</span><span class="s1">Timestamp</span><span class="s3">(</span><span class="s5">&quot;now&quot;</span><span class="s3">),</span>
+        <span class="s1">np</span><span class="s3">.</span><span class="s1">datetime64</span><span class="s3">(</span><span class="s5">&quot;now&quot;</span><span class="s3">),</span>
+        <span class="s1">datetime</span><span class="s3">.</span><span class="s1">datetime</span><span class="s3">.</span><span class="s1">now</span><span class="s3">(),</span>
+        <span class="s1">datetime</span><span class="s3">.</span><span class="s1">date</span><span class="s3">.</span><span class="s1">today</span><span class="s3">(),</span>
+    <span class="s3">],</span>
+    <span class="s1">ids</span><span class="s3">=[</span><span class="s5">&quot;pd.Timestamp&quot;</span><span class="s3">, </span><span class="s5">&quot;np.datetime64&quot;</span><span class="s3">, </span><span class="s5">&quot;datetime.datetime&quot;</span><span class="s3">, </span><span class="s5">&quot;datetime.date&quot;</span><span class="s3">],</span>
+<span class="s3">)</span>
+<span class="s2">def </span><span class="s1">test_maybe_promote_any_with_datetime64</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">):</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">)</span>
+
+    <span class="s4"># filling datetime with anything but datetime casts to object</span>
+    <span class="s2">if </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">== </span><span class="s5">&quot;M&quot;</span><span class="s3">:</span>
+        <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">dtype</span>
+        <span class="s4"># for datetime dtypes, scalar values get cast to pd.Timestamp.value</span>
+        <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Timestamp</span><span class="s3">(</span><span class="s1">fill_value</span><span class="s3">).</span><span class="s1">to_datetime64</span><span class="s3">()</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">)</span>
+        <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">fill_value</span>
+
+    <span class="s2">if </span><span class="s1">type</span><span class="s3">(</span><span class="s1">fill_value</span><span class="s3">) </span><span class="s2">is </span><span class="s1">datetime</span><span class="s3">.</span><span class="s1">date </span><span class="s2">and </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">== </span><span class="s5">&quot;M&quot;</span><span class="s3">:</span>
+        <span class="s4"># Casting date to dt64 is deprecated, in 2.0 enforced to cast to object</span>
+        <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">)</span>
+        <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">fill_value</span>
+
+    <span class="s1">_check_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">, </span><span class="s1">exp_val_for_scalar</span><span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+    <span class="s5">&quot;fill_value&quot;</span><span class="s3">,</span>
+    <span class="s3">[</span>
+        <span class="s1">pd</span><span class="s3">.</span><span class="s1">Timestamp</span><span class="s3">(</span><span class="s6">2023</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">),</span>
+        <span class="s1">np</span><span class="s3">.</span><span class="s1">datetime64</span><span class="s3">(</span><span class="s5">&quot;2023-01-01&quot;</span><span class="s3">),</span>
+        <span class="s1">datetime</span><span class="s3">.</span><span class="s1">datetime</span><span class="s3">(</span><span class="s6">2023</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">),</span>
+        <span class="s1">datetime</span><span class="s3">.</span><span class="s1">date</span><span class="s3">(</span><span class="s6">2023</span><span class="s3">, </span><span class="s6">1</span><span class="s3">, </span><span class="s6">1</span><span class="s3">),</span>
+    <span class="s3">],</span>
+    <span class="s1">ids</span><span class="s3">=[</span><span class="s5">&quot;pd.Timestamp&quot;</span><span class="s3">, </span><span class="s5">&quot;np.datetime64&quot;</span><span class="s3">, </span><span class="s5">&quot;datetime.datetime&quot;</span><span class="s3">, </span><span class="s5">&quot;datetime.date&quot;</span><span class="s3">],</span>
+<span class="s3">)</span>
+<span class="s2">def </span><span class="s1">test_maybe_promote_any_numpy_dtype_with_datetimetz</span><span class="s3">(</span>
+    <span class="s1">any_numpy_dtype</span><span class="s3">, </span><span class="s1">tz_aware_fixture</span><span class="s3">, </span><span class="s1">fill_value</span>
+<span class="s3">):</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">)</span>
+    <span class="s1">fill_dtype </span><span class="s3">= </span><span class="s1">DatetimeTZDtype</span><span class="s3">(</span><span class="s1">tz</span><span class="s3">=</span><span class="s1">tz_aware_fixture</span><span class="s3">)</span>
+
+    <span class="s1">fill_value </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Series</span><span class="s3">([</span><span class="s1">fill_value</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">fill_dtype</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]</span>
+
+    <span class="s4"># filling any numpy dtype with datetimetz casts to object</span>
+    <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">)</span>
+    <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">fill_value</span>
+
+    <span class="s1">_check_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">, </span><span class="s1">exp_val_for_scalar</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">test_maybe_promote_timedelta64_with_any</span><span class="s3">(</span><span class="s1">timedelta64_dtype</span><span class="s3">, </span><span class="s1">any_numpy_dtype</span><span class="s3">):</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">timedelta64_dtype</span><span class="s3">)</span>
+    <span class="s1">fill_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">)</span>
+
+    <span class="s4"># create array of given dtype; casts &quot;1&quot; to correct dtype</span>
+    <span class="s1">fill_value </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s6">1</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">fill_dtype</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]</span>
+
+    <span class="s4"># filling timedelta with anything but timedelta casts to object</span>
+    <span class="s2">if </span><span class="s1">fill_dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">== </span><span class="s5">&quot;m&quot;</span><span class="s3">:</span>
+        <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">dtype</span>
+        <span class="s4"># for timedelta dtypes, scalar values get cast to pd.Timedelta.value</span>
+        <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Timedelta</span><span class="s3">(</span><span class="s1">fill_value</span><span class="s3">).</span><span class="s1">to_timedelta64</span><span class="s3">()</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">)</span>
+        <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">fill_value</span>
+
+    <span class="s1">_check_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">, </span><span class="s1">exp_val_for_scalar</span><span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">pytest</span><span class="s3">.</span><span class="s1">mark</span><span class="s3">.</span><span class="s1">parametrize</span><span class="s3">(</span>
+    <span class="s5">&quot;fill_value&quot;</span><span class="s3">,</span>
+    <span class="s3">[</span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Timedelta</span><span class="s3">(</span><span class="s1">days</span><span class="s3">=</span><span class="s6">1</span><span class="s3">), </span><span class="s1">np</span><span class="s3">.</span><span class="s1">timedelta64</span><span class="s3">(</span><span class="s6">24</span><span class="s3">, </span><span class="s5">&quot;h&quot;</span><span class="s3">), </span><span class="s1">datetime</span><span class="s3">.</span><span class="s1">timedelta</span><span class="s3">(</span><span class="s6">1</span><span class="s3">)],</span>
+    <span class="s1">ids</span><span class="s3">=[</span><span class="s5">&quot;pd.Timedelta&quot;</span><span class="s3">, </span><span class="s5">&quot;np.timedelta64&quot;</span><span class="s3">, </span><span class="s5">&quot;datetime.timedelta&quot;</span><span class="s3">],</span>
+<span class="s3">)</span>
+<span class="s2">def </span><span class="s1">test_maybe_promote_any_with_timedelta64</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">):</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">)</span>
+
+    <span class="s4"># filling anything but timedelta with timedelta casts to object</span>
+    <span class="s2">if </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s3">== </span><span class="s5">&quot;m&quot;</span><span class="s3">:</span>
+        <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">dtype</span>
+        <span class="s4"># for timedelta dtypes, scalar values get cast to pd.Timedelta.value</span>
+        <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">Timedelta</span><span class="s3">(</span><span class="s1">fill_value</span><span class="s3">).</span><span class="s1">to_timedelta64</span><span class="s3">()</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">)</span>
+        <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">fill_value</span>
+
+    <span class="s1">_check_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">, </span><span class="s1">exp_val_for_scalar</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">test_maybe_promote_string_with_any</span><span class="s3">(</span><span class="s1">string_dtype</span><span class="s3">, </span><span class="s1">any_numpy_dtype</span><span class="s3">):</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">string_dtype</span><span class="s3">)</span>
+    <span class="s1">fill_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">)</span>
+
+    <span class="s4"># create array of given dtype; casts &quot;1&quot; to correct dtype</span>
+    <span class="s1">fill_value </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s6">1</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">fill_dtype</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]</span>
+
+    <span class="s4"># filling string with anything casts to object</span>
+    <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">)</span>
+    <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">fill_value</span>
+
+    <span class="s1">_check_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">, </span><span class="s1">exp_val_for_scalar</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">test_maybe_promote_any_with_string</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">):</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">)</span>
+
+    <span class="s4"># create array of given dtype</span>
+    <span class="s1">fill_value </span><span class="s3">= </span><span class="s5">&quot;abc&quot;</span>
+
+    <span class="s4"># filling anything with a string casts to object</span>
+    <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">)</span>
+    <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">fill_value</span>
+
+    <span class="s1">_check_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">, </span><span class="s1">exp_val_for_scalar</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">test_maybe_promote_object_with_any</span><span class="s3">(</span><span class="s1">object_dtype</span><span class="s3">, </span><span class="s1">any_numpy_dtype</span><span class="s3">):</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object_dtype</span><span class="s3">)</span>
+    <span class="s1">fill_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">)</span>
+
+    <span class="s4"># create array of given dtype; casts &quot;1&quot; to correct dtype</span>
+    <span class="s1">fill_value </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">array</span><span class="s3">([</span><span class="s6">1</span><span class="s3">], </span><span class="s1">dtype</span><span class="s3">=</span><span class="s1">fill_dtype</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">]</span>
+
+    <span class="s4"># filling object with anything stays object</span>
+    <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">)</span>
+    <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">fill_value</span>
+
+    <span class="s1">_check_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">, </span><span class="s1">exp_val_for_scalar</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">test_maybe_promote_any_with_object</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">):</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">)</span>
+
+    <span class="s4"># create array of object dtype from a scalar value (i.e. passing</span>
+    <span class="s4"># dtypes.common.is_scalar), which can however not be cast to int/float etc.</span>
+    <span class="s1">fill_value </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">DateOffset</span><span class="s3">(</span><span class="s6">1</span><span class="s3">)</span>
+
+    <span class="s4"># filling object with anything stays object</span>
+    <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">)</span>
+    <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">fill_value</span>
+
+    <span class="s1">_check_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">, </span><span class="s1">exp_val_for_scalar</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">test_maybe_promote_any_numpy_dtype_with_na</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">, </span><span class="s1">nulls_fixture</span><span class="s3">):</span>
+    <span class="s1">fill_value </span><span class="s3">= </span><span class="s1">nulls_fixture</span>
+    <span class="s1">dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">any_numpy_dtype</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">Decimal</span><span class="s3">):</span>
+        <span class="s4"># Subject to change, but ATM (When Decimal(NAN) is being added to nulls_fixture)</span>
+        <span class="s4">#  this is the existing behavior in maybe_promote,</span>
+        <span class="s4">#  hinges on is_valid_na_for_dtype</span>
+        <span class="s2">if </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s2">in </span><span class="s5">&quot;iufc&quot;</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s2">in </span><span class="s5">&quot;iu&quot;</span><span class="s3">:</span>
+                <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">np</span><span class="s3">.</span><span class="s1">float64</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">dtype</span>
+            <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">nan</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">)</span>
+            <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">fill_value</span>
+    <span class="s2">elif </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s2">in </span><span class="s5">&quot;iu&quot; </span><span class="s2">and </span><span class="s1">fill_value </span><span class="s2">is not </span><span class="s1">NaT</span><span class="s3">:</span>
+        <span class="s4"># integer + other missing value (np.nan / None) casts to float</span>
+        <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">float64</span>
+        <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">nan</span>
+    <span class="s2">elif </span><span class="s1">dtype </span><span class="s3">== </span><span class="s1">object </span><span class="s2">and </span><span class="s1">fill_value </span><span class="s2">is </span><span class="s1">NaT</span><span class="s3">:</span>
+        <span class="s4"># inserting into object does not cast the value</span>
+        <span class="s4"># but *does* cast None to np.nan</span>
+        <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">)</span>
+        <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">fill_value</span>
+    <span class="s2">elif </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s2">in </span><span class="s5">&quot;mM&quot;</span><span class="s3">:</span>
+        <span class="s4"># datetime / timedelta cast all missing values to dtyped-NaT</span>
+        <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">dtype</span>
+        <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">type</span><span class="s3">(</span><span class="s5">&quot;NaT&quot;</span><span class="s3">, </span><span class="s5">&quot;ns&quot;</span><span class="s3">)</span>
+    <span class="s2">elif </span><span class="s1">fill_value </span><span class="s2">is </span><span class="s1">NaT</span><span class="s3">:</span>
+        <span class="s4"># NaT upcasts everything that's not datetime/timedelta to object</span>
+        <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">)</span>
+        <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">NaT</span>
+    <span class="s2">elif </span><span class="s1">dtype</span><span class="s3">.</span><span class="s1">kind </span><span class="s2">in </span><span class="s5">&quot;fc&quot;</span><span class="s3">:</span>
+        <span class="s4"># float / complex + missing value (!= NaT) stays the same</span>
+        <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">dtype</span>
+        <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">nan</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s4"># all other cases cast to object, and use np.nan as missing value</span>
+        <span class="s1">expected_dtype </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">dtype</span><span class="s3">(</span><span class="s1">object</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">fill_value </span><span class="s2">is </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">NA</span><span class="s3">:</span>
+            <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">pd</span><span class="s3">.</span><span class="s1">NA</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">exp_val_for_scalar </span><span class="s3">= </span><span class="s1">np</span><span class="s3">.</span><span class="s1">nan</span>
+
+    <span class="s1">_check_promote</span><span class="s3">(</span><span class="s1">dtype</span><span class="s3">, </span><span class="s1">fill_value</span><span class="s3">, </span><span class="s1">expected_dtype</span><span class="s3">, </span><span class="s1">exp_val_for_scalar</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

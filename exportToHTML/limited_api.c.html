@@ -1,0 +1,477 @@
+<html>
+<head>
+<title>limited_api.c</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #6aab73;}
+.s3 { color: #0da19e;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+limited_api.c</font>
+</center></td></tr></table>
+<pre><span class="s0">#ifndef </span><span class="s1">MODULE_NAME</span>
+<span class="s0">#error </span><span class="s2">&quot;MODULE_NAME must be defined before including this file&quot;</span>
+<span class="s0">#endif</span>
+
+<span class="s0">#ifndef </span><span class="s1">Py_LIMITED_API</span>
+<span class="s0">#error </span><span class="s2">&quot;Py_LIMITED_API must be defined before including this file&quot;</span>
+<span class="s0">#endif</span>
+
+<span class="s0">#include </span><span class="s1">&lt;Python.h&gt;</span>
+<span class="s0">#include </span><span class="s1">&lt;numpy/ndarraytypes.h&gt;</span>
+<span class="s0">#include </span><span class="s1">&lt;numpy/arrayobject.h&gt;</span>
+<span class="s0">#include </span><span class="s1">&lt;numpy/ufuncobject.h&gt;</span>
+<span class="s0">#include </span><span class="s1">&lt;stddef.h&gt;</span>
+<span class="s0">#include </span><span class="s1">&lt;string.h&gt;</span>
+
+
+<span class="s0">#define </span><span class="s1">MODULE_NAME_STR NPY_TOSTRING(MODULE_NAME)</span>
+
+<span class="s0">#ifdef </span><span class="s1">Py_TARGET_ABI3T</span>
+<span class="s0">#define </span><span class="s1">ENTRY_FUNC_NAME NPY_CAT(PyModExport_, MODULE_NAME)</span>
+<span class="s0">#else</span>
+<span class="s0">#define </span><span class="s1">ENTRY_FUNC_NAME NPY_CAT(PyInit_, MODULE_NAME)</span>
+<span class="s0">#endif</span>
+
+<span class="s0">static </span><span class="s1">PyObject *limited_api_nonzero(PyObject *mod, PyArrayObject *self)</span>
+<span class="s1">{</span>
+    <span class="s1">PyArray_NonzeroFunc* nonzero = PyDataType_GetArrFuncs(PyArray_DESCR(self))</span><span class="s3">-&gt;</span><span class="s1">nonzero;</span>
+
+    <span class="s1">NpyIter* iter;</span>
+    <span class="s1">NpyIter_IterNextFunc *iternext;</span>
+    <span class="s0">char</span><span class="s1">** dataptr;</span>
+    <span class="s1">npy_intp nonzero_count;</span>
+    <span class="s1">npy_intp* strideptr,* innersizeptr;</span>
+
+    <span class="s4">/* Handle zero-sized arrays specially */</span>
+    <span class="s0">if </span><span class="s1">(PyArray_SIZE(self) == </span><span class="s5">0</span><span class="s1">) {</span>
+        <span class="s0">return </span><span class="s1">PyLong_FromLong(</span><span class="s5">0</span><span class="s1">);</span>
+    <span class="s1">}</span>
+
+    <span class="s4">/* 
+     * Create and use an iterator to count the nonzeros. 
+     *   flag NPY_ITER_READONLY 
+     *     - The array is never written to. 
+     *   flag NPY_ITER_EXTERNAL_LOOP 
+     *     - Inner loop is done outside the iterator for efficiency. 
+     *   flag NPY_ITER_NPY_ITER_REFS_OK 
+     *     - Reference types are acceptable. 
+     *   order NPY_KEEPORDER 
+     *     - Visit elements in memory order, regardless of strides. 
+     *       This is good for performance when the specific order 
+     *       elements are visited is unimportant. 
+     *   casting NPY_NO_CASTING 
+     *     - No casting is required for this operation. 
+     */</span>
+    <span class="s1">iter = NpyIter_New(self, NPY_ITER_READONLY|</span>
+                             <span class="s1">NPY_ITER_EXTERNAL_LOOP|</span>
+                             <span class="s1">NPY_ITER_REFS_OK,</span>
+                        <span class="s1">NPY_KEEPORDER, NPY_NO_CASTING,</span>
+                        <span class="s1">NULL);</span>
+    <span class="s0">if </span><span class="s1">(iter == NULL) {</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+
+    <span class="s4">/* 
+     * The iternext function gets stored in a local variable 
+     * so it can be called repeatedly in an efficient manner. 
+     */</span>
+    <span class="s1">iternext = NpyIter_GetIterNext(iter, NULL);</span>
+    <span class="s0">if </span><span class="s1">(iternext == NULL) {</span>
+        <span class="s1">NpyIter_Deallocate(iter);</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s4">/* The location of the data pointer which the iterator may update */</span>
+    <span class="s1">dataptr = NpyIter_GetDataPtrArray(iter);</span>
+    <span class="s4">/* The location of the stride which the iterator may update */</span>
+    <span class="s1">strideptr = NpyIter_GetInnerStrideArray(iter);</span>
+    <span class="s4">/* The location of the inner loop size which the iterator may update */</span>
+    <span class="s1">innersizeptr = NpyIter_GetInnerLoopSizePtr(iter);</span>
+
+    <span class="s1">nonzero_count = </span><span class="s5">0</span><span class="s1">;</span>
+    <span class="s0">do </span><span class="s1">{</span>
+        <span class="s4">/* Get the inner loop data/stride/count values */</span>
+        <span class="s0">char</span><span class="s1">* data = *dataptr;</span>
+        <span class="s1">npy_intp stride = *strideptr;</span>
+        <span class="s1">npy_intp count = *innersizeptr;</span>
+
+        <span class="s4">/* This is a typical inner loop for NPY_ITER_EXTERNAL_LOOP */</span>
+        <span class="s0">while </span><span class="s1">(count--) {</span>
+            <span class="s0">if </span><span class="s1">(nonzero(data, self)) {</span>
+                <span class="s1">++nonzero_count;</span>
+            <span class="s1">}</span>
+            <span class="s1">data += stride;</span>
+        <span class="s1">}</span>
+
+        <span class="s4">/* Increment the iterator to the next inner loop */</span>
+    <span class="s1">} </span><span class="s0">while</span><span class="s1">(iternext(iter));</span>
+
+    <span class="s1">NpyIter_Deallocate(iter);</span>
+
+    <span class="s0">return </span><span class="s1">PyLong_FromLong(nonzero_count);</span>
+<span class="s1">}</span>
+
+<span class="s4">/* 
+ * Test PyArray_ITER_NEXT, PyArray_ITER_RESET, PyArray_ITER_DATA, 
+ * and PyArray_ITER_NOTDONE by summing all elements using the 
+ * legacy iterator macros. 
+ */</span>
+<span class="s0">static </span><span class="s1">PyObject *</span>
+<span class="s1">limited_api_iter_next(PyObject *mod, PyArrayObject *self)</span>
+<span class="s1">{</span>
+    <span class="s1">PyObject *iter_obj = PyArray_IterNew((PyObject *)self);</span>
+    <span class="s0">if </span><span class="s1">(iter_obj == NULL) {</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s0">double </span><span class="s1">sum = </span><span class="s5">0.0</span><span class="s1">;</span>
+    <span class="s0">while </span><span class="s1">(PyArray_ITER_NOTDONE(iter_obj)) {</span>
+        <span class="s1">sum += *(</span><span class="s0">double </span><span class="s1">*)PyArray_ITER_DATA(iter_obj);</span>
+        <span class="s1">PyArray_ITER_NEXT(iter_obj);</span>
+    <span class="s1">}</span>
+    <span class="s1">Py_DECREF(iter_obj);</span>
+    <span class="s0">return </span><span class="s1">PyFloat_FromDouble(sum);</span>
+<span class="s1">}</span>
+
+<span class="s4">/* 
+ * Test PyArray_ITER_GOTO1D by accessing a specific flat index. 
+ */</span>
+<span class="s0">static </span><span class="s1">PyObject *</span>
+<span class="s1">limited_api_iter_goto1d(PyObject *mod, PyObject *args)</span>
+<span class="s1">{</span>
+    <span class="s1">PyArrayObject *arr;</span>
+    <span class="s1">npy_intp index;</span>
+    <span class="s0">if </span><span class="s1">(!PyArg_ParseTuple(args, </span><span class="s2">&quot;O!n&quot;</span><span class="s1">, &amp;PyArray_Type, &amp;arr, &amp;index)) {</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s1">PyObject *iter_obj = PyArray_IterNew((PyObject *)arr);</span>
+    <span class="s0">if </span><span class="s1">(iter_obj == NULL) {</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s1">PyArray_ITER_GOTO1D(iter_obj, index);</span>
+    <span class="s0">double </span><span class="s1">val = *(</span><span class="s0">double </span><span class="s1">*)PyArray_ITER_DATA(iter_obj);</span>
+    <span class="s1">Py_DECREF(iter_obj);</span>
+    <span class="s0">return </span><span class="s1">PyFloat_FromDouble(val);</span>
+<span class="s1">}</span>
+
+<span class="s4">/* 
+ * Test PyArray_ITER_RESET by iterating, resetting, and iterating again. 
+ * Returns the sum from the second pass (should equal the first). 
+ */</span>
+<span class="s0">static </span><span class="s1">PyObject *</span>
+<span class="s1">limited_api_iter_reset(PyObject *mod, PyArrayObject *self)</span>
+<span class="s1">{</span>
+    <span class="s1">PyObject *iter_obj = PyArray_IterNew((PyObject *)self);</span>
+    <span class="s0">if </span><span class="s1">(iter_obj == NULL) {</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s4">/* First pass: skip through */</span>
+    <span class="s0">while </span><span class="s1">(PyArray_ITER_NOTDONE(iter_obj)) {</span>
+        <span class="s1">PyArray_ITER_NEXT(iter_obj);</span>
+    <span class="s1">}</span>
+    <span class="s4">/* Reset and sum */</span>
+    <span class="s1">PyArray_ITER_RESET(iter_obj);</span>
+    <span class="s0">double </span><span class="s1">sum = </span><span class="s5">0.0</span><span class="s1">;</span>
+    <span class="s0">while </span><span class="s1">(PyArray_ITER_NOTDONE(iter_obj)) {</span>
+        <span class="s1">sum += *(</span><span class="s0">double </span><span class="s1">*)PyArray_ITER_DATA(iter_obj);</span>
+        <span class="s1">PyArray_ITER_NEXT(iter_obj);</span>
+    <span class="s1">}</span>
+    <span class="s1">Py_DECREF(iter_obj);</span>
+    <span class="s0">return </span><span class="s1">PyFloat_FromDouble(sum);</span>
+<span class="s1">}</span>
+
+<span class="s4">/* 
+ * Test PyArray_MultiIter_NEXT, PyArray_MultiIter_RESET, 
+ * PyArray_MultiIter_DATA, and PyArray_MultiIter_NOTDONE 
+ * by computing the element-wise sum of two broadcastable arrays. 
+ * Returns the total sum of (a + b) for all broadcast elements. 
+ */</span>
+<span class="s0">static </span><span class="s1">PyObject *</span>
+<span class="s1">limited_api_multi_iter_next(PyObject *mod, PyObject *args)</span>
+<span class="s1">{</span>
+    <span class="s1">PyArrayObject *a, *b;</span>
+    <span class="s0">if </span><span class="s1">(!PyArg_ParseTuple(args, </span><span class="s2">&quot;O!O!&quot;</span><span class="s1">, &amp;PyArray_Type, &amp;a,</span>
+                          <span class="s1">&amp;PyArray_Type, &amp;b)) {</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s1">PyObject *multi = PyArray_MultiIterNew(</span><span class="s5">2</span><span class="s1">, a, b);</span>
+    <span class="s0">if </span><span class="s1">(multi == NULL) {</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s0">double </span><span class="s1">sum = </span><span class="s5">0.0</span><span class="s1">;</span>
+    <span class="s0">while </span><span class="s1">(PyArray_MultiIter_NOTDONE(multi)) {</span>
+        <span class="s0">double </span><span class="s1">va = *(</span><span class="s0">double </span><span class="s1">*)PyArray_MultiIter_DATA(multi, </span><span class="s5">0</span><span class="s1">);</span>
+        <span class="s0">double </span><span class="s1">vb = *(</span><span class="s0">double </span><span class="s1">*)PyArray_MultiIter_DATA(multi, </span><span class="s5">1</span><span class="s1">);</span>
+        <span class="s1">sum += va + vb;</span>
+        <span class="s1">PyArray_MultiIter_NEXT(multi);</span>
+    <span class="s1">}</span>
+    <span class="s4">/* Test reset: iterate again and verify same sum */</span>
+    <span class="s1">PyArray_MultiIter_RESET(multi);</span>
+    <span class="s0">double </span><span class="s1">sum2 = </span><span class="s5">0.0</span><span class="s1">;</span>
+    <span class="s0">while </span><span class="s1">(PyArray_MultiIter_NOTDONE(multi)) {</span>
+        <span class="s0">double </span><span class="s1">va = *(</span><span class="s0">double </span><span class="s1">*)PyArray_MultiIter_DATA(multi, </span><span class="s5">0</span><span class="s1">);</span>
+        <span class="s0">double </span><span class="s1">vb = *(</span><span class="s0">double </span><span class="s1">*)PyArray_MultiIter_DATA(multi, </span><span class="s5">1</span><span class="s1">);</span>
+        <span class="s1">sum2 += va + vb;</span>
+        <span class="s1">PyArray_MultiIter_NEXT(multi);</span>
+    <span class="s1">}</span>
+    <span class="s1">Py_DECREF(multi);</span>
+    <span class="s0">if </span><span class="s1">(sum != sum2) {</span>
+        <span class="s1">PyErr_SetString(PyExc_RuntimeError,</span>
+                        <span class="s2">&quot;MultiIter reset produced different sum&quot;</span><span class="s1">);</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s0">return </span><span class="s1">PyFloat_FromDouble(sum);</span>
+<span class="s1">}</span>
+
+<span class="s4">/* 
+ * Test PyArray_ITER_GOTO by jumping to a coordinate and reading the value. 
+ */</span>
+<span class="s0">static </span><span class="s1">PyObject *</span>
+<span class="s1">limited_api_iter_goto(PyObject *mod, PyObject *args)</span>
+<span class="s1">{</span>
+    <span class="s1">PyArrayObject *arr;</span>
+    <span class="s1">PyObject *coord_tuple;</span>
+    <span class="s0">if </span><span class="s1">(!PyArg_ParseTuple(args, </span><span class="s2">&quot;O!O!&quot;</span><span class="s1">, &amp;PyArray_Type, &amp;arr,</span>
+                          <span class="s1">&amp;PyTuple_Type, &amp;coord_tuple)) {</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s0">int </span><span class="s1">nd = PyArray_NDIM(arr);</span>
+    <span class="s0">if </span><span class="s1">(PyTuple_Size(coord_tuple) != nd) {</span>
+        <span class="s1">PyErr_SetString(PyExc_ValueError, </span><span class="s2">&quot;coordinate length mismatch&quot;</span><span class="s1">);</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s1">npy_intp destination[NPY_MAXDIMS_LEGACY_ITERS];</span>
+    <span class="s0">for </span><span class="s1">(</span><span class="s0">int </span><span class="s1">i = </span><span class="s5">0</span><span class="s1">; i &lt; nd; i++) {</span>
+        <span class="s1">destination[i] = PyLong_AsLong(PyTuple_GetItem(coord_tuple, i));</span>
+        <span class="s0">if </span><span class="s1">(destination[i] == -</span><span class="s5">1 </span><span class="s1">&amp;&amp; PyErr_Occurred()) {</span>
+            <span class="s0">return </span><span class="s1">NULL;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+    <span class="s1">PyObject *iter_obj = PyArray_IterNew((PyObject *)arr);</span>
+    <span class="s0">if </span><span class="s1">(iter_obj == NULL) {</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s1">PyArray_ITER_GOTO(iter_obj, destination);</span>
+    <span class="s0">double </span><span class="s1">val = *(</span><span class="s0">double </span><span class="s1">*)PyArray_ITER_DATA(iter_obj);</span>
+    <span class="s1">Py_DECREF(iter_obj);</span>
+    <span class="s0">return </span><span class="s1">PyFloat_FromDouble(val);</span>
+<span class="s1">}</span>
+
+<span class="s4">/* 
+ * Test PyArray_MultiIter_GOTO by jumping to a coordinate 
+ * and returning (a_val, b_val) at that position. 
+ */</span>
+<span class="s0">static </span><span class="s1">PyObject *</span>
+<span class="s1">limited_api_multi_iter_goto(PyObject *mod, PyObject *args)</span>
+<span class="s1">{</span>
+    <span class="s1">PyArrayObject *a, *b;</span>
+    <span class="s1">PyObject *coord_tuple;</span>
+    <span class="s0">if </span><span class="s1">(!PyArg_ParseTuple(args, </span><span class="s2">&quot;O!O!O!&quot;</span><span class="s1">, &amp;PyArray_Type, &amp;a,</span>
+                          <span class="s1">&amp;PyArray_Type, &amp;b,</span>
+                          <span class="s1">&amp;PyTuple_Type, &amp;coord_tuple)) {</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s1">PyObject *multi = PyArray_MultiIterNew(</span><span class="s5">2</span><span class="s1">, a, b);</span>
+    <span class="s0">if </span><span class="s1">(multi == NULL) {</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s0">int </span><span class="s1">nd = _PyMIT(multi)</span><span class="s3">-&gt;</span><span class="s1">nd;</span>
+    <span class="s0">if </span><span class="s1">(PyTuple_Size(coord_tuple) != nd) {</span>
+        <span class="s1">Py_DECREF(multi);</span>
+        <span class="s1">PyErr_SetString(PyExc_ValueError, </span><span class="s2">&quot;coordinate length mismatch&quot;</span><span class="s1">);</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s1">npy_intp destination[NPY_MAXDIMS_LEGACY_ITERS];</span>
+    <span class="s0">for </span><span class="s1">(</span><span class="s0">int </span><span class="s1">i = </span><span class="s5">0</span><span class="s1">; i &lt; nd; i++) {</span>
+        <span class="s1">destination[i] = PyLong_AsLong(PyTuple_GetItem(coord_tuple, i));</span>
+        <span class="s0">if </span><span class="s1">(destination[i] == -</span><span class="s5">1 </span><span class="s1">&amp;&amp; PyErr_Occurred()) {</span>
+            <span class="s1">Py_DECREF(multi);</span>
+            <span class="s0">return </span><span class="s1">NULL;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+    <span class="s1">PyArray_MultiIter_GOTO(multi, destination);</span>
+    <span class="s0">double </span><span class="s1">va = *(</span><span class="s0">double </span><span class="s1">*)PyArray_MultiIter_DATA(multi, </span><span class="s5">0</span><span class="s1">);</span>
+    <span class="s0">double </span><span class="s1">vb = *(</span><span class="s0">double </span><span class="s1">*)PyArray_MultiIter_DATA(multi, </span><span class="s5">1</span><span class="s1">);</span>
+    <span class="s1">Py_DECREF(multi);</span>
+    <span class="s0">return </span><span class="s1">Py_BuildValue(</span><span class="s2">&quot;dd&quot;</span><span class="s1">, va, vb);</span>
+<span class="s1">}</span>
+
+<span class="s4">/* 
+ * Test PyArray_MultiIter_GOTO1D by jumping to a flat index 
+ * and returning (a_val, b_val) at that position. 
+ */</span>
+<span class="s0">static </span><span class="s1">PyObject *</span>
+<span class="s1">limited_api_multi_iter_goto1d(PyObject *mod, PyObject *args)</span>
+<span class="s1">{</span>
+    <span class="s1">PyArrayObject *a, *b;</span>
+    <span class="s1">npy_intp index;</span>
+    <span class="s0">if </span><span class="s1">(!PyArg_ParseTuple(args, </span><span class="s2">&quot;O!O!n&quot;</span><span class="s1">, &amp;PyArray_Type, &amp;a,</span>
+                          <span class="s1">&amp;PyArray_Type, &amp;b, &amp;index)) {</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s1">PyObject *multi = PyArray_MultiIterNew(</span><span class="s5">2</span><span class="s1">, a, b);</span>
+    <span class="s0">if </span><span class="s1">(multi == NULL) {</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s1">PyArray_MultiIter_GOTO1D(multi, index);</span>
+    <span class="s0">double </span><span class="s1">va = *(</span><span class="s0">double </span><span class="s1">*)PyArray_MultiIter_DATA(multi, </span><span class="s5">0</span><span class="s1">);</span>
+    <span class="s0">double </span><span class="s1">vb = *(</span><span class="s0">double </span><span class="s1">*)PyArray_MultiIter_DATA(multi, </span><span class="s5">1</span><span class="s1">);</span>
+    <span class="s1">Py_DECREF(multi);</span>
+    <span class="s0">return </span><span class="s1">Py_BuildValue(</span><span class="s2">&quot;dd&quot;</span><span class="s1">, va, vb);</span>
+<span class="s1">}</span>
+
+<span class="s4">/* 
+ * Test PyArray_MultiIter_NEXTi by advancing only the first iterator 
+ * and returning its data pointer value after N steps. 
+ */</span>
+<span class="s0">static </span><span class="s1">PyObject *</span>
+<span class="s1">limited_api_multi_iter_nexti(PyObject *mod, PyObject *args)</span>
+<span class="s1">{</span>
+    <span class="s1">PyArrayObject *a, *b;</span>
+    <span class="s0">int </span><span class="s1">steps;</span>
+    <span class="s0">if </span><span class="s1">(!PyArg_ParseTuple(args, </span><span class="s2">&quot;O!O!i&quot;</span><span class="s1">, &amp;PyArray_Type, &amp;a,</span>
+                          <span class="s1">&amp;PyArray_Type, &amp;b, &amp;steps)) {</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s1">PyObject *multi = PyArray_MultiIterNew(</span><span class="s5">2</span><span class="s1">, a, b);</span>
+    <span class="s0">if </span><span class="s1">(multi == NULL) {</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s0">for </span><span class="s1">(</span><span class="s0">int </span><span class="s1">i = </span><span class="s5">0</span><span class="s1">; i &lt; steps; i++) {</span>
+        <span class="s1">PyArray_MultiIter_NEXTi(multi, </span><span class="s5">0</span><span class="s1">);</span>
+    <span class="s1">}</span>
+    <span class="s0">double </span><span class="s1">val = *(</span><span class="s0">double </span><span class="s1">*)PyArray_MultiIter_DATA(multi, </span><span class="s5">0</span><span class="s1">);</span>
+    <span class="s1">Py_DECREF(multi);</span>
+    <span class="s0">return </span><span class="s1">PyFloat_FromDouble(val);</span>
+<span class="s1">}</span>
+
+<span class="s0">static </span><span class="s1">PyObject *</span>
+<span class="s1">limited_api_datetime_metadata(PyObject *mod, PyArrayObject *arr)</span>
+<span class="s1">{</span>
+    <span class="s1">PyArray_Descr *descr = PyArray_DESCR(arr);</span>
+    <span class="s1">npy_uint64 flags = PyDataType_FLAGS(descr);</span>
+    <span class="s1">PyArray_DatetimeDTypeMetaData *dt_meta =</span>
+            <span class="s1">(PyArray_DatetimeDTypeMetaData *)PyDataType_C_METADATA(descr);</span>
+    <span class="s0">if </span><span class="s1">(dt_meta == NULL) {</span>
+        <span class="s1">PyErr_SetString(</span>
+            <span class="s1">PyExc_RuntimeError,</span>
+            <span class="s2">&quot;PyDataType_C_METADATA() returned NULL for a datetime descriptor&quot;</span><span class="s1">);</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s0">return </span><span class="s1">Py_BuildValue(</span><span class="s2">&quot;Kii&quot;</span><span class="s1">, (</span><span class="s0">unsigned long long</span><span class="s1">)flags,</span>
+                         <span class="s1">(</span><span class="s0">int</span><span class="s1">)dt_meta</span><span class="s3">-&gt;</span><span class="s1">meta.base, dt_meta</span><span class="s3">-&gt;</span><span class="s1">meta.num);</span>
+<span class="s1">}</span>
+
+<span class="s4">/* 
+ * Test the NpyString allocator API. Under the abi3t stable ABI 
+ * PyArray_StringDTypeObject is an opaque struct; the descriptor object 
+ * pointer is passed to NpyString_acquire_allocator without accessing any 
+ * struct fields. The API only exists when targeting NumPy 2.0+. 
+ */</span>
+<span class="s0">#if </span><span class="s1">NPY_FEATURE_VERSION &gt;= NPY_2_0_API_VERSION</span>
+<span class="s0">static </span><span class="s1">PyObject *</span>
+<span class="s1">limited_api_stringdtype_load(PyObject *mod, PyArrayObject *arr)</span>
+<span class="s1">{</span>
+    <span class="s1">npy_string_allocator *allocator = NpyString_acquire_allocator(</span>
+            <span class="s1">(PyArray_StringDTypeObject *)PyArray_DESCR(arr));</span>
+    <span class="s1">npy_packed_static_string *packed =</span>
+            <span class="s1">(npy_packed_static_string *)PyArray_DATA(arr);</span>
+    <span class="s1">npy_static_string s = {</span><span class="s5">0</span><span class="s1">, NULL};</span>
+    <span class="s1">PyObject *res = NULL;</span>
+    <span class="s0">int </span><span class="s1">is_null = NpyString_load(allocator, packed, &amp;s);</span>
+    <span class="s0">if </span><span class="s1">(is_null == -</span><span class="s5">1</span><span class="s1">) {</span>
+        <span class="s1">PyErr_SetString(PyExc_RuntimeError, </span><span class="s2">&quot;NpyString_load failed&quot;</span><span class="s1">);</span>
+    <span class="s1">}</span>
+    <span class="s0">else if </span><span class="s1">(is_null) {</span>
+        <span class="s1">res = Py_None;</span>
+        <span class="s1">Py_INCREF(res);</span>
+    <span class="s1">}</span>
+    <span class="s0">else </span><span class="s1">{</span>
+        <span class="s1">res = PyUnicode_FromStringAndSize(s.buf, (Py_ssize_t)s.size);</span>
+    <span class="s1">}</span>
+    <span class="s1">NpyString_release_allocator(allocator);</span>
+    <span class="s0">return </span><span class="s1">res;</span>
+<span class="s1">}</span>
+<span class="s0">#endif  </span><span class="s4">/* NPY_FEATURE_VERSION &gt;= NPY_2_0_API_VERSION */</span>
+
+<span class="s0">static </span><span class="s1">PyMethodDef limited_api_methods[] = {</span>
+    <span class="s1">{</span><span class="s2">&quot;nonzero&quot;</span><span class="s1">, (PyCFunction)limited_api_nonzero, METH_O,</span>
+     <span class="s2">&quot;Count the number of non-zero elements in the array.&quot;</span><span class="s1">},</span>
+    <span class="s1">{</span><span class="s2">&quot;iter_next&quot;</span><span class="s1">, (PyCFunction)limited_api_iter_next, METH_O,</span>
+     <span class="s2">&quot;Sum array elements using PyArray_ITER_NEXT.&quot;</span><span class="s1">},</span>
+    <span class="s1">{</span><span class="s2">&quot;iter_goto1d&quot;</span><span class="s1">, (PyCFunction)limited_api_iter_goto1d, METH_VARARGS,</span>
+     <span class="s2">&quot;Get element at flat index using PyArray_ITER_GOTO1D.&quot;</span><span class="s1">},</span>
+    <span class="s1">{</span><span class="s2">&quot;iter_reset&quot;</span><span class="s1">, (PyCFunction)limited_api_iter_reset, METH_O,</span>
+     <span class="s2">&quot;Sum array elements after reset using PyArray_ITER_RESET.&quot;</span><span class="s1">},</span>
+    <span class="s1">{</span><span class="s2">&quot;multi_iter_next&quot;</span><span class="s1">, (PyCFunction)limited_api_multi_iter_next,</span>
+     <span class="s1">METH_VARARGS,</span>
+     <span class="s2">&quot;Sum broadcast (a+b) using PyArray_MultiIter_NEXT.&quot;</span><span class="s1">},</span>
+    <span class="s1">{</span><span class="s2">&quot;iter_goto&quot;</span><span class="s1">, (PyCFunction)limited_api_iter_goto, METH_VARARGS,</span>
+     <span class="s2">&quot;Get element at coordinate using PyArray_ITER_GOTO.&quot;</span><span class="s1">},</span>
+    <span class="s1">{</span><span class="s2">&quot;multi_iter_goto&quot;</span><span class="s1">, (PyCFunction)limited_api_multi_iter_goto,</span>
+     <span class="s1">METH_VARARGS,</span>
+     <span class="s2">&quot;Get (a, b) at coordinate using PyArray_MultiIter_GOTO.&quot;</span><span class="s1">},</span>
+    <span class="s1">{</span><span class="s2">&quot;multi_iter_goto1d&quot;</span><span class="s1">, (PyCFunction)limited_api_multi_iter_goto1d,</span>
+     <span class="s1">METH_VARARGS,</span>
+     <span class="s2">&quot;Get (a, b) at flat index using PyArray_MultiIter_GOTO1D.&quot;</span><span class="s1">},</span>
+    <span class="s1">{</span><span class="s2">&quot;multi_iter_nexti&quot;</span><span class="s1">, (PyCFunction)limited_api_multi_iter_nexti,</span>
+     <span class="s1">METH_VARARGS,</span>
+     <span class="s2">&quot;Advance only iter 0 N steps using PyArray_MultiIter_NEXTi.&quot;</span><span class="s1">},</span>
+    <span class="s1">{</span><span class="s2">&quot;datetime_metadata&quot;</span><span class="s1">, (PyCFunction)limited_api_datetime_metadata,</span>
+     <span class="s1">METH_O,</span>
+     <span class="s2">&quot;Get (flags, unit base, unit num) from a datetime64/timedelta64 array.&quot;</span><span class="s1">},</span>
+<span class="s0">#if </span><span class="s1">NPY_FEATURE_VERSION &gt;= NPY_2_0_API_VERSION</span>
+    <span class="s1">{</span><span class="s2">&quot;stringdtype_load&quot;</span><span class="s1">, (PyCFunction)limited_api_stringdtype_load, METH_O,</span>
+     <span class="s2">&quot;Load the first element of a StringDType array via the NpyString API.&quot;</span><span class="s1">},</span>
+<span class="s0">#endif</span>
+    <span class="s1">{NULL, NULL, </span><span class="s5">0</span><span class="s1">, NULL}  </span><span class="s4">/* Sentinel */</span>
+<span class="s1">};</span>
+
+<span class="s0">#ifdef </span><span class="s1">Py_TARGET_ABI3T</span>
+
+<span class="s1">PyABIInfo_VAR(abi_info);</span>
+
+<span class="s0">static </span><span class="s1">PySlot limited_api_slots[] = {</span>
+    <span class="s1">PySlot_STATIC_DATA(Py_mod_abi, &amp;abi_info),</span>
+    <span class="s1">PySlot_STATIC_DATA(Py_mod_name, MODULE_NAME_STR),</span>
+    <span class="s1">PySlot_STATIC_DATA(Py_mod_methods, limited_api_methods),</span>
+    <span class="s1">PySlot_STATIC_DATA(Py_mod_gil, Py_MOD_GIL_NOT_USED),</span>
+    <span class="s1">PySlot_END,</span>
+<span class="s1">};</span>
+
+<span class="s1">PyMODEXPORT_FUNC</span>
+<span class="s1">ENTRY_FUNC_NAME(</span><span class="s0">void</span><span class="s1">)</span>
+<span class="s1">{</span>
+    <span class="s1">import_array();</span>
+    <span class="s1">import_umath();</span>
+    <span class="s0">return </span><span class="s1">limited_api_slots;</span>
+<span class="s1">}</span>
+
+<span class="s0">#else</span>
+
+<span class="s0">static </span><span class="s1">PyModuleDef moduledef = {</span>
+    <span class="s1">.m_base = PyModuleDef_HEAD_INIT,</span>
+    <span class="s1">.m_name = MODULE_NAME_STR,</span>
+    <span class="s1">.m_size = -</span><span class="s5">1</span><span class="s1">,</span>
+    <span class="s1">.m_methods = limited_api_methods,</span>
+<span class="s1">};</span>
+
+<span class="s1">PyMODINIT_FUNC</span>
+<span class="s1">ENTRY_FUNC_NAME(</span><span class="s0">void</span><span class="s1">)</span>
+<span class="s1">{</span>
+    <span class="s1">import_array();</span>
+    <span class="s1">import_umath();</span>
+    <span class="s0">return </span><span class="s1">PyModule_Create(&amp;moduledef);</span>
+<span class="s1">}</span>
+
+<span class="s0">#endif</span>
+</pre>
+</body>
+</html>

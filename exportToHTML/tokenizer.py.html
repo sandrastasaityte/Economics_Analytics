@@ -1,0 +1,469 @@
+<html>
+<head>
+<title>tokenizer.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+tokenizer.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+This module contains a tokenizer for Excel formulae. 
+ 
+The tokenizer is based on the Javascript tokenizer found at 
+http://ewbi.blogs.com/develops/2004/12/excel_formula_p.html written by Eric 
+Bachtal 
+&quot;&quot;&quot;</span>
+
+<span class="s2">import </span><span class="s1">re</span>
+
+
+<span class="s2">class </span><span class="s1">TokenizerError</span><span class="s3">(</span><span class="s1">Exception</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Base class for all Tokenizer errors.&quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Tokenizer</span><span class="s3">:</span>
+
+    <span class="s0">&quot;&quot;&quot; 
+    A tokenizer for Excel worksheet formulae. 
+ 
+    Converts a str string representing an Excel formula (in A1 notation) 
+    into a sequence of `Token` objects. 
+ 
+    `formula`: The str string to tokenize 
+ 
+    Tokenizer defines a method `._parse()` to parse the formula into tokens, 
+    which can then be accessed through the `.items` attribute. 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">SN_RE </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">&quot;^[1-9](</span><span class="s2">\\</span><span class="s4">.[0-9]+)?[Ee]$&quot;</span><span class="s3">)  </span><span class="s5"># Scientific notation</span>
+    <span class="s1">WSPACE_RE </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">r&quot;[ \n]+&quot;</span><span class="s3">)</span>
+    <span class="s1">STRING_REGEXES </span><span class="s3">= {</span>
+        <span class="s5"># Inside a string, all characters are treated as literals, except for</span>
+        <span class="s5"># the quote character used to start the string. That character, when</span>
+        <span class="s5"># doubled is treated as a single character in the string. If an</span>
+        <span class="s5"># unmatched quote appears, the string is terminated.</span>
+        <span class="s4">'&quot;'</span><span class="s3">: </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">'&quot;(?:[^&quot;]*&quot;&quot;)*[^&quot;]*&quot;(?!&quot;)'</span><span class="s3">),</span>
+        <span class="s4">&quot;'&quot;</span><span class="s3">: </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">&quot;'(?:[^']*'')*[^']*'(?!')&quot;</span><span class="s3">),</span>
+    <span class="s3">}</span>
+    <span class="s1">ERROR_CODES </span><span class="s3">= (</span><span class="s4">&quot;#NULL!&quot;</span><span class="s3">, </span><span class="s4">&quot;#DIV/0!&quot;</span><span class="s3">, </span><span class="s4">&quot;#VALUE!&quot;</span><span class="s3">, </span><span class="s4">&quot;#REF!&quot;</span><span class="s3">, </span><span class="s4">&quot;#NAME?&quot;</span><span class="s3">,</span>
+                   <span class="s4">&quot;#NUM!&quot;</span><span class="s3">, </span><span class="s4">&quot;#N/A&quot;</span><span class="s3">, </span><span class="s4">&quot;#GETTING_DATA&quot;</span><span class="s3">)</span>
+    <span class="s1">TOKEN_ENDERS </span><span class="s3">= </span><span class="s4">',;}) +-*/^&amp;=&gt;&lt;%'  </span><span class="s5"># Each of these characters, marks the</span>
+                                       <span class="s5"># end of an operand token</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">formula</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">formula </span><span class="s3">= </span><span class="s1">formula</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">items </span><span class="s3">= []</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">token_stack </span><span class="s3">= []  </span><span class="s5"># Used to keep track of arrays, functions, and</span>
+                               <span class="s5"># parentheses</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">offset </span><span class="s3">= </span><span class="s6">0  </span><span class="s5"># How many chars have we read</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">token </span><span class="s3">= []  </span><span class="s5"># Used to build up token values char by char</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_parse</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">_parse</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Populate self.items with the tokens from the formula.&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">:</span>
+            <span class="s2">return  </span><span class="s5"># Already parsed!</span>
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">:</span>
+            <span class="s2">return</span>
+        <span class="s2">elif </span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s6">0</span><span class="s3">] == </span><span class="s4">'='</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">offset </span><span class="s3">+= </span><span class="s6">1</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">items</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">Token</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">, </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">LITERAL</span><span class="s3">))</span>
+            <span class="s2">return</span>
+        <span class="s1">consumers </span><span class="s3">= (</span>
+            <span class="s3">(</span><span class="s4">'&quot;</span><span class="s2">\'</span><span class="s4">'</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_parse_string</span><span class="s3">),</span>
+            <span class="s3">(</span><span class="s4">'['</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_parse_brackets</span><span class="s3">),</span>
+            <span class="s3">(</span><span class="s4">'#'</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_parse_error</span><span class="s3">),</span>
+            <span class="s3">(</span><span class="s4">' '</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_parse_whitespace</span><span class="s3">),</span>
+            <span class="s3">(</span><span class="s4">'</span><span class="s2">\n</span><span class="s4">'</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_parse_whitespace</span><span class="s3">),</span>
+            <span class="s3">(</span><span class="s4">'+-*/^&amp;=&gt;&lt;%'</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_parse_operator</span><span class="s3">),</span>
+            <span class="s3">(</span><span class="s4">'{('</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_parse_opener</span><span class="s3">),</span>
+            <span class="s3">(</span><span class="s4">')}'</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_parse_closer</span><span class="s3">),</span>
+            <span class="s3">(</span><span class="s4">';,'</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_parse_separator</span><span class="s3">),</span>
+        <span class="s3">)</span>
+        <span class="s1">dispatcher </span><span class="s3">= {}  </span><span class="s5"># maps chars to the specific parsing function</span>
+        <span class="s2">for </span><span class="s1">chars</span><span class="s3">, </span><span class="s1">consumer </span><span class="s2">in </span><span class="s1">consumers</span><span class="s3">:</span>
+            <span class="s1">dispatcher</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">dict</span><span class="s3">.</span><span class="s1">fromkeys</span><span class="s3">(</span><span class="s1">chars</span><span class="s3">, </span><span class="s1">consumer</span><span class="s3">))</span>
+        <span class="s2">while </span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset </span><span class="s3">&lt; </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">check_scientific_notation</span><span class="s3">():  </span><span class="s5"># May consume one character</span>
+                <span class="s2">continue</span>
+            <span class="s1">curr_char </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">]</span>
+            <span class="s2">if </span><span class="s1">curr_char </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">TOKEN_ENDERS</span><span class="s3">:</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">save_token</span><span class="s3">()</span>
+            <span class="s2">if </span><span class="s1">curr_char </span><span class="s2">in </span><span class="s1">dispatcher</span><span class="s3">:</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">offset </span><span class="s3">+= </span><span class="s1">dispatcher</span><span class="s3">[</span><span class="s1">curr_char</span><span class="s3">]()</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s5"># TODO: this can probably be sped up using a regex to get to</span>
+                <span class="s5"># the next interesting character</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">token</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">curr_char</span><span class="s3">)</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">offset </span><span class="s3">+= </span><span class="s6">1</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">save_token</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">_parse_string</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Parse a &quot;-delimited string or '-delimited link. 
+ 
+        The offset must be pointing to either a single quote (&quot;'&quot;) or double 
+        quote ('&quot;') character. The strings are parsed according to Excel 
+        rules where to escape the delimiter you just double it up. E.g., 
+        &quot;abc&quot;&quot;def&quot; in Excel is parsed as 'abc&quot;def' in Python. 
+ 
+        Returns the number of characters matched. (Does not update 
+        self.offset) 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">assert_empty_token</span><span class="s3">(</span><span class="s1">can_follow</span><span class="s3">=</span><span class="s4">':'</span><span class="s3">)</span>
+        <span class="s1">delim </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">]</span>
+        <span class="s2">assert </span><span class="s1">delim </span><span class="s2">in </span><span class="s3">(</span><span class="s4">'&quot;'</span><span class="s3">, </span><span class="s4">&quot;'&quot;</span><span class="s3">)</span>
+        <span class="s1">regex </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">STRING_REGEXES</span><span class="s3">[</span><span class="s1">delim</span><span class="s3">]</span>
+        <span class="s1">match </span><span class="s3">= </span><span class="s1">regex</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">:])</span>
+        <span class="s2">if </span><span class="s1">match </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">subtype </span><span class="s3">= </span><span class="s4">&quot;string&quot; </span><span class="s2">if </span><span class="s1">delim </span><span class="s3">== </span><span class="s4">'&quot;' </span><span class="s2">else </span><span class="s4">'link'</span>
+            <span class="s2">raise </span><span class="s1">TokenizerError</span><span class="s3">(</span><span class="s4">f&quot;Reached end of formula while parsing </span><span class="s2">{</span><span class="s1">subtype</span><span class="s2">} </span><span class="s4">in </span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">)</span>
+        <span class="s1">match </span><span class="s3">= </span><span class="s1">match</span><span class="s3">.</span><span class="s1">group</span><span class="s3">(</span><span class="s6">0</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">delim </span><span class="s3">== </span><span class="s4">'&quot;'</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">items</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">Token</span><span class="s3">.</span><span class="s1">make_operand</span><span class="s3">(</span><span class="s1">match</span><span class="s3">))</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">token</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">match</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">len</span><span class="s3">(</span><span class="s1">match</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_parse_brackets</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Consume all the text between square brackets []. 
+ 
+        Returns the number of characters matched. (Does not update 
+        self.offset) 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s2">assert </span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">] == </span><span class="s4">'['</span>
+        <span class="s1">lefts </span><span class="s3">= [(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">start</span><span class="s3">(), </span><span class="s6">1</span><span class="s3">) </span><span class="s2">for </span><span class="s1">t </span><span class="s2">in</span>
+                 <span class="s1">re</span><span class="s3">.</span><span class="s1">finditer</span><span class="s3">(</span><span class="s4">r&quot;\[&quot;</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">:])]</span>
+        <span class="s1">rights </span><span class="s3">= [(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">start</span><span class="s3">(), -</span><span class="s6">1</span><span class="s3">) </span><span class="s2">for </span><span class="s1">t </span><span class="s2">in</span>
+                  <span class="s1">re</span><span class="s3">.</span><span class="s1">finditer</span><span class="s3">(</span><span class="s4">r&quot;\]&quot;</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">:])]</span>
+
+        <span class="s1">open_count </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s2">for </span><span class="s1">idx</span><span class="s3">, </span><span class="s1">open_close </span><span class="s2">in </span><span class="s1">sorted</span><span class="s3">(</span><span class="s1">lefts </span><span class="s3">+ </span><span class="s1">rights</span><span class="s3">):</span>
+            <span class="s1">open_count </span><span class="s3">+= </span><span class="s1">open_close</span>
+            <span class="s2">if </span><span class="s1">open_count </span><span class="s3">== </span><span class="s6">0</span><span class="s3">:</span>
+                <span class="s1">outer_right </span><span class="s3">= </span><span class="s1">idx </span><span class="s3">+ </span><span class="s6">1</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">token</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span>
+                    <span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">:</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset </span><span class="s3">+ </span><span class="s1">outer_right</span><span class="s3">])</span>
+                <span class="s2">return </span><span class="s1">outer_right</span>
+
+        <span class="s2">raise </span><span class="s1">TokenizerError</span><span class="s3">(</span><span class="s4">f&quot;Encountered unmatched '[' in </span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_parse_error</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Consume the text following a '#' as an error. 
+ 
+        Looks for a match in self.ERROR_CODES and returns the number of 
+        characters matched. (Does not update self.offset) 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">assert_empty_token</span><span class="s3">(</span><span class="s1">can_follow</span><span class="s3">=</span><span class="s4">'!'</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">] == </span><span class="s4">'#'</span>
+        <span class="s1">subformula </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">:]</span>
+        <span class="s2">for </span><span class="s1">err </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">ERROR_CODES</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">subformula</span><span class="s3">.</span><span class="s1">startswith</span><span class="s3">(</span><span class="s1">err</span><span class="s3">):</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">items</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">Token</span><span class="s3">.</span><span class="s1">make_operand</span><span class="s3">(</span><span class="s4">''</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">token</span><span class="s3">) + </span><span class="s1">err</span><span class="s3">))</span>
+                <span class="s2">del </span><span class="s1">self</span><span class="s3">.</span><span class="s1">token</span><span class="s3">[:]</span>
+                <span class="s2">return </span><span class="s1">len</span><span class="s3">(</span><span class="s1">err</span><span class="s3">)</span>
+        <span class="s2">raise </span><span class="s1">TokenizerError</span><span class="s3">(</span><span class="s4">f&quot;Invalid error code at position </span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s2">} </span><span class="s4">in '</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s2">}</span><span class="s4">'&quot;</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_parse_whitespace</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Consume a string of consecutive spaces. 
+ 
+        Returns the number of spaces found. (Does not update self.offset). 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s2">assert </span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">] </span><span class="s2">in </span><span class="s3">(</span><span class="s4">' '</span><span class="s3">, </span><span class="s4">'</span><span class="s2">\n</span><span class="s4">'</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">items</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">Token</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">], </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">WSPACE</span><span class="s3">))</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">WSPACE_RE</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">:]).</span><span class="s1">end</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">_parse_operator</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Consume the characters constituting an operator. 
+ 
+        Returns the number of characters consumed. (Does not update 
+        self.offset) 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">:</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset </span><span class="s3">+ </span><span class="s6">2</span><span class="s3">] </span><span class="s2">in </span><span class="s3">(</span><span class="s4">'&gt;='</span><span class="s3">, </span><span class="s4">'&lt;='</span><span class="s3">, </span><span class="s4">'&lt;&gt;'</span><span class="s3">):</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">items</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">Token</span><span class="s3">(</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">:</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset </span><span class="s3">+ </span><span class="s6">2</span><span class="s3">],</span>
+                <span class="s1">Token</span><span class="s3">.</span><span class="s1">OP_IN</span>
+            <span class="s3">))</span>
+            <span class="s2">return </span><span class="s6">2</span>
+        <span class="s1">curr_char </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">]  </span><span class="s5"># guaranteed to be 1 char</span>
+        <span class="s2">assert </span><span class="s1">curr_char </span><span class="s2">in </span><span class="s4">'%*/^&amp;=&gt;&lt;+-'</span>
+        <span class="s2">if </span><span class="s1">curr_char </span><span class="s3">== </span><span class="s4">'%'</span><span class="s3">:</span>
+            <span class="s1">token </span><span class="s3">= </span><span class="s1">Token</span><span class="s3">(</span><span class="s4">'%'</span><span class="s3">, </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">OP_POST</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">curr_char </span><span class="s2">in </span><span class="s4">&quot;*/^&amp;=&gt;&lt;&quot;</span><span class="s3">:</span>
+            <span class="s1">token </span><span class="s3">= </span><span class="s1">Token</span><span class="s3">(</span><span class="s1">curr_char</span><span class="s3">, </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">OP_IN</span><span class="s3">)</span>
+        <span class="s5"># From here on, curr_char is guaranteed to be in '+-'</span>
+        <span class="s2">elif not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">items</span><span class="s3">:</span>
+            <span class="s1">token </span><span class="s3">= </span><span class="s1">Token</span><span class="s3">(</span><span class="s1">curr_char</span><span class="s3">, </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">OP_PRE</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">prev </span><span class="s3">= </span><span class="s1">next</span><span class="s3">((</span><span class="s1">i </span><span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">reversed</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">items</span><span class="s3">)</span>
+                         <span class="s2">if </span><span class="s1">i</span><span class="s3">.</span><span class="s1">type </span><span class="s3">!= </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">WSPACE</span><span class="s3">), </span><span class="s2">None</span><span class="s3">)</span>
+            <span class="s1">is_infix </span><span class="s3">= </span><span class="s1">prev </span><span class="s2">and </span><span class="s3">(</span>
+                <span class="s1">prev</span><span class="s3">.</span><span class="s1">subtype </span><span class="s3">== </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">CLOSE</span>
+                <span class="s2">or </span><span class="s1">prev</span><span class="s3">.</span><span class="s1">type </span><span class="s3">== </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">OP_POST</span>
+                <span class="s2">or </span><span class="s1">prev</span><span class="s3">.</span><span class="s1">type </span><span class="s3">== </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">OPERAND</span>
+            <span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">is_infix</span><span class="s3">:</span>
+                <span class="s1">token </span><span class="s3">= </span><span class="s1">Token</span><span class="s3">(</span><span class="s1">curr_char</span><span class="s3">, </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">OP_IN</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">token </span><span class="s3">= </span><span class="s1">Token</span><span class="s3">(</span><span class="s1">curr_char</span><span class="s3">, </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">OP_PRE</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">items</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">token</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s6">1</span>
+
+    <span class="s2">def </span><span class="s1">_parse_opener</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Consumes a ( or { character. 
+ 
+        Returns the number of characters consumed. (Does not update 
+        self.offset) 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s2">assert </span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">] </span><span class="s2">in </span><span class="s3">(</span><span class="s4">'('</span><span class="s3">, </span><span class="s4">'{'</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">] == </span><span class="s4">'{'</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">assert_empty_token</span><span class="s3">()</span>
+            <span class="s1">token </span><span class="s3">= </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">make_subexp</span><span class="s3">(</span><span class="s4">&quot;{&quot;</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">self</span><span class="s3">.</span><span class="s1">token</span><span class="s3">:</span>
+            <span class="s1">token_value </span><span class="s3">= </span><span class="s4">&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">token</span><span class="s3">) + </span><span class="s4">'('</span>
+            <span class="s2">del </span><span class="s1">self</span><span class="s3">.</span><span class="s1">token</span><span class="s3">[:]</span>
+            <span class="s1">token </span><span class="s3">= </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">make_subexp</span><span class="s3">(</span><span class="s1">token_value</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">token </span><span class="s3">= </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">make_subexp</span><span class="s3">(</span><span class="s4">&quot;(&quot;</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">items</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">token</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">token_stack</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">token</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s6">1</span>
+
+    <span class="s2">def </span><span class="s1">_parse_closer</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Consumes a } or ) character. 
+ 
+        Returns the number of characters consumed. (Does not update 
+        self.offset) 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s2">assert </span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">] </span><span class="s2">in </span><span class="s3">(</span><span class="s4">')'</span><span class="s3">, </span><span class="s4">'}'</span><span class="s3">)</span>
+        <span class="s1">token </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">token_stack</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">().</span><span class="s1">get_closer</span><span class="s3">()</span>
+        <span class="s2">if </span><span class="s1">token</span><span class="s3">.</span><span class="s1">value </span><span class="s3">!= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">]:</span>
+            <span class="s2">raise </span><span class="s1">TokenizerError</span><span class="s3">(</span>
+                <span class="s4">&quot;Mismatched ( and { pair in '%s'&quot; </span><span class="s3">% </span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">items</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">token</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s6">1</span>
+
+    <span class="s2">def </span><span class="s1">_parse_separator</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Consumes a ; or , character. 
+ 
+        Returns the number of characters consumed. (Does not update 
+        self.offset) 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">curr_char </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">]</span>
+        <span class="s2">assert </span><span class="s1">curr_char </span><span class="s2">in </span><span class="s3">(</span><span class="s4">';'</span><span class="s3">, </span><span class="s4">','</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">curr_char </span><span class="s3">== </span><span class="s4">';'</span><span class="s3">:</span>
+            <span class="s1">token </span><span class="s3">= </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">make_separator</span><span class="s3">(</span><span class="s4">&quot;;&quot;</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">top_type </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">token_stack</span><span class="s3">[-</span><span class="s6">1</span><span class="s3">].</span><span class="s1">type</span>
+            <span class="s2">except </span><span class="s1">IndexError</span><span class="s3">:</span>
+                <span class="s1">token </span><span class="s3">= </span><span class="s1">Token</span><span class="s3">(</span><span class="s4">&quot;,&quot;</span><span class="s3">, </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">OP_IN</span><span class="s3">)  </span><span class="s5"># Range Union operator</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">top_type </span><span class="s3">== </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">PAREN</span><span class="s3">:</span>
+                    <span class="s1">token </span><span class="s3">= </span><span class="s1">Token</span><span class="s3">(</span><span class="s4">&quot;,&quot;</span><span class="s3">, </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">OP_IN</span><span class="s3">)  </span><span class="s5"># Range Union operator</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s1">token </span><span class="s3">= </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">make_separator</span><span class="s3">(</span><span class="s4">&quot;,&quot;</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">items</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">token</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s6">1</span>
+
+    <span class="s2">def </span><span class="s1">check_scientific_notation</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Consumes a + or - character if part of a number in sci. notation. 
+ 
+        Returns True if the character was consumed and self.offset was 
+        updated, False otherwise. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">curr_char </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s3">]</span>
+        <span class="s2">if </span><span class="s3">(</span><span class="s1">curr_char </span><span class="s2">in </span><span class="s4">'+-'</span>
+                <span class="s2">and </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">token</span><span class="s3">) &gt;= </span><span class="s6">1</span>
+                <span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">SN_RE</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s4">&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">token</span><span class="s3">))):</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">token</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">curr_char</span><span class="s3">)</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">offset </span><span class="s3">+= </span><span class="s6">1</span>
+            <span class="s2">return True</span>
+        <span class="s2">return False</span>
+
+    <span class="s2">def </span><span class="s1">assert_empty_token</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">can_follow</span><span class="s3">=()):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Ensure that there's no token currently being parsed. 
+ 
+        Or if there is a token being parsed, it must end with a character in 
+        can_follow. 
+ 
+        If there are unconsumed token contents, it means we hit an unexpected 
+        token transition. In this case, we raise a TokenizerError 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">token </span><span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">token</span><span class="s3">[-</span><span class="s6">1</span><span class="s3">] </span><span class="s2">not in </span><span class="s1">can_follow</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">TokenizerError</span><span class="s3">(</span><span class="s4">f&quot;Unexpected character at position </span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset</span><span class="s2">} </span><span class="s4">in '</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">formula</span><span class="s2">}</span><span class="s4">'&quot;</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">save_token</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;If there's a token being parsed, add it to the item list.&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">token</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">items</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">Token</span><span class="s3">.</span><span class="s1">make_operand</span><span class="s3">(</span><span class="s4">&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">token</span><span class="s3">)))</span>
+            <span class="s2">del </span><span class="s1">self</span><span class="s3">.</span><span class="s1">token</span><span class="s3">[:]</span>
+
+    <span class="s2">def </span><span class="s1">render</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Convert the parsed tokens back to a string.&quot;&quot;&quot;</span>
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">items</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s4">&quot;&quot;</span>
+        <span class="s2">elif </span><span class="s1">self</span><span class="s3">.</span><span class="s1">items</span><span class="s3">[</span><span class="s6">0</span><span class="s3">].</span><span class="s1">type </span><span class="s3">== </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">LITERAL</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">items</span><span class="s3">[</span><span class="s6">0</span><span class="s3">].</span><span class="s1">value</span>
+        <span class="s2">return </span><span class="s4">&quot;=&quot; </span><span class="s3">+ </span><span class="s4">&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">token</span><span class="s3">.</span><span class="s1">value </span><span class="s2">for </span><span class="s1">token </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">items</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">Token</span><span class="s3">:</span>
+
+    <span class="s0">&quot;&quot;&quot; 
+    A token in an Excel formula. 
+ 
+    Tokens have three attributes: 
+ 
+    * `value`: The string value parsed that led to this token 
+    * `type`: A string identifying the type of token 
+    * `subtype`: A string identifying subtype of the token (optional, and 
+                 defaults to &quot;&quot;) 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">__slots__ </span><span class="s3">= [</span><span class="s4">'value'</span><span class="s3">, </span><span class="s4">'type'</span><span class="s3">, </span><span class="s4">'subtype'</span><span class="s3">]</span>
+
+    <span class="s1">LITERAL </span><span class="s3">= </span><span class="s4">&quot;LITERAL&quot;</span>
+    <span class="s1">OPERAND </span><span class="s3">= </span><span class="s4">&quot;OPERAND&quot;</span>
+    <span class="s1">FUNC </span><span class="s3">= </span><span class="s4">&quot;FUNC&quot;</span>
+    <span class="s1">ARRAY </span><span class="s3">= </span><span class="s4">&quot;ARRAY&quot;</span>
+    <span class="s1">PAREN </span><span class="s3">= </span><span class="s4">&quot;PAREN&quot;</span>
+    <span class="s1">SEP </span><span class="s3">= </span><span class="s4">&quot;SEP&quot;</span>
+    <span class="s1">OP_PRE </span><span class="s3">= </span><span class="s4">&quot;OPERATOR-PREFIX&quot;</span>
+    <span class="s1">OP_IN </span><span class="s3">= </span><span class="s4">&quot;OPERATOR-INFIX&quot;</span>
+    <span class="s1">OP_POST </span><span class="s3">= </span><span class="s4">&quot;OPERATOR-POSTFIX&quot;</span>
+    <span class="s1">WSPACE </span><span class="s3">= </span><span class="s4">&quot;WHITE-SPACE&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">value</span><span class="s3">, </span><span class="s1">type_</span><span class="s3">, </span><span class="s1">subtype</span><span class="s3">=</span><span class="s4">&quot;&quot;</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">value </span><span class="s3">= </span><span class="s1">value</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">type </span><span class="s3">= </span><span class="s1">type_</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">subtype </span><span class="s3">= </span><span class="s1">subtype</span>
+
+    <span class="s5"># Literal operands:</span>
+    <span class="s5">#</span>
+    <span class="s5"># Literal operands are always of type 'OPERAND' and can be of subtype</span>
+    <span class="s5"># 'TEXT' (for text strings), 'NUMBER' (for all numeric types), 'LOGICAL'</span>
+    <span class="s5"># (for TRUE and FALSE), 'ERROR' (for literal error values), or 'RANGE'</span>
+    <span class="s5"># (for all range references).</span>
+
+    <span class="s1">TEXT </span><span class="s3">= </span><span class="s4">'TEXT'</span>
+    <span class="s1">NUMBER </span><span class="s3">= </span><span class="s4">'NUMBER'</span>
+    <span class="s1">LOGICAL </span><span class="s3">= </span><span class="s4">'LOGICAL'</span>
+    <span class="s1">ERROR </span><span class="s3">= </span><span class="s4">'ERROR'</span>
+    <span class="s1">RANGE </span><span class="s3">= </span><span class="s4">'RANGE'</span>
+
+    <span class="s2">def </span><span class="s1">__repr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s4">u&quot;{0} {1} {2}:&quot;</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">type</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">subtype</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">value</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">make_operand</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">value</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Create an operand token.&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">value</span><span class="s3">.</span><span class="s1">startswith</span><span class="s3">(</span><span class="s4">'&quot;'</span><span class="s3">):</span>
+            <span class="s1">subtype </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">TEXT</span>
+        <span class="s2">elif </span><span class="s1">value</span><span class="s3">.</span><span class="s1">startswith</span><span class="s3">(</span><span class="s4">'#'</span><span class="s3">):</span>
+            <span class="s1">subtype </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">ERROR</span>
+        <span class="s2">elif </span><span class="s1">value </span><span class="s2">in </span><span class="s3">(</span><span class="s4">'TRUE'</span><span class="s3">, </span><span class="s4">'FALSE'</span><span class="s3">):</span>
+            <span class="s1">subtype </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">LOGICAL</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">float</span><span class="s3">(</span><span class="s1">value</span><span class="s3">)</span>
+                <span class="s1">subtype </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">NUMBER</span>
+            <span class="s2">except </span><span class="s1">ValueError</span><span class="s3">:</span>
+                <span class="s1">subtype </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">RANGE</span>
+        <span class="s2">return </span><span class="s1">cls</span><span class="s3">(</span><span class="s1">value</span><span class="s3">, </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">OPERAND</span><span class="s3">, </span><span class="s1">subtype</span><span class="s3">)</span>
+
+
+    <span class="s5"># Subexpresssions</span>
+    <span class="s5">#</span>
+    <span class="s5"># There are 3 types of `Subexpressions`: functions, array literals, and</span>
+    <span class="s5"># parentheticals. Subexpressions have 'OPEN' and 'CLOSE' tokens. 'OPEN'</span>
+    <span class="s5"># is used when parsing the initial expression token (i.e., '(' or '{')</span>
+    <span class="s5"># and 'CLOSE' is used when parsing the closing expression token ('}' or</span>
+    <span class="s5"># ')').</span>
+
+    <span class="s1">OPEN </span><span class="s3">= </span><span class="s4">&quot;OPEN&quot;</span>
+    <span class="s1">CLOSE </span><span class="s3">= </span><span class="s4">&quot;CLOSE&quot;</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">make_subexp</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">value</span><span class="s3">, </span><span class="s1">func</span><span class="s3">=</span><span class="s2">False</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Create a subexpression token. 
+ 
+        `value`: The value of the token 
+        `func`: If True, force the token to be of type FUNC 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s2">assert </span><span class="s1">value</span><span class="s3">[-</span><span class="s6">1</span><span class="s3">] </span><span class="s2">in </span><span class="s3">(</span><span class="s4">'{'</span><span class="s3">, </span><span class="s4">'}'</span><span class="s3">, </span><span class="s4">'('</span><span class="s3">, </span><span class="s4">')'</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">func</span><span class="s3">:</span>
+            <span class="s2">assert </span><span class="s1">re</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s4">'.+</span><span class="s2">\\</span><span class="s4">(|</span><span class="s2">\\</span><span class="s4">)'</span><span class="s3">, </span><span class="s1">value</span><span class="s3">)</span>
+            <span class="s1">type_ </span><span class="s3">= </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">FUNC</span>
+        <span class="s2">elif </span><span class="s1">value </span><span class="s2">in </span><span class="s4">'{}'</span><span class="s3">:</span>
+            <span class="s1">type_ </span><span class="s3">= </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">ARRAY</span>
+        <span class="s2">elif </span><span class="s1">value </span><span class="s2">in </span><span class="s4">'()'</span><span class="s3">:</span>
+            <span class="s1">type_ </span><span class="s3">= </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">PAREN</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">type_ </span><span class="s3">= </span><span class="s1">Token</span><span class="s3">.</span><span class="s1">FUNC</span>
+        <span class="s1">subtype </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">CLOSE </span><span class="s2">if </span><span class="s1">value </span><span class="s2">in </span><span class="s4">')}' </span><span class="s2">else </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">OPEN</span>
+        <span class="s2">return </span><span class="s1">cls</span><span class="s3">(</span><span class="s1">value</span><span class="s3">, </span><span class="s1">type_</span><span class="s3">, </span><span class="s1">subtype</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">get_closer</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Return a closing token that matches this token's type.&quot;&quot;&quot;</span>
+        <span class="s2">assert </span><span class="s1">self</span><span class="s3">.</span><span class="s1">type </span><span class="s2">in </span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">FUNC</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">ARRAY</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">PAREN</span><span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">self</span><span class="s3">.</span><span class="s1">subtype </span><span class="s3">== </span><span class="s1">self</span><span class="s3">.</span><span class="s1">OPEN</span>
+        <span class="s1">value </span><span class="s3">= </span><span class="s4">&quot;}&quot; </span><span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">type </span><span class="s3">== </span><span class="s1">self</span><span class="s3">.</span><span class="s1">ARRAY </span><span class="s2">else </span><span class="s4">&quot;)&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">make_subexp</span><span class="s3">(</span><span class="s1">value</span><span class="s3">, </span><span class="s1">func</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">type </span><span class="s3">== </span><span class="s1">self</span><span class="s3">.</span><span class="s1">FUNC</span><span class="s3">)</span>
+
+    <span class="s5"># Separator tokens</span>
+    <span class="s5">#</span>
+    <span class="s5"># Argument separators always have type 'SEP' and can have one of two</span>
+    <span class="s5"># subtypes: 'ARG', 'ROW'. 'ARG' is used for the ',' token, when used to</span>
+    <span class="s5"># delimit either function arguments or array elements. 'ROW' is used for</span>
+    <span class="s5"># the ';' token, which is always used to delimit rows in an array</span>
+    <span class="s5"># literal.</span>
+
+    <span class="s1">ARG </span><span class="s3">= </span><span class="s4">&quot;ARG&quot;</span>
+    <span class="s1">ROW </span><span class="s3">= </span><span class="s4">&quot;ROW&quot;</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">make_separator</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">value</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Create a separator token&quot;&quot;&quot;</span>
+        <span class="s2">assert </span><span class="s1">value </span><span class="s2">in </span><span class="s3">(</span><span class="s4">','</span><span class="s3">, </span><span class="s4">';'</span><span class="s3">)</span>
+        <span class="s1">subtype </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">ARG </span><span class="s2">if </span><span class="s1">value </span><span class="s3">== </span><span class="s4">',' </span><span class="s2">else </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">ROW</span>
+        <span class="s2">return </span><span class="s1">cls</span><span class="s3">(</span><span class="s1">value</span><span class="s3">, </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">SEP</span><span class="s3">, </span><span class="s1">subtype</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

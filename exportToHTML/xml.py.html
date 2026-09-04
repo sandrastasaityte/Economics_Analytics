@@ -1,0 +1,589 @@
+<html>
+<head>
+<title>xml.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+xml.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+:mod:`pandas.io.formats.xml` is a module for formatting data in XML. 
+&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">import </span><span class="s1">codecs</span>
+<span class="s2">import </span><span class="s1">io</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s3">,</span>
+    <span class="s1">Any</span><span class="s3">,</span>
+    <span class="s1">final</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">errors </span><span class="s2">import </span><span class="s1">AbstractMethodError</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">_decorators </span><span class="s2">import </span><span class="s1">cache_readonly</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">common </span><span class="s2">import </span><span class="s1">is_list_like</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">core</span><span class="s3">.</span><span class="s1">dtypes</span><span class="s3">.</span><span class="s1">missing </span><span class="s2">import </span><span class="s1">isna</span>
+
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">common </span><span class="s2">import </span><span class="s1">get_handle</span>
+<span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">io</span><span class="s3">.</span><span class="s1">xml </span><span class="s2">import </span><span class="s1">get_data_from_filepath</span>
+
+<span class="s2">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">pandas</span><span class="s3">.</span><span class="s1">_typing </span><span class="s2">import </span><span class="s3">(</span>
+        <span class="s1">CompressionOptions</span><span class="s3">,</span>
+        <span class="s1">FilePath</span><span class="s3">,</span>
+        <span class="s1">ReadBuffer</span><span class="s3">,</span>
+        <span class="s1">StorageOptions</span><span class="s3">,</span>
+        <span class="s1">WriteBuffer</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+    <span class="s2">from </span><span class="s1">pandas </span><span class="s2">import </span><span class="s1">DataFrame</span>
+
+
+<span class="s2">class </span><span class="s1">_BaseXMLFormatter</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Subclass for formatting data in XML. 
+ 
+    Parameters 
+    ---------- 
+    path_or_buffer : str or file-like 
+        This can be either a string of raw XML, a valid URL, 
+        file or file-like object. 
+ 
+    index : bool 
+        Whether to include index in xml document. 
+ 
+    row_name : str 
+        Name for root of xml document. Default is 'data'. 
+ 
+    root_name : str 
+        Name for row elements of xml document. Default is 'row'. 
+ 
+    na_rep : str 
+        Missing data representation. 
+ 
+    attrs_cols : list 
+        List of columns to write as attributes in row element. 
+ 
+    elem_cols : list 
+        List of columns to write as children in row element. 
+ 
+    namespaces : dict 
+        The namespaces to define in XML document as dicts with key 
+        being namespace and value the URI. 
+ 
+    prefix : str 
+        The prefix for each element in XML document including root. 
+ 
+    encoding : str 
+        Encoding of xml object or document. 
+ 
+    xml_declaration : bool 
+        Whether to include xml declaration at top line item in xml. 
+ 
+    pretty_print : bool 
+        Whether to write xml document with line breaks and indentation. 
+ 
+    stylesheet : str or file-like 
+        A URL, file, file-like object, or a raw string containing XSLT. 
+ 
+    compression : str or dict, default 'infer' 
+        For on-the-fly compression of the output data. If 'infer' and 'path_or_buffer' 
+        is path-like, then detect compression from the following extensions: '.gz', 
+        '.bz2', '.zip', '.xz', '.zst', '.tar', '.tar.gz', '.tar.xz' or '.tar.bz2' 
+        (otherwise no compression). 
+        Set to ``None`` for no compression. 
+        Can also be a dict with key ``'method'`` set 
+        to one of {``'zip'``, ``'gzip'``, ``'bz2'``, ``'zstd'``, ``'xz'``, ``'tar'``} 
+        and other key-value pairs are forwarded to 
+        ``zipfile.ZipFile``, ``gzip.GzipFile``, 
+        ``bz2.BZ2File``, ``zstandard.ZstdCompressor``, ``lzma.LZMAFile`` or 
+        ``tarfile.TarFile``, respectively. 
+        As an example, the following could be passed for faster compression and to 
+        create a reproducible gzip archive: 
+        ``compression={'method': 'gzip', 'compresslevel': 1, 'mtime': 1}``. 
+ 
+    storage_options : dict, optional 
+        Extra options that make sense for a particular storage connection, e.g. 
+        host, port, username, password, etc. For HTTP(S) URLs the key-value pairs 
+        are forwarded to ``urllib.request.Request`` as header options. For other 
+        URLs (e.g. starting with &quot;s3://&quot;, and &quot;gcs://&quot;) the key-value pairs are 
+        forwarded to ``fsspec.open``. Please see ``fsspec`` and ``urllib`` for more 
+        details, and for more examples on storage options refer `here 
+        &lt;https://pandas.pydata.org/docs/user_guide/io.html? 
+        highlight=storage_options#reading-writing-remote-files&gt;`_. 
+ 
+    See also 
+    -------- 
+    pandas.io.formats.xml.EtreeXMLFormatter 
+    pandas.io.formats.xml.LxmlXMLFormatter 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">frame</span><span class="s3">: </span><span class="s1">DataFrame</span><span class="s3">,</span>
+        <span class="s1">path_or_buffer</span><span class="s3">: </span><span class="s1">FilePath </span><span class="s3">| </span><span class="s1">WriteBuffer</span><span class="s3">[</span><span class="s1">bytes</span><span class="s3">] | </span><span class="s1">WriteBuffer</span><span class="s3">[</span><span class="s1">str</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">index</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+        <span class="s1">root_name</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s4">&quot;data&quot;</span><span class="s3">,</span>
+        <span class="s1">row_name</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s4">&quot;row&quot;</span><span class="s3">,</span>
+        <span class="s1">na_rep</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">attr_cols</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">elem_cols</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">namespaces</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str </span><span class="s3">| </span><span class="s2">None</span><span class="s3">, </span><span class="s1">str</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">prefix</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">encoding</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s4">&quot;utf-8&quot;</span><span class="s3">,</span>
+        <span class="s1">xml_declaration</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+        <span class="s1">pretty_print</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+        <span class="s1">stylesheet</span><span class="s3">: </span><span class="s1">FilePath </span><span class="s3">| </span><span class="s1">ReadBuffer</span><span class="s3">[</span><span class="s1">str</span><span class="s3">] | </span><span class="s1">ReadBuffer</span><span class="s3">[</span><span class="s1">bytes</span><span class="s3">] | </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">compression</span><span class="s3">: </span><span class="s1">CompressionOptions </span><span class="s3">= </span><span class="s4">&quot;infer&quot;</span><span class="s3">,</span>
+        <span class="s1">storage_options</span><span class="s3">: </span><span class="s1">StorageOptions </span><span class="s3">| </span><span class="s2">None </span><span class="s3">= </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">frame </span><span class="s3">= </span><span class="s1">frame</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">path_or_buffer </span><span class="s3">= </span><span class="s1">path_or_buffer</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">index </span><span class="s3">= </span><span class="s1">index</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">root_name </span><span class="s3">= </span><span class="s1">root_name</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">row_name </span><span class="s3">= </span><span class="s1">row_name</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">na_rep </span><span class="s3">= </span><span class="s1">na_rep</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">attr_cols </span><span class="s3">= </span><span class="s1">attr_cols</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">elem_cols </span><span class="s3">= </span><span class="s1">elem_cols</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">namespaces </span><span class="s3">= </span><span class="s1">namespaces</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">prefix </span><span class="s3">= </span><span class="s1">prefix</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">encoding </span><span class="s3">= </span><span class="s1">encoding</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">xml_declaration </span><span class="s3">= </span><span class="s1">xml_declaration</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">pretty_print </span><span class="s3">= </span><span class="s1">pretty_print</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">stylesheet </span><span class="s3">= </span><span class="s1">stylesheet</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">compression</span><span class="s3">: </span><span class="s1">CompressionOptions </span><span class="s3">= </span><span class="s1">compression</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">storage_options </span><span class="s3">= </span><span class="s1">storage_options</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">orig_cols </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">frame</span><span class="s3">.</span><span class="s1">columns</span><span class="s3">.</span><span class="s1">tolist</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">frame_dicts </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_process_dataframe</span><span class="s3">()</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_validate_columns</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_validate_encoding</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">prefix_uri </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_prefix_uri</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_handle_indexes</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">_build_tree</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; bytes</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Build tree from  data. 
+ 
+        This method initializes the root and builds attributes and elements 
+        with optional namespaces. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">raise </span><span class="s1">AbstractMethodError</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">final</span>
+    <span class="s2">def </span><span class="s1">_validate_columns</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Validate elems_cols and attrs_cols. 
+ 
+        This method will check if columns is list-like. 
+ 
+        Raises 
+        ------ 
+        ValueError 
+            * If value is not a list and less then length of nodes. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">attr_cols </span><span class="s2">and not </span><span class="s1">is_list_like</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">attr_cols</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span>
+                <span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">attr_cols</span><span class="s3">).</span><span class="s1">__name__</span><span class="s2">} </span><span class="s4">is not a valid type for attr_cols&quot;</span>
+            <span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">elem_cols </span><span class="s2">and not </span><span class="s1">is_list_like</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">elem_cols</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span>
+                <span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">elem_cols</span><span class="s3">).</span><span class="s1">__name__</span><span class="s2">} </span><span class="s4">is not a valid type for elem_cols&quot;</span>
+            <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">final</span>
+    <span class="s2">def </span><span class="s1">_validate_encoding</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Validate encoding. 
+ 
+        This method will check if encoding is among listed under codecs. 
+ 
+        Raises 
+        ------ 
+        LookupError 
+            * If encoding is not available in codecs. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s1">codecs</span><span class="s3">.</span><span class="s1">lookup</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">encoding</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">final</span>
+    <span class="s2">def </span><span class="s1">_process_dataframe</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; dict</span><span class="s3">[</span><span class="s1">int </span><span class="s3">| </span><span class="s1">str</span><span class="s3">, </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">]]:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Adjust Data Frame to fit xml output. 
+ 
+        This method will adjust underlying data frame for xml output, 
+        including optionally replacing missing values and including indexes. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s1">df </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">frame</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">index</span><span class="s3">:</span>
+            <span class="s1">df </span><span class="s3">= </span><span class="s1">df</span><span class="s3">.</span><span class="s1">reset_index</span><span class="s3">()</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">na_rep </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">df </span><span class="s3">= </span><span class="s1">df</span><span class="s3">.</span><span class="s1">fillna</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">na_rep</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">df</span><span class="s3">.</span><span class="s1">to_dict</span><span class="s3">(</span><span class="s1">orient</span><span class="s3">=</span><span class="s4">&quot;index&quot;</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">final</span>
+    <span class="s2">def </span><span class="s1">_handle_indexes</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Handle indexes. 
+ 
+        This method will add indexes into attr_cols or elem_cols. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">index</span><span class="s3">:</span>
+            <span class="s2">return</span>
+
+        <span class="s1">first_key </span><span class="s3">= </span><span class="s1">next</span><span class="s3">(</span><span class="s1">iter</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">frame_dicts</span><span class="s3">))</span>
+        <span class="s1">indexes</span><span class="s3">: </span><span class="s1">list</span><span class="s3">[</span><span class="s1">str</span><span class="s3">] = [</span>
+            <span class="s1">x </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">frame_dicts</span><span class="s3">[</span><span class="s1">first_key</span><span class="s3">].</span><span class="s1">keys</span><span class="s3">() </span><span class="s2">if </span><span class="s1">x </span><span class="s2">not in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">orig_cols</span>
+        <span class="s3">]</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">attr_cols</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">attr_cols </span><span class="s3">= </span><span class="s1">indexes </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">attr_cols</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">elem_cols</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">elem_cols </span><span class="s3">= </span><span class="s1">indexes </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">elem_cols</span>
+
+    <span class="s2">def </span><span class="s1">_get_prefix_uri</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Get uri of namespace prefix. 
+ 
+        This method retrieves corresponding URI to prefix in namespaces. 
+ 
+        Raises 
+        ------ 
+        KeyError 
+            *If prefix is not included in namespace dict. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s2">raise </span><span class="s1">AbstractMethodError</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">final</span>
+    <span class="s2">def </span><span class="s1">_other_namespaces</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; dict</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Define other namespaces. 
+ 
+        This method will build dictionary of namespaces attributes 
+        for root element, conditionally with optional namespaces and 
+        prefix. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s1">nmsp_dict</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">] = {}</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">namespaces</span><span class="s3">:</span>
+            <span class="s1">nmsp_dict </span><span class="s3">= {</span>
+                <span class="s4">f&quot;xmlns</span><span class="s2">{</span><span class="s1">p </span><span class="s2">if </span><span class="s1">p </span><span class="s3">== </span><span class="s4">'' </span><span class="s2">else </span><span class="s4">f':</span><span class="s2">{</span><span class="s1">p</span><span class="s2">}</span><span class="s4">'</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">: </span><span class="s1">n</span>
+                <span class="s2">for </span><span class="s1">p</span><span class="s3">, </span><span class="s1">n </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">namespaces</span><span class="s3">.</span><span class="s1">items</span><span class="s3">()</span>
+                <span class="s2">if </span><span class="s1">n </span><span class="s3">!= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">prefix_uri</span><span class="s3">[</span><span class="s5">1</span><span class="s3">:-</span><span class="s5">1</span><span class="s3">]</span>
+            <span class="s3">}</span>
+
+        <span class="s2">return </span><span class="s1">nmsp_dict</span>
+
+    <span class="s3">@</span><span class="s1">final</span>
+    <span class="s2">def </span><span class="s1">_build_attribs</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">d</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">], </span><span class="s1">elem_row</span><span class="s3">: </span><span class="s1">Any</span><span class="s3">) </span><span class="s1">-&gt; Any</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Create attributes of row. 
+ 
+        This method adds attributes using attr_cols to row element and 
+        works with tuples for multindex or hierarchical columns. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">attr_cols</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">elem_row</span>
+
+        <span class="s2">for </span><span class="s1">col </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">attr_cols</span><span class="s3">:</span>
+            <span class="s1">attr_name </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_flat_col_name</span><span class="s3">(</span><span class="s1">col</span><span class="s3">)</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s2">if not </span><span class="s1">isna</span><span class="s3">(</span><span class="s1">d</span><span class="s3">[</span><span class="s1">col</span><span class="s3">]):</span>
+                    <span class="s1">elem_row</span><span class="s3">.</span><span class="s1">attrib</span><span class="s3">[</span><span class="s1">attr_name</span><span class="s3">] = </span><span class="s1">str</span><span class="s3">(</span><span class="s1">d</span><span class="s3">[</span><span class="s1">col</span><span class="s3">])</span>
+            <span class="s2">except </span><span class="s1">KeyError </span><span class="s2">as </span><span class="s1">err</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">KeyError</span><span class="s3">(</span><span class="s4">f&quot;no valid column, </span><span class="s2">{</span><span class="s1">col</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">) </span><span class="s2">from </span><span class="s1">err</span>
+        <span class="s2">return </span><span class="s1">elem_row</span>
+
+    <span class="s3">@</span><span class="s1">final</span>
+    <span class="s2">def </span><span class="s1">_get_flat_col_name</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">col</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s1">tuple</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s1">flat_col </span><span class="s3">= </span><span class="s1">col</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">col</span><span class="s3">, </span><span class="s1">tuple</span><span class="s3">):</span>
+            <span class="s1">flat_col </span><span class="s3">= (</span>
+                <span class="s4">&quot;&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">([</span><span class="s1">str</span><span class="s3">(</span><span class="s1">c</span><span class="s3">) </span><span class="s2">for </span><span class="s1">c </span><span class="s2">in </span><span class="s1">col</span><span class="s3">]).</span><span class="s1">strip</span><span class="s3">()</span>
+                <span class="s2">if </span><span class="s4">&quot;&quot; </span><span class="s2">in </span><span class="s1">col</span>
+                <span class="s2">else </span><span class="s4">&quot;_&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">([</span><span class="s1">str</span><span class="s3">(</span><span class="s1">c</span><span class="s3">) </span><span class="s2">for </span><span class="s1">c </span><span class="s2">in </span><span class="s1">col</span><span class="s3">]).</span><span class="s1">strip</span><span class="s3">()</span>
+            <span class="s3">)</span>
+        <span class="s2">return </span><span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">prefix_uri</span><span class="s2">}{</span><span class="s1">flat_col</span><span class="s2">}</span><span class="s4">&quot;</span>
+
+    <span class="s3">@</span><span class="s1">cache_readonly</span>
+    <span class="s2">def </span><span class="s1">_sub_element_cls</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">AbstractMethodError</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">final</span>
+    <span class="s2">def </span><span class="s1">_build_elems</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">d</span><span class="s3">: </span><span class="s1">dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">], </span><span class="s1">elem_row</span><span class="s3">: </span><span class="s1">Any</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Create child elements of row. 
+ 
+        This method adds child elements using elem_cols to row element and 
+        works with tuples for multindex or hierarchical columns. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">sub_element_cls </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_sub_element_cls</span>
+
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">elem_cols</span><span class="s3">:</span>
+            <span class="s2">return</span>
+
+        <span class="s2">for </span><span class="s1">col </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">elem_cols</span><span class="s3">:</span>
+            <span class="s1">elem_name </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_get_flat_col_name</span><span class="s3">(</span><span class="s1">col</span><span class="s3">)</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">val </span><span class="s3">= </span><span class="s2">None if </span><span class="s1">isna</span><span class="s3">(</span><span class="s1">d</span><span class="s3">[</span><span class="s1">col</span><span class="s3">]) </span><span class="s2">or </span><span class="s1">d</span><span class="s3">[</span><span class="s1">col</span><span class="s3">] == </span><span class="s4">&quot;&quot; </span><span class="s2">else </span><span class="s1">str</span><span class="s3">(</span><span class="s1">d</span><span class="s3">[</span><span class="s1">col</span><span class="s3">])</span>
+                <span class="s1">sub_element_cls</span><span class="s3">(</span><span class="s1">elem_row</span><span class="s3">, </span><span class="s1">elem_name</span><span class="s3">).</span><span class="s1">text </span><span class="s3">= </span><span class="s1">val</span>
+            <span class="s2">except </span><span class="s1">KeyError </span><span class="s2">as </span><span class="s1">err</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">KeyError</span><span class="s3">(</span><span class="s4">f&quot;no valid column, </span><span class="s2">{</span><span class="s1">col</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">) </span><span class="s2">from </span><span class="s1">err</span>
+
+    <span class="s3">@</span><span class="s1">final</span>
+    <span class="s2">def </span><span class="s1">write_output</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; str </span><span class="s3">| </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">xml_doc </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_build_tree</span><span class="s3">()</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">path_or_buffer </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">with </span><span class="s1">get_handle</span><span class="s3">(</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">path_or_buffer</span><span class="s3">,</span>
+                <span class="s4">&quot;wb&quot;</span><span class="s3">,</span>
+                <span class="s1">compression</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">compression</span><span class="s3">,</span>
+                <span class="s1">storage_options</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">storage_options</span><span class="s3">,</span>
+                <span class="s1">is_text</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+            <span class="s3">) </span><span class="s2">as </span><span class="s1">handles</span><span class="s3">:</span>
+                <span class="s1">handles</span><span class="s3">.</span><span class="s1">handle</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">xml_doc</span><span class="s3">)</span>
+            <span class="s2">return None</span>
+
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">xml_doc</span><span class="s3">.</span><span class="s1">decode</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">encoding</span><span class="s3">).</span><span class="s1">rstrip</span><span class="s3">()</span>
+
+
+<span class="s2">class </span><span class="s1">EtreeXMLFormatter</span><span class="s3">(</span><span class="s1">_BaseXMLFormatter</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Class for formatting data in xml using Python standard library 
+    modules: `xml.etree.ElementTree` and `xml.dom.minidom`. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">_build_tree</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; bytes</span><span class="s3">:</span>
+        <span class="s2">from </span><span class="s1">xml</span><span class="s3">.</span><span class="s1">etree</span><span class="s3">.</span><span class="s1">ElementTree </span><span class="s2">import </span><span class="s3">(</span>
+            <span class="s1">Element</span><span class="s3">,</span>
+            <span class="s1">SubElement</span><span class="s3">,</span>
+            <span class="s1">tostring</span><span class="s3">,</span>
+        <span class="s3">)</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">root </span><span class="s3">= </span><span class="s1">Element</span><span class="s3">(</span>
+            <span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">prefix_uri</span><span class="s2">}{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">root_name</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">, </span><span class="s1">attrib</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_other_namespaces</span><span class="s3">()</span>
+        <span class="s3">)</span>
+
+        <span class="s2">for </span><span class="s1">d </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">frame_dicts</span><span class="s3">.</span><span class="s1">values</span><span class="s3">():</span>
+            <span class="s1">elem_row </span><span class="s3">= </span><span class="s1">SubElement</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">root</span><span class="s3">, </span><span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">prefix_uri</span><span class="s2">}{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">row_name</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">)</span>
+
+            <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">attr_cols </span><span class="s2">and not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">elem_cols</span><span class="s3">:</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">elem_cols </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">d</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">())</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_build_elems</span><span class="s3">(</span><span class="s1">d</span><span class="s3">, </span><span class="s1">elem_row</span><span class="s3">)</span>
+
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">elem_row </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_build_attribs</span><span class="s3">(</span><span class="s1">d</span><span class="s3">, </span><span class="s1">elem_row</span><span class="s3">)</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_build_elems</span><span class="s3">(</span><span class="s1">d</span><span class="s3">, </span><span class="s1">elem_row</span><span class="s3">)</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">out_xml </span><span class="s3">= </span><span class="s1">tostring</span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">root</span><span class="s3">,</span>
+            <span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;xml&quot;</span><span class="s3">,</span>
+            <span class="s1">encoding</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">encoding</span><span class="s3">,</span>
+            <span class="s1">xml_declaration</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">xml_declaration</span><span class="s3">,</span>
+        <span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">pretty_print</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">out_xml </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_prettify_tree</span><span class="s3">()</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">stylesheet </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                <span class="s4">&quot;To use stylesheet, you need lxml installed and selected as parser.&quot;</span>
+            <span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">out_xml</span>
+
+    <span class="s2">def </span><span class="s1">_get_prefix_uri</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s2">from </span><span class="s1">xml</span><span class="s3">.</span><span class="s1">etree</span><span class="s3">.</span><span class="s1">ElementTree </span><span class="s2">import </span><span class="s1">register_namespace</span>
+
+        <span class="s1">uri </span><span class="s3">= </span><span class="s4">&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">namespaces</span><span class="s3">:</span>
+            <span class="s2">for </span><span class="s1">p</span><span class="s3">, </span><span class="s1">n </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">namespaces</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+                <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">p</span><span class="s3">, </span><span class="s1">str</span><span class="s3">) </span><span class="s2">and </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">n</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+                    <span class="s1">register_namespace</span><span class="s3">(</span><span class="s1">p</span><span class="s3">, </span><span class="s1">n</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">prefix</span><span class="s3">:</span>
+                <span class="s2">try</span><span class="s3">:</span>
+                    <span class="s1">uri </span><span class="s3">= </span><span class="s4">f&quot;</span><span class="s2">{{{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">namespaces</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">prefix</span><span class="s3">]</span><span class="s2">}}}</span><span class="s4">&quot;</span>
+                <span class="s2">except </span><span class="s1">KeyError </span><span class="s2">as </span><span class="s1">err</span><span class="s3">:</span>
+                    <span class="s2">raise </span><span class="s1">KeyError</span><span class="s3">(</span>
+                        <span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">prefix</span><span class="s2">} </span><span class="s4">is not included in namespaces&quot;</span>
+                    <span class="s3">) </span><span class="s2">from </span><span class="s1">err</span>
+            <span class="s2">elif </span><span class="s4">&quot;&quot; </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">namespaces</span><span class="s3">:</span>
+                <span class="s1">uri </span><span class="s3">= </span><span class="s4">f&quot;</span><span class="s2">{{{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">namespaces</span><span class="s3">[</span><span class="s4">''</span><span class="s3">]</span><span class="s2">}}}</span><span class="s4">&quot;</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">uri </span><span class="s3">= </span><span class="s4">&quot;&quot;</span>
+
+        <span class="s2">return </span><span class="s1">uri</span>
+
+    <span class="s3">@</span><span class="s1">cache_readonly</span>
+    <span class="s2">def </span><span class="s1">_sub_element_cls</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">from </span><span class="s1">xml</span><span class="s3">.</span><span class="s1">etree</span><span class="s3">.</span><span class="s1">ElementTree </span><span class="s2">import </span><span class="s1">SubElement</span>
+
+        <span class="s2">return </span><span class="s1">SubElement</span>
+
+    <span class="s2">def </span><span class="s1">_prettify_tree</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; bytes</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Output tree for pretty print format. 
+ 
+        This method will pretty print xml with line breaks and indentation. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s2">from </span><span class="s1">xml</span><span class="s3">.</span><span class="s1">dom</span><span class="s3">.</span><span class="s1">minidom </span><span class="s2">import </span><span class="s1">parseString</span>
+
+        <span class="s1">dom </span><span class="s3">= </span><span class="s1">parseString</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">out_xml</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">dom</span><span class="s3">.</span><span class="s1">toprettyxml</span><span class="s3">(</span><span class="s1">indent</span><span class="s3">=</span><span class="s4">&quot;  &quot;</span><span class="s3">, </span><span class="s1">encoding</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">encoding</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">LxmlXMLFormatter</span><span class="s3">(</span><span class="s1">_BaseXMLFormatter</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Class for formatting data in xml using Python standard library 
+    modules: `xml.etree.ElementTree` and `xml.dom.minidom`. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">super</span><span class="s3">().</span><span class="s1">__init__</span><span class="s3">(*</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">)</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_convert_empty_str_key</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">_build_tree</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; bytes</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Build tree from  data. 
+ 
+        This method initializes the root and builds attributes and elements 
+        with optional namespaces. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">from </span><span class="s1">lxml</span><span class="s3">.</span><span class="s1">etree </span><span class="s2">import </span><span class="s3">(</span>
+            <span class="s1">Element</span><span class="s3">,</span>
+            <span class="s1">SubElement</span><span class="s3">,</span>
+            <span class="s1">tostring</span><span class="s3">,</span>
+        <span class="s3">)</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">root </span><span class="s3">= </span><span class="s1">Element</span><span class="s3">(</span><span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">prefix_uri</span><span class="s2">}{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">root_name</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">, </span><span class="s1">nsmap</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">namespaces</span><span class="s3">)</span>
+
+        <span class="s2">for </span><span class="s1">d </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">frame_dicts</span><span class="s3">.</span><span class="s1">values</span><span class="s3">():</span>
+            <span class="s1">elem_row </span><span class="s3">= </span><span class="s1">SubElement</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">root</span><span class="s3">, </span><span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">prefix_uri</span><span class="s2">}{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">row_name</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s3">)</span>
+
+            <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">attr_cols </span><span class="s2">and not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">elem_cols</span><span class="s3">:</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">elem_cols </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">d</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">())</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_build_elems</span><span class="s3">(</span><span class="s1">d</span><span class="s3">, </span><span class="s1">elem_row</span><span class="s3">)</span>
+
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">elem_row </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_build_attribs</span><span class="s3">(</span><span class="s1">d</span><span class="s3">, </span><span class="s1">elem_row</span><span class="s3">)</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_build_elems</span><span class="s3">(</span><span class="s1">d</span><span class="s3">, </span><span class="s1">elem_row</span><span class="s3">)</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">out_xml </span><span class="s3">= </span><span class="s1">tostring</span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">root</span><span class="s3">,</span>
+            <span class="s1">pretty_print</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">pretty_print</span><span class="s3">,</span>
+            <span class="s1">method</span><span class="s3">=</span><span class="s4">&quot;xml&quot;</span><span class="s3">,</span>
+            <span class="s1">encoding</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">encoding</span><span class="s3">,</span>
+            <span class="s1">xml_declaration</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">xml_declaration</span><span class="s3">,</span>
+        <span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">stylesheet </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">out_xml </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_transform_doc</span><span class="s3">()</span>
+
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">out_xml</span>
+
+    <span class="s2">def </span><span class="s1">_convert_empty_str_key</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Replace zero-length string in `namespaces`. 
+ 
+        This method will replace '' with None to align to `lxml` 
+        requirement that empty string prefixes are not allowed. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">namespaces </span><span class="s2">and </span><span class="s4">&quot;&quot; </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">namespaces</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">():</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">namespaces</span><span class="s3">[</span><span class="s2">None</span><span class="s3">] = </span><span class="s1">self</span><span class="s3">.</span><span class="s1">namespaces</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">(</span><span class="s4">&quot;&quot;</span><span class="s3">, </span><span class="s4">&quot;default&quot;</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_get_prefix_uri</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s1">uri </span><span class="s3">= </span><span class="s4">&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">namespaces</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">prefix</span><span class="s3">:</span>
+                <span class="s2">try</span><span class="s3">:</span>
+                    <span class="s1">uri </span><span class="s3">= </span><span class="s4">f&quot;</span><span class="s2">{{{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">namespaces</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">prefix</span><span class="s3">]</span><span class="s2">}}}</span><span class="s4">&quot;</span>
+                <span class="s2">except </span><span class="s1">KeyError </span><span class="s2">as </span><span class="s1">err</span><span class="s3">:</span>
+                    <span class="s2">raise </span><span class="s1">KeyError</span><span class="s3">(</span>
+                        <span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">prefix</span><span class="s2">} </span><span class="s4">is not included in namespaces&quot;</span>
+                    <span class="s3">) </span><span class="s2">from </span><span class="s1">err</span>
+            <span class="s2">elif </span><span class="s4">&quot;&quot; </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">namespaces</span><span class="s3">:</span>
+                <span class="s1">uri </span><span class="s3">= </span><span class="s4">f&quot;</span><span class="s2">{{{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">namespaces</span><span class="s3">[</span><span class="s4">''</span><span class="s3">]</span><span class="s2">}}}</span><span class="s4">&quot;</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">uri </span><span class="s3">= </span><span class="s4">&quot;&quot;</span>
+
+        <span class="s2">return </span><span class="s1">uri</span>
+
+    <span class="s3">@</span><span class="s1">cache_readonly</span>
+    <span class="s2">def </span><span class="s1">_sub_element_cls</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">from </span><span class="s1">lxml</span><span class="s3">.</span><span class="s1">etree </span><span class="s2">import </span><span class="s1">SubElement</span>
+
+        <span class="s2">return </span><span class="s1">SubElement</span>
+
+    <span class="s2">def </span><span class="s1">_transform_doc</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; bytes</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Parse stylesheet from file or buffer and run it. 
+ 
+        This method will parse stylesheet object into tree for parsing 
+        conditionally by its specific object type, then transforms 
+        original tree with XSLT script. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">from </span><span class="s1">lxml</span><span class="s3">.</span><span class="s1">etree </span><span class="s2">import </span><span class="s3">(</span>
+            <span class="s1">XSLT</span><span class="s3">,</span>
+            <span class="s1">XMLParser</span><span class="s3">,</span>
+            <span class="s1">fromstring</span><span class="s3">,</span>
+            <span class="s1">parse</span><span class="s3">,</span>
+        <span class="s3">)</span>
+
+        <span class="s1">style_doc </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">stylesheet</span>
+        <span class="s2">assert </span><span class="s1">style_doc </span><span class="s2">is not None  </span><span class="s6"># is ensured by caller</span>
+
+        <span class="s1">handle_data </span><span class="s3">= </span><span class="s1">get_data_from_filepath</span><span class="s3">(</span>
+            <span class="s1">filepath_or_buffer</span><span class="s3">=</span><span class="s1">style_doc</span><span class="s3">,</span>
+            <span class="s1">encoding</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">encoding</span><span class="s3">,</span>
+            <span class="s1">compression</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">compression</span><span class="s3">,</span>
+            <span class="s1">storage_options</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">storage_options</span><span class="s3">,</span>
+        <span class="s3">)</span>
+
+        <span class="s2">with </span><span class="s1">handle_data </span><span class="s2">as </span><span class="s1">xml_data</span><span class="s3">:</span>
+            <span class="s1">curr_parser </span><span class="s3">= </span><span class="s1">XMLParser</span><span class="s3">(</span><span class="s1">encoding</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">encoding</span><span class="s3">)</span>
+
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">xml_data</span><span class="s3">, </span><span class="s1">io</span><span class="s3">.</span><span class="s1">StringIO</span><span class="s3">):</span>
+                <span class="s1">xsl_doc </span><span class="s3">= </span><span class="s1">fromstring</span><span class="s3">(</span>
+                    <span class="s1">xml_data</span><span class="s3">.</span><span class="s1">getvalue</span><span class="s3">().</span><span class="s1">encode</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">encoding</span><span class="s3">), </span><span class="s1">parser</span><span class="s3">=</span><span class="s1">curr_parser</span>
+                <span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">xsl_doc </span><span class="s3">= </span><span class="s1">parse</span><span class="s3">(</span><span class="s1">xml_data</span><span class="s3">, </span><span class="s1">parser</span><span class="s3">=</span><span class="s1">curr_parser</span><span class="s3">)</span>
+
+        <span class="s1">transformer </span><span class="s3">= </span><span class="s1">XSLT</span><span class="s3">(</span><span class="s1">xsl_doc</span><span class="s3">)</span>
+        <span class="s1">new_doc </span><span class="s3">= </span><span class="s1">transformer</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">root</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">bytes</span><span class="s3">(</span><span class="s1">new_doc</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

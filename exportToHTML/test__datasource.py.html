@@ -1,0 +1,352 @@
+<html>
+<head>
+<title>test__datasource.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #5f826b; font-style: italic;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #a5c261;}
+.s7 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test__datasource.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">urllib</span><span class="s2">.</span><span class="s1">request </span><span class="s0">as </span><span class="s1">urllib_request</span>
+<span class="s0">from </span><span class="s1">shutil </span><span class="s0">import </span><span class="s1">rmtree</span>
+<span class="s0">from </span><span class="s1">tempfile </span><span class="s0">import </span><span class="s1">NamedTemporaryFile</span><span class="s2">, </span><span class="s1">mkdtemp</span><span class="s2">, </span><span class="s1">mkstemp</span>
+<span class="s0">from </span><span class="s1">urllib</span><span class="s2">.</span><span class="s1">error </span><span class="s0">import </span><span class="s1">URLError</span>
+<span class="s0">from </span><span class="s1">urllib</span><span class="s2">.</span><span class="s1">parse </span><span class="s0">import </span><span class="s1">urlparse</span>
+
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">import </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">lib</span><span class="s2">.</span><span class="s1">_datasource </span><span class="s0">as </span><span class="s1">datasource</span>
+<span class="s0">from </span><span class="s1">numpy</span><span class="s2">.</span><span class="s1">testing </span><span class="s0">import </span><span class="s1">assert_</span><span class="s2">, </span><span class="s1">assert_equal</span><span class="s2">, </span><span class="s1">assert_raises</span>
+
+
+<span class="s0">def </span><span class="s1">urlopen_stub</span><span class="s2">(</span><span class="s1">url</span><span class="s2">, </span><span class="s1">data</span><span class="s2">=</span><span class="s0">None</span><span class="s2">):</span>
+    <span class="s3">'''Stub to replace urlopen for testing.'''</span>
+    <span class="s0">if </span><span class="s1">url </span><span class="s2">== </span><span class="s1">valid_httpurl</span><span class="s2">():</span>
+        <span class="s1">tmpfile </span><span class="s2">= </span><span class="s1">NamedTemporaryFile</span><span class="s2">(</span><span class="s1">prefix</span><span class="s2">=</span><span class="s4">'urltmp_'</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">tmpfile</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">URLError</span><span class="s2">(</span><span class="s4">'Name or service not known'</span><span class="s2">)</span>
+
+
+<span class="s5"># setup and teardown</span>
+<span class="s1">old_urlopen </span><span class="s2">= </span><span class="s0">None</span>
+
+
+<span class="s0">def </span><span class="s1">setup_module</span><span class="s2">():</span>
+    <span class="s0">global </span><span class="s1">old_urlopen</span>
+
+    <span class="s1">old_urlopen </span><span class="s2">= </span><span class="s1">urllib_request</span><span class="s2">.</span><span class="s1">urlopen</span>
+    <span class="s1">urllib_request</span><span class="s2">.</span><span class="s1">urlopen </span><span class="s2">= </span><span class="s1">urlopen_stub</span>
+
+
+<span class="s0">def </span><span class="s1">teardown_module</span><span class="s2">():</span>
+    <span class="s1">urllib_request</span><span class="s2">.</span><span class="s1">urlopen </span><span class="s2">= </span><span class="s1">old_urlopen</span>
+
+
+<span class="s5"># A valid website for more robust testing</span>
+<span class="s1">http_path </span><span class="s2">= </span><span class="s4">'http://www.google.com/'</span>
+<span class="s1">http_file </span><span class="s2">= </span><span class="s4">'index.html'</span>
+
+<span class="s1">http_fakepath </span><span class="s2">= </span><span class="s4">'http://fake.abc.web/site/'</span>
+<span class="s1">http_fakefile </span><span class="s2">= </span><span class="s4">'fake.txt'</span>
+
+<span class="s1">malicious_files </span><span class="s2">= [</span><span class="s4">'/etc/shadow'</span><span class="s2">, </span><span class="s4">'../../shadow'</span><span class="s2">,</span>
+                   <span class="s4">'..</span><span class="s0">\\</span><span class="s4">system.dat'</span><span class="s2">, </span><span class="s4">'c:</span><span class="s0">\\</span><span class="s4">windows</span><span class="s0">\\</span><span class="s4">system.dat'</span><span class="s2">]</span>
+
+<span class="s1">magic_line </span><span class="s2">= </span><span class="s6">b'three is the magic number'</span>
+
+
+<span class="s5"># Utility functions used by many tests</span>
+<span class="s0">def </span><span class="s1">valid_textfile</span><span class="s2">(</span><span class="s1">filedir</span><span class="s2">):</span>
+    <span class="s5"># Generate and return a valid temporary file.</span>
+    <span class="s1">fd</span><span class="s2">, </span><span class="s1">path </span><span class="s2">= </span><span class="s1">mkstemp</span><span class="s2">(</span><span class="s1">suffix</span><span class="s2">=</span><span class="s4">'.txt'</span><span class="s2">, </span><span class="s1">prefix</span><span class="s2">=</span><span class="s4">'dstmp_'</span><span class="s2">, </span><span class="s1">dir</span><span class="s2">=</span><span class="s1">filedir</span><span class="s2">, </span><span class="s1">text</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">os</span><span class="s2">.</span><span class="s1">close</span><span class="s2">(</span><span class="s1">fd</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">path</span>
+
+
+<span class="s0">def </span><span class="s1">invalid_textfile</span><span class="s2">(</span><span class="s1">filedir</span><span class="s2">):</span>
+    <span class="s5"># Generate and return an invalid filename.</span>
+    <span class="s1">fd</span><span class="s2">, </span><span class="s1">path </span><span class="s2">= </span><span class="s1">mkstemp</span><span class="s2">(</span><span class="s1">suffix</span><span class="s2">=</span><span class="s4">'.txt'</span><span class="s2">, </span><span class="s1">prefix</span><span class="s2">=</span><span class="s4">'dstmp_'</span><span class="s2">, </span><span class="s1">dir</span><span class="s2">=</span><span class="s1">filedir</span><span class="s2">)</span>
+    <span class="s1">os</span><span class="s2">.</span><span class="s1">close</span><span class="s2">(</span><span class="s1">fd</span><span class="s2">)</span>
+    <span class="s1">os</span><span class="s2">.</span><span class="s1">remove</span><span class="s2">(</span><span class="s1">path</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">path</span>
+
+
+<span class="s0">def </span><span class="s1">valid_httpurl</span><span class="s2">():</span>
+    <span class="s0">return </span><span class="s1">http_path </span><span class="s2">+ </span><span class="s1">http_file</span>
+
+
+<span class="s0">def </span><span class="s1">invalid_httpurl</span><span class="s2">():</span>
+    <span class="s0">return </span><span class="s1">http_fakepath </span><span class="s2">+ </span><span class="s1">http_fakefile</span>
+
+
+<span class="s0">def </span><span class="s1">valid_baseurl</span><span class="s2">():</span>
+    <span class="s0">return </span><span class="s1">http_path</span>
+
+
+<span class="s0">def </span><span class="s1">invalid_baseurl</span><span class="s2">():</span>
+    <span class="s0">return </span><span class="s1">http_fakepath</span>
+
+
+<span class="s0">def </span><span class="s1">valid_httpfile</span><span class="s2">():</span>
+    <span class="s0">return </span><span class="s1">http_file</span>
+
+
+<span class="s0">def </span><span class="s1">invalid_httpfile</span><span class="s2">():</span>
+    <span class="s0">return </span><span class="s1">http_fakefile</span>
+
+
+<span class="s0">class </span><span class="s1">TestDataSourceOpen</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">test_ValidHTTP</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">ds </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">DataSource</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">fh </span><span class="s2">= </span><span class="s1">ds</span><span class="s2">.</span><span class="s1">open</span><span class="s2">(</span><span class="s1">valid_httpurl</span><span class="s2">())</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">fh</span><span class="s2">)</span>
+        <span class="s1">fh</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">test_InvalidHTTP</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">ds </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">DataSource</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">url </span><span class="s2">= </span><span class="s1">invalid_httpurl</span><span class="s2">()</span>
+        <span class="s1">assert_raises</span><span class="s2">(</span><span class="s1">OSError</span><span class="s2">, </span><span class="s1">ds</span><span class="s2">.</span><span class="s1">open</span><span class="s2">, </span><span class="s1">url</span><span class="s2">)</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">ds</span><span class="s2">.</span><span class="s1">open</span><span class="s2">(</span><span class="s1">url</span><span class="s2">)</span>
+        <span class="s0">except </span><span class="s1">OSError </span><span class="s0">as </span><span class="s1">e</span><span class="s2">:</span>
+            <span class="s5"># Regression test for bug fixed in r4342.</span>
+            <span class="s1">assert_</span><span class="s2">(</span><span class="s1">e</span><span class="s2">.</span><span class="s1">errno </span><span class="s0">is None</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_InvalidHTTPCacheURLError</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">ds </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">DataSource</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">assert_raises</span><span class="s2">(</span><span class="s1">URLError</span><span class="s2">, </span><span class="s1">ds</span><span class="s2">.</span><span class="s1">_cache</span><span class="s2">, </span><span class="s1">invalid_httpurl</span><span class="s2">())</span>
+
+    <span class="s0">def </span><span class="s1">test_ValidFile</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">ds </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">DataSource</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">local_file </span><span class="s2">= </span><span class="s1">valid_textfile</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">fh </span><span class="s2">= </span><span class="s1">ds</span><span class="s2">.</span><span class="s1">open</span><span class="s2">(</span><span class="s1">local_file</span><span class="s2">)</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">fh</span><span class="s2">)</span>
+        <span class="s1">fh</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">test_InvalidFile</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">ds </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">DataSource</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">invalid_file </span><span class="s2">= </span><span class="s1">invalid_textfile</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">assert_raises</span><span class="s2">(</span><span class="s1">OSError</span><span class="s2">, </span><span class="s1">ds</span><span class="s2">.</span><span class="s1">open</span><span class="s2">, </span><span class="s1">invalid_file</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_ValidGzipFile</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s0">import </span><span class="s1">gzip</span>
+        <span class="s0">except </span><span class="s1">ImportError</span><span class="s2">:</span>
+            <span class="s5"># We don't have the gzip capabilities to test.</span>
+            <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">()</span>
+        <span class="s5"># Test datasource's internal file_opener for Gzip files.</span>
+        <span class="s1">ds </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">DataSource</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">filepath </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">, </span><span class="s4">'foobar.txt.gz'</span><span class="s2">)</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">gzip</span><span class="s2">.</span><span class="s1">open</span><span class="s2">(</span><span class="s1">filepath</span><span class="s2">, </span><span class="s4">'w'</span><span class="s2">)</span>
+        <span class="s1">fp</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s1">magic_line</span><span class="s2">)</span>
+        <span class="s1">fp</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">ds</span><span class="s2">.</span><span class="s1">open</span><span class="s2">(</span><span class="s1">filepath</span><span class="s2">)</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">fp</span><span class="s2">.</span><span class="s1">readline</span><span class="s2">()</span>
+        <span class="s1">fp</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">magic_line</span><span class="s2">, </span><span class="s1">result</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_ValidBz2File</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s0">import </span><span class="s1">bz2</span>
+        <span class="s0">except </span><span class="s1">ImportError</span><span class="s2">:</span>
+            <span class="s5"># We don't have the bz2 capabilities to test.</span>
+            <span class="s1">pytest</span><span class="s2">.</span><span class="s1">skip</span><span class="s2">()</span>
+        <span class="s5"># Test datasource's internal file_opener for BZip2 files.</span>
+        <span class="s1">ds </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">DataSource</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">filepath </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">, </span><span class="s4">'foobar.txt.bz2'</span><span class="s2">)</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">bz2</span><span class="s2">.</span><span class="s1">BZ2File</span><span class="s2">(</span><span class="s1">filepath</span><span class="s2">, </span><span class="s4">'w'</span><span class="s2">)</span>
+        <span class="s1">fp</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s1">magic_line</span><span class="s2">)</span>
+        <span class="s1">fp</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">ds</span><span class="s2">.</span><span class="s1">open</span><span class="s2">(</span><span class="s1">filepath</span><span class="s2">)</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">fp</span><span class="s2">.</span><span class="s1">readline</span><span class="s2">()</span>
+        <span class="s1">fp</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">magic_line</span><span class="s2">, </span><span class="s1">result</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">TestDataSourceExists</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">test_ValidHTTP</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">ds </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">DataSource</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">ds</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">(</span><span class="s1">valid_httpurl</span><span class="s2">()))</span>
+
+    <span class="s0">def </span><span class="s1">test_InvalidHTTP</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">ds </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">DataSource</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">ds</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">(</span><span class="s1">invalid_httpurl</span><span class="s2">()), </span><span class="s0">False</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_ValidFile</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s5"># Test valid file in destpath</span>
+        <span class="s1">ds </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">DataSource</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">tmpfile </span><span class="s2">= </span><span class="s1">valid_textfile</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">ds</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">(</span><span class="s1">tmpfile</span><span class="s2">))</span>
+        <span class="s5"># Test valid local file not in destpath</span>
+        <span class="s1">localdir </span><span class="s2">= </span><span class="s1">mkdtemp</span><span class="s2">()</span>
+        <span class="s1">tmpfile </span><span class="s2">= </span><span class="s1">valid_textfile</span><span class="s2">(</span><span class="s1">localdir</span><span class="s2">)</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">ds</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">(</span><span class="s1">tmpfile</span><span class="s2">))</span>
+        <span class="s1">rmtree</span><span class="s2">(</span><span class="s1">localdir</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_InvalidFile</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">ds </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">DataSource</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">tmpfile </span><span class="s2">= </span><span class="s1">invalid_textfile</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">ds</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">(</span><span class="s1">tmpfile</span><span class="s2">), </span><span class="s0">False</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">TestDataSourceAbspath</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">test_ValidHTTP</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">ds </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">DataSource</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">_</span><span class="s2">, </span><span class="s1">netloc</span><span class="s2">, </span><span class="s1">upath</span><span class="s2">, </span><span class="s1">_</span><span class="s2">, </span><span class="s1">_</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">urlparse</span><span class="s2">(</span><span class="s1">valid_httpurl</span><span class="s2">())</span>
+        <span class="s1">local_path </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">, </span><span class="s1">netloc</span><span class="s2">,</span>
+                                  <span class="s1">upath</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">sep</span><span class="s2">).</span><span class="s1">strip</span><span class="s2">(</span><span class="s4">'/'</span><span class="s2">))</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">local_path</span><span class="s2">, </span><span class="s1">ds</span><span class="s2">.</span><span class="s1">abspath</span><span class="s2">(</span><span class="s1">valid_httpurl</span><span class="s2">()))</span>
+
+    <span class="s0">def </span><span class="s1">test_ValidFile</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">ds </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">DataSource</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">tmpfile </span><span class="s2">= </span><span class="s1">valid_textfile</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">tmpfilename </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s1">tmpfile</span><span class="s2">)[-</span><span class="s7">1</span><span class="s2">]</span>
+        <span class="s5"># Test with filename only</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">tmpfile</span><span class="s2">, </span><span class="s1">ds</span><span class="s2">.</span><span class="s1">abspath</span><span class="s2">(</span><span class="s1">tmpfilename</span><span class="s2">))</span>
+        <span class="s5"># Test filename with complete path</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">tmpfile</span><span class="s2">, </span><span class="s1">ds</span><span class="s2">.</span><span class="s1">abspath</span><span class="s2">(</span><span class="s1">tmpfile</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">test_InvalidHTTP</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">ds </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">DataSource</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">_</span><span class="s2">, </span><span class="s1">netloc</span><span class="s2">, </span><span class="s1">upath</span><span class="s2">, </span><span class="s1">_</span><span class="s2">, </span><span class="s1">_</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">urlparse</span><span class="s2">(</span><span class="s1">invalid_httpurl</span><span class="s2">())</span>
+        <span class="s1">invalidhttp </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">, </span><span class="s1">netloc</span><span class="s2">,</span>
+                                   <span class="s1">upath</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">sep</span><span class="s2">).</span><span class="s1">strip</span><span class="s2">(</span><span class="s4">'/'</span><span class="s2">))</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">invalidhttp </span><span class="s2">!= </span><span class="s1">ds</span><span class="s2">.</span><span class="s1">abspath</span><span class="s2">(</span><span class="s1">valid_httpurl</span><span class="s2">()))</span>
+
+    <span class="s0">def </span><span class="s1">test_InvalidFile</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">ds </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">DataSource</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">invalidfile </span><span class="s2">= </span><span class="s1">valid_textfile</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">tmpfile </span><span class="s2">= </span><span class="s1">valid_textfile</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">tmpfilename </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s1">tmpfile</span><span class="s2">)[-</span><span class="s7">1</span><span class="s2">]</span>
+        <span class="s5"># Test with filename only</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">invalidfile </span><span class="s2">!= </span><span class="s1">ds</span><span class="s2">.</span><span class="s1">abspath</span><span class="s2">(</span><span class="s1">tmpfilename</span><span class="s2">))</span>
+        <span class="s5"># Test filename with complete path</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">invalidfile </span><span class="s2">!= </span><span class="s1">ds</span><span class="s2">.</span><span class="s1">abspath</span><span class="s2">(</span><span class="s1">tmpfile</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">test_sandboxing</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">ds </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">DataSource</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">tmpfile </span><span class="s2">= </span><span class="s1">valid_textfile</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">tmpfilename </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s1">tmpfile</span><span class="s2">)[-</span><span class="s7">1</span><span class="s2">]</span>
+
+        <span class="s1">path </span><span class="s2">= </span><span class="s0">lambda </span><span class="s1">x</span><span class="s2">: </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">abspath</span><span class="s2">(</span><span class="s1">ds</span><span class="s2">.</span><span class="s1">abspath</span><span class="s2">(</span><span class="s1">x</span><span class="s2">))</span>
+
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">path</span><span class="s2">(</span><span class="s1">valid_httpurl</span><span class="s2">()).</span><span class="s1">startswith</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)))</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">path</span><span class="s2">(</span><span class="s1">invalid_httpurl</span><span class="s2">()).</span><span class="s1">startswith</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)))</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">path</span><span class="s2">(</span><span class="s1">tmpfile</span><span class="s2">).</span><span class="s1">startswith</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)))</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">path</span><span class="s2">(</span><span class="s1">tmpfilename</span><span class="s2">).</span><span class="s1">startswith</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)))</span>
+        <span class="s0">for </span><span class="s1">fn </span><span class="s0">in </span><span class="s1">malicious_files</span><span class="s2">:</span>
+            <span class="s1">assert_</span><span class="s2">(</span><span class="s1">path</span><span class="s2">(</span><span class="s1">http_path </span><span class="s2">+ </span><span class="s1">fn</span><span class="s2">).</span><span class="s1">startswith</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)))</span>
+            <span class="s1">assert_</span><span class="s2">(</span><span class="s1">path</span><span class="s2">(</span><span class="s1">fn</span><span class="s2">).</span><span class="s1">startswith</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)))</span>
+
+    <span class="s0">def </span><span class="s1">test_windows_os_sep</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">orig_os_sep </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">sep</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">os</span><span class="s2">.</span><span class="s1">sep </span><span class="s2">= </span><span class="s4">'</span><span class="s0">\\</span><span class="s4">'</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">test_ValidHTTP</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">test_ValidFile</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">test_InvalidHTTP</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">test_InvalidFile</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">test_sandboxing</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s0">finally</span><span class="s2">:</span>
+            <span class="s1">os</span><span class="s2">.</span><span class="s1">sep </span><span class="s2">= </span><span class="s1">orig_os_sep</span>
+
+
+<span class="s0">class </span><span class="s1">TestRepositoryAbspath</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">test_ValidHTTP</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">repos </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">Repository</span><span class="s2">(</span><span class="s1">valid_baseurl</span><span class="s2">(), </span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">_</span><span class="s2">, </span><span class="s1">netloc</span><span class="s2">, </span><span class="s1">upath</span><span class="s2">, </span><span class="s1">_</span><span class="s2">, </span><span class="s1">_</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">urlparse</span><span class="s2">(</span><span class="s1">valid_httpurl</span><span class="s2">())</span>
+        <span class="s1">local_path </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">repos</span><span class="s2">.</span><span class="s1">_destpath</span><span class="s2">, </span><span class="s1">netloc</span><span class="s2">,</span>
+                                  <span class="s1">upath</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">sep</span><span class="s2">).</span><span class="s1">strip</span><span class="s2">(</span><span class="s4">'/'</span><span class="s2">))</span>
+        <span class="s1">filepath </span><span class="s2">= </span><span class="s1">repos</span><span class="s2">.</span><span class="s1">abspath</span><span class="s2">(</span><span class="s1">valid_httpfile</span><span class="s2">())</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">local_path</span><span class="s2">, </span><span class="s1">filepath</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_sandboxing</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">repos </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">Repository</span><span class="s2">(</span><span class="s1">valid_baseurl</span><span class="s2">(), </span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">path </span><span class="s2">= </span><span class="s0">lambda </span><span class="s1">x</span><span class="s2">: </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">abspath</span><span class="s2">(</span><span class="s1">repos</span><span class="s2">.</span><span class="s1">abspath</span><span class="s2">(</span><span class="s1">x</span><span class="s2">))</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">path</span><span class="s2">(</span><span class="s1">valid_httpfile</span><span class="s2">()).</span><span class="s1">startswith</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)))</span>
+        <span class="s0">for </span><span class="s1">fn </span><span class="s0">in </span><span class="s1">malicious_files</span><span class="s2">:</span>
+            <span class="s1">assert_</span><span class="s2">(</span><span class="s1">path</span><span class="s2">(</span><span class="s1">http_path </span><span class="s2">+ </span><span class="s1">fn</span><span class="s2">).</span><span class="s1">startswith</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)))</span>
+            <span class="s1">assert_</span><span class="s2">(</span><span class="s1">path</span><span class="s2">(</span><span class="s1">fn</span><span class="s2">).</span><span class="s1">startswith</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)))</span>
+
+    <span class="s0">def </span><span class="s1">test_windows_os_sep</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">orig_os_sep </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">sep</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">os</span><span class="s2">.</span><span class="s1">sep </span><span class="s2">= </span><span class="s4">'</span><span class="s0">\\</span><span class="s4">'</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">test_ValidHTTP</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">test_sandboxing</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s0">finally</span><span class="s2">:</span>
+            <span class="s1">os</span><span class="s2">.</span><span class="s1">sep </span><span class="s2">= </span><span class="s1">orig_os_sep</span>
+
+
+<span class="s0">class </span><span class="s1">TestRepositoryExists</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">test_ValidFile</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s5"># Create local temp file</span>
+        <span class="s1">repos </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">Repository</span><span class="s2">(</span><span class="s1">valid_baseurl</span><span class="s2">(), </span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">tmpfile </span><span class="s2">= </span><span class="s1">valid_textfile</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">repos</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">(</span><span class="s1">tmpfile</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">test_InvalidFile</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">repos </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">Repository</span><span class="s2">(</span><span class="s1">valid_baseurl</span><span class="s2">(), </span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">tmpfile </span><span class="s2">= </span><span class="s1">invalid_textfile</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">assert_equal</span><span class="s2">(</span><span class="s1">repos</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">(</span><span class="s1">tmpfile</span><span class="s2">), </span><span class="s0">False</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_RemoveHTTPFile</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">repos </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">Repository</span><span class="s2">(</span><span class="s1">valid_baseurl</span><span class="s2">(), </span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">repos</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">(</span><span class="s1">valid_httpurl</span><span class="s2">()))</span>
+
+    <span class="s0">def </span><span class="s1">test_CachedHTTPFile</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">localfile </span><span class="s2">= </span><span class="s1">valid_httpurl</span><span class="s2">()</span>
+        <span class="s5"># Create a locally cached temp file with a URL based</span>
+        <span class="s5"># directory structure.  This is similar to what Repository.open</span>
+        <span class="s5"># would do.</span>
+        <span class="s1">repos </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">Repository</span><span class="s2">(</span><span class="s1">valid_baseurl</span><span class="s2">(), </span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">_</span><span class="s2">, </span><span class="s1">netloc</span><span class="s2">, </span><span class="s1">_</span><span class="s2">, </span><span class="s1">_</span><span class="s2">, </span><span class="s1">_</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">urlparse</span><span class="s2">(</span><span class="s1">localfile</span><span class="s2">)</span>
+        <span class="s1">local_path </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">repos</span><span class="s2">.</span><span class="s1">_destpath</span><span class="s2">, </span><span class="s1">netloc</span><span class="s2">)</span>
+        <span class="s1">os</span><span class="s2">.</span><span class="s1">mkdir</span><span class="s2">(</span><span class="s1">local_path</span><span class="s2">, </span><span class="s7">0o0700</span><span class="s2">)</span>
+        <span class="s1">tmpfile </span><span class="s2">= </span><span class="s1">valid_textfile</span><span class="s2">(</span><span class="s1">local_path</span><span class="s2">)</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">repos</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">(</span><span class="s1">tmpfile</span><span class="s2">))</span>
+
+
+<span class="s0">class </span><span class="s1">TestOpenFunc</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">test_DataSourceOpen</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">tmp_path</span><span class="s2">):</span>
+        <span class="s1">local_file </span><span class="s2">= </span><span class="s1">valid_textfile</span><span class="s2">(</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s5"># Test case where destpath is passed in</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">open</span><span class="s2">(</span><span class="s1">local_file</span><span class="s2">, </span><span class="s1">destpath</span><span class="s2">=</span><span class="s1">tmp_path</span><span class="s2">)</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">)</span>
+        <span class="s1">fp</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s5"># Test case where default destpath is used</span>
+        <span class="s1">fp </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">open</span><span class="s2">(</span><span class="s1">local_file</span><span class="s2">)</span>
+        <span class="s1">assert_</span><span class="s2">(</span><span class="s1">fp</span><span class="s2">)</span>
+        <span class="s1">fp</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+
+<span class="s0">def </span><span class="s1">test_del_attr_handling</span><span class="s2">():</span>
+    <span class="s5"># DataSource __del__ can be called</span>
+    <span class="s5"># even if __init__ fails when the</span>
+    <span class="s5"># Exception object is caught by the</span>
+    <span class="s5"># caller as happens in refguide_check</span>
+    <span class="s5"># is_deprecated() function</span>
+
+    <span class="s1">ds </span><span class="s2">= </span><span class="s1">datasource</span><span class="s2">.</span><span class="s1">DataSource</span><span class="s2">()</span>
+    <span class="s5"># simulate failed __init__ by removing key attribute</span>
+    <span class="s5"># produced within __init__ and expected by __del__</span>
+    <span class="s0">del </span><span class="s1">ds</span><span class="s2">.</span><span class="s1">_istmpdest</span>
+    <span class="s5"># should not raise an AttributeError if __del__</span>
+    <span class="s5"># gracefully handles failed __init__:</span>
+    <span class="s1">ds</span><span class="s2">.</span><span class="s1">__del__</span><span class="s2">()</span>
+</pre>
+</body>
+</html>

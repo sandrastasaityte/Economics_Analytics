@@ -1,0 +1,455 @@
+<html>
+<head>
+<title>col.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+col.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s1">collections</span><span class="s2">.</span><span class="s1">abc </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">Callable</span><span class="s2">,</span>
+    <span class="s1">Hashable</span><span class="s2">,</span>
+    <span class="s1">Sequence</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s2">,</span>
+    <span class="s1">Any</span><span class="s2">,</span>
+    <span class="s1">NoReturn</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s0">from </span><span class="s1">pandas</span><span class="s2">.</span><span class="s1">util</span><span class="s2">.</span><span class="s1">_decorators </span><span class="s0">import </span><span class="s1">set_module</span>
+
+<span class="s0">if </span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">pandas </span><span class="s0">import </span><span class="s2">(</span>
+        <span class="s1">DataFrame</span><span class="s2">,</span>
+        <span class="s1">Series</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+
+<span class="s3"># Used only for generating the str repr of expressions.</span>
+<span class="s1">_OP_SYMBOLS </span><span class="s2">= {</span>
+    <span class="s4">&quot;__add__&quot;</span><span class="s2">: </span><span class="s4">&quot;+&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__radd__&quot;</span><span class="s2">: </span><span class="s4">&quot;+&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__sub__&quot;</span><span class="s2">: </span><span class="s4">&quot;-&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__rsub__&quot;</span><span class="s2">: </span><span class="s4">&quot;-&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__mul__&quot;</span><span class="s2">: </span><span class="s4">&quot;*&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__rmul__&quot;</span><span class="s2">: </span><span class="s4">&quot;*&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__truediv__&quot;</span><span class="s2">: </span><span class="s4">&quot;/&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__rtruediv__&quot;</span><span class="s2">: </span><span class="s4">&quot;/&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__floordiv__&quot;</span><span class="s2">: </span><span class="s4">&quot;//&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__rfloordiv__&quot;</span><span class="s2">: </span><span class="s4">&quot;//&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__mod__&quot;</span><span class="s2">: </span><span class="s4">&quot;%&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__rmod__&quot;</span><span class="s2">: </span><span class="s4">&quot;%&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__ge__&quot;</span><span class="s2">: </span><span class="s4">&quot;&gt;=&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__gt__&quot;</span><span class="s2">: </span><span class="s4">&quot;&gt;&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__le__&quot;</span><span class="s2">: </span><span class="s4">&quot;&lt;=&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__lt__&quot;</span><span class="s2">: </span><span class="s4">&quot;&lt;&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__eq__&quot;</span><span class="s2">: </span><span class="s4">&quot;==&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__ne__&quot;</span><span class="s2">: </span><span class="s4">&quot;!=&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__and__&quot;</span><span class="s2">: </span><span class="s4">&quot;&amp;&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__rand__&quot;</span><span class="s2">: </span><span class="s4">&quot;&amp;&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__or__&quot;</span><span class="s2">: </span><span class="s4">&quot;|&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__ror__&quot;</span><span class="s2">: </span><span class="s4">&quot;|&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__xor__&quot;</span><span class="s2">: </span><span class="s4">&quot;^&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;__rxor__&quot;</span><span class="s2">: </span><span class="s4">&quot;^&quot;</span><span class="s2">,</span>
+<span class="s2">}</span>
+
+
+<span class="s0">def </span><span class="s1">_parse_args</span><span class="s2">(</span><span class="s1">df</span><span class="s2">: </span><span class="s1">DataFrame</span><span class="s2">, *</span><span class="s1">args</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">Any</span><span class="s2">, ...]:</span>
+    <span class="s3"># Parse `args`, evaluating any expressions we encounter.</span>
+    <span class="s0">return </span><span class="s1">tuple</span><span class="s2">(</span>
+        <span class="s1">x</span><span class="s2">.</span><span class="s1">_eval_expression</span><span class="s2">(</span><span class="s1">df</span><span class="s2">) </span><span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">Expression</span><span class="s2">) </span><span class="s0">else </span><span class="s1">x </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">args</span>
+    <span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_parse_kwargs</span><span class="s2">(</span><span class="s1">df</span><span class="s2">: </span><span class="s1">DataFrame</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">]:</span>
+    <span class="s3"># Parse `kwargs`, evaluating any expressions we encounter.</span>
+    <span class="s0">return </span><span class="s2">{</span>
+        <span class="s1">key</span><span class="s2">: </span><span class="s1">val</span><span class="s2">.</span><span class="s1">_eval_expression</span><span class="s2">(</span><span class="s1">df</span><span class="s2">) </span><span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">val</span><span class="s2">, </span><span class="s1">Expression</span><span class="s2">) </span><span class="s0">else </span><span class="s1">val</span>
+        <span class="s0">for </span><span class="s1">key</span><span class="s2">, </span><span class="s1">val </span><span class="s0">in </span><span class="s1">kwargs</span><span class="s2">.</span><span class="s1">items</span><span class="s2">()</span>
+    <span class="s2">}</span>
+
+
+<span class="s0">def </span><span class="s1">_pretty_print_args_kwargs</span><span class="s2">(*</span><span class="s1">args</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+    <span class="s1">inputs_repr </span><span class="s2">= </span><span class="s4">&quot;, &quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">repr</span><span class="s2">(</span><span class="s1">arg</span><span class="s2">) </span><span class="s0">for </span><span class="s1">arg </span><span class="s0">in </span><span class="s1">args</span><span class="s2">)</span>
+    <span class="s1">kwargs_repr </span><span class="s2">= </span><span class="s4">&quot;, &quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">k</span><span class="s0">}</span><span class="s4">=</span><span class="s0">{</span><span class="s1">v</span><span class="s0">!r}</span><span class="s4">&quot; </span><span class="s0">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">v </span><span class="s0">in </span><span class="s1">kwargs</span><span class="s2">.</span><span class="s1">items</span><span class="s2">())</span>
+
+    <span class="s1">all_args </span><span class="s2">= []</span>
+    <span class="s0">if </span><span class="s1">inputs_repr</span><span class="s2">:</span>
+        <span class="s1">all_args</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">inputs_repr</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">kwargs_repr</span><span class="s2">:</span>
+        <span class="s1">all_args</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">kwargs_repr</span><span class="s2">)</span>
+
+    <span class="s0">return </span><span class="s4">&quot;, &quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">all_args</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">set_module</span><span class="s2">(</span><span class="s4">&quot;pandas.api.typing&quot;</span><span class="s2">)</span>
+<span class="s0">class </span><span class="s1">Expression</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Class representing a deferred column. 
+ 
+    This is not meant to be instantiated directly. Instead, use :meth:`pandas.col`. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">func</span><span class="s2">: </span><span class="s1">Callable</span><span class="s2">[[</span><span class="s1">DataFrame</span><span class="s2">], </span><span class="s1">Any</span><span class="s2">],</span>
+        <span class="s1">repr_str</span><span class="s2">: </span><span class="s1">str</span><span class="s2">,</span>
+        <span class="s1">needs_parenthese</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_func </span><span class="s2">= </span><span class="s1">func</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_repr_str </span><span class="s2">= </span><span class="s1">repr_str</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_needs_parentheses </span><span class="s2">= </span><span class="s1">needs_parenthese</span>
+
+    <span class="s0">def </span><span class="s1">_eval_expression</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">df</span><span class="s2">: </span><span class="s1">DataFrame</span><span class="s2">) </span><span class="s1">-&gt; Any</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_func</span><span class="s2">(</span><span class="s1">df</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_with_op</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">op</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">, </span><span class="s1">repr_str</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">needs_parentheses</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">True</span>
+    <span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s1">Expression</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">Expression</span><span class="s2">(</span>
+                <span class="s0">lambda </span><span class="s1">df</span><span class="s2">: </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_eval_expression</span><span class="s2">(</span><span class="s1">df</span><span class="s2">), </span><span class="s1">op</span><span class="s2">)(</span>
+                    <span class="s1">other</span><span class="s2">.</span><span class="s1">_eval_expression</span><span class="s2">(</span><span class="s1">df</span><span class="s2">)</span>
+                <span class="s2">),</span>
+                <span class="s1">repr_str</span><span class="s2">,</span>
+                <span class="s1">needs_parenthese</span><span class="s2">=</span><span class="s1">needs_parentheses</span><span class="s2">,</span>
+            <span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">Expression</span><span class="s2">(</span>
+                <span class="s0">lambda </span><span class="s1">df</span><span class="s2">: </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_eval_expression</span><span class="s2">(</span><span class="s1">df</span><span class="s2">), </span><span class="s1">op</span><span class="s2">)(</span><span class="s1">other</span><span class="s2">),</span>
+                <span class="s1">repr_str</span><span class="s2">,</span>
+                <span class="s1">needs_parenthese</span><span class="s2">=</span><span class="s1">needs_parentheses</span><span class="s2">,</span>
+            <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]:</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_needs_parentheses</span><span class="s2">:</span>
+            <span class="s1">self_repr </span><span class="s2">= </span><span class="s4">f&quot;(</span><span class="s0">{</span><span class="s1">self</span><span class="s0">!r}</span><span class="s4">)&quot;</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">self_repr </span><span class="s2">= </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self</span><span class="s0">!r}</span><span class="s4">&quot;</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s1">Expression</span><span class="s2">) </span><span class="s0">and </span><span class="s1">other</span><span class="s2">.</span><span class="s1">_needs_parentheses</span><span class="s2">:</span>
+            <span class="s1">other_repr </span><span class="s2">= </span><span class="s4">f&quot;(</span><span class="s0">{</span><span class="s1">other</span><span class="s0">!r}</span><span class="s4">)&quot;</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">other_repr </span><span class="s2">= </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">other</span><span class="s0">!r}</span><span class="s4">&quot;</span>
+        <span class="s0">return </span><span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr</span>
+
+    <span class="s3"># Binary ops</span>
+    <span class="s0">def </span><span class="s1">__add__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__add__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">} </span><span class="s4">+ </span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__radd__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__radd__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">} </span><span class="s4">+ </span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__sub__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__sub__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">} </span><span class="s4">- </span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__rsub__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__rsub__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">} </span><span class="s4">- </span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__mul__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__mul__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">} </span><span class="s4">* </span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__rmul__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__rmul__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">} </span><span class="s4">* </span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__matmul__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__matmul__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">} </span><span class="s4">@ </span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__rmatmul__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__rmatmul__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">} </span><span class="s4">@ </span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__pow__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__pow__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">} </span><span class="s4">** </span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__rpow__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__rpow__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">} </span><span class="s4">** </span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__truediv__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__truediv__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">} </span><span class="s4">/ </span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__rtruediv__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__rtruediv__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">} </span><span class="s4">/ </span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__floordiv__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__floordiv__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">} </span><span class="s4">// </span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__rfloordiv__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__rfloordiv__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">} </span><span class="s4">// </span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__ge__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__ge__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">} </span><span class="s4">&gt;= </span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__gt__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__gt__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">} </span><span class="s4">&gt; </span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__le__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__le__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">} </span><span class="s4">&lt;= </span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__lt__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__lt__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">} </span><span class="s4">&lt; </span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__eq__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">object</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:  </span><span class="s3"># type: ignore[override]</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__eq__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">} </span><span class="s4">== </span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__ne__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">object</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:  </span><span class="s3"># type: ignore[override]</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__ne__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">} </span><span class="s4">!= </span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__mod__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__mod__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">} </span><span class="s4">% </span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__rmod__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__rmod__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">} </span><span class="s4">% </span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s3"># Logical ops</span>
+    <span class="s0">def </span><span class="s1">__and__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__and__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">} </span><span class="s4">&amp; </span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__rand__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__rand__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">} </span><span class="s4">&amp; </span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__or__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__or__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">} </span><span class="s4">| </span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__ror__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__ror__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">} </span><span class="s4">| </span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__xor__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__xor__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">} </span><span class="s4">^ </span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__rxor__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s1">self_repr</span><span class="s2">, </span><span class="s1">other_repr </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maybe_wrap_parentheses</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span><span class="s4">&quot;__rxor__&quot;</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">other_repr</span><span class="s0">} </span><span class="s4">^ </span><span class="s0">{</span><span class="s1">self_repr</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__invert__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">Expression</span><span class="s2">(</span>
+            <span class="s0">lambda </span><span class="s1">df</span><span class="s2">: ~</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_eval_expression</span><span class="s2">(</span><span class="s1">df</span><span class="s2">),</span>
+            <span class="s4">f&quot;~</span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_repr_str</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s2">,</span>
+            <span class="s1">needs_parenthese</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,</span>
+        <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__neg__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_needs_parentheses</span><span class="s2">:</span>
+            <span class="s1">repr_str </span><span class="s2">= </span><span class="s4">f&quot;-(</span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_repr_str</span><span class="s0">}</span><span class="s4">)&quot;</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">repr_str </span><span class="s2">= </span><span class="s4">f&quot;-</span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_repr_str</span><span class="s0">}</span><span class="s4">&quot;</span>
+        <span class="s0">return </span><span class="s1">Expression</span><span class="s2">(</span>
+            <span class="s0">lambda </span><span class="s1">df</span><span class="s2">: -</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_eval_expression</span><span class="s2">(</span><span class="s1">df</span><span class="s2">),</span>
+            <span class="s1">repr_str</span><span class="s2">,</span>
+            <span class="s1">needs_parenthese</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,</span>
+        <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__pos__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_needs_parentheses</span><span class="s2">:</span>
+            <span class="s1">repr_str </span><span class="s2">= </span><span class="s4">f&quot;+(</span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_repr_str</span><span class="s0">}</span><span class="s4">)&quot;</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">repr_str </span><span class="s2">= </span><span class="s4">f&quot;+</span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_repr_str</span><span class="s0">}</span><span class="s4">&quot;</span>
+        <span class="s0">return </span><span class="s1">Expression</span><span class="s2">(</span>
+            <span class="s0">lambda </span><span class="s1">df</span><span class="s2">: +</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_eval_expression</span><span class="s2">(</span><span class="s1">df</span><span class="s2">),</span>
+            <span class="s1">repr_str</span><span class="s2">,</span>
+            <span class="s1">needs_parenthese</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,</span>
+        <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__abs__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">Expression</span><span class="s2">(</span>
+            <span class="s0">lambda </span><span class="s1">df</span><span class="s2">: </span><span class="s1">abs</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_eval_expression</span><span class="s2">(</span><span class="s1">df</span><span class="s2">)),</span>
+            <span class="s4">f&quot;abs(</span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_repr_str</span><span class="s0">}</span><span class="s4">)&quot;</span><span class="s2">,</span>
+            <span class="s1">needs_parenthese</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,</span>
+        <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__array_ufunc__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">ufunc</span><span class="s2">: </span><span class="s1">Callable</span><span class="s2">[..., </span><span class="s1">Any</span><span class="s2">], </span><span class="s1">method</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, *</span><span class="s1">inputs</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">Any</span>
+    <span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s0">def </span><span class="s1">func</span><span class="s2">(</span><span class="s1">df</span><span class="s2">: </span><span class="s1">DataFrame</span><span class="s2">) </span><span class="s1">-&gt; Any</span><span class="s2">:</span>
+            <span class="s1">parsed_inputs </span><span class="s2">= </span><span class="s1">_parse_args</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, *</span><span class="s1">inputs</span><span class="s2">)</span>
+            <span class="s1">parsed_kwargs </span><span class="s2">= </span><span class="s1">_parse_kwargs</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, *</span><span class="s1">kwargs</span><span class="s2">)</span>
+            <span class="s0">return </span><span class="s1">ufunc</span><span class="s2">(*</span><span class="s1">parsed_inputs</span><span class="s2">, **</span><span class="s1">parsed_kwargs</span><span class="s2">)</span>
+
+        <span class="s1">args_str </span><span class="s2">= </span><span class="s1">_pretty_print_args_kwargs</span><span class="s2">(*</span><span class="s1">inputs</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+        <span class="s1">repr_str </span><span class="s2">= </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">ufunc</span><span class="s2">.</span><span class="s1">__name__</span><span class="s0">}</span><span class="s4">(</span><span class="s0">{</span><span class="s1">args_str</span><span class="s0">}</span><span class="s4">)&quot;</span>
+
+        <span class="s0">return </span><span class="s1">Expression</span><span class="s2">(</span><span class="s1">func</span><span class="s2">, </span><span class="s1">repr_str</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__getitem__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">item</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_with_op</span><span class="s2">(</span>
+            <span class="s4">&quot;__getitem__&quot;</span><span class="s2">, </span><span class="s1">item</span><span class="s2">, </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self</span><span class="s0">!r}</span><span class="s4">[</span><span class="s0">{</span><span class="s1">item</span><span class="s0">!r}</span><span class="s4">]&quot;</span><span class="s2">, </span><span class="s1">needs_parentheses</span><span class="s2">=</span><span class="s0">True</span>
+        <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_call_with_func</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">func</span><span class="s2">: </span><span class="s1">Callable</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s0">def </span><span class="s1">wrapped</span><span class="s2">(</span><span class="s1">df</span><span class="s2">: </span><span class="s1">DataFrame</span><span class="s2">) </span><span class="s1">-&gt; Any</span><span class="s2">:</span>
+            <span class="s1">parsed_kwargs </span><span class="s2">= </span><span class="s1">_parse_kwargs</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+            <span class="s0">return </span><span class="s1">func</span><span class="s2">(**</span><span class="s1">parsed_kwargs</span><span class="s2">)</span>
+
+        <span class="s1">args_str </span><span class="s2">= </span><span class="s1">_pretty_print_args_kwargs</span><span class="s2">(**</span><span class="s1">kwargs</span><span class="s2">)</span>
+        <span class="s1">repr_str </span><span class="s2">= </span><span class="s1">func</span><span class="s2">.</span><span class="s1">__name__ </span><span class="s2">+ </span><span class="s4">&quot;(&quot; </span><span class="s2">+ </span><span class="s1">args_str </span><span class="s2">+ </span><span class="s4">&quot;)&quot;</span>
+
+        <span class="s0">return </span><span class="s1">Expression</span><span class="s2">(</span><span class="s1">wrapped</span><span class="s2">, </span><span class="s1">repr_str</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__call__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, *</span><span class="s1">args</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s0">def </span><span class="s1">func</span><span class="s2">(</span><span class="s1">df</span><span class="s2">: </span><span class="s1">DataFrame</span><span class="s2">, *</span><span class="s1">args</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Any</span><span class="s2">:</span>
+            <span class="s1">parsed_args </span><span class="s2">= </span><span class="s1">_parse_args</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, *</span><span class="s1">args</span><span class="s2">)</span>
+            <span class="s1">parsed_kwargs </span><span class="s2">= </span><span class="s1">_parse_kwargs</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+            <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_eval_expression</span><span class="s2">(</span><span class="s1">df</span><span class="s2">)(*</span><span class="s1">parsed_args</span><span class="s2">, **</span><span class="s1">parsed_kwargs</span><span class="s2">)</span>
+
+        <span class="s1">args_str </span><span class="s2">= </span><span class="s1">_pretty_print_args_kwargs</span><span class="s2">(*</span><span class="s1">args</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+        <span class="s1">repr_str </span><span class="s2">= </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_repr_str</span><span class="s0">}</span><span class="s4">(</span><span class="s0">{</span><span class="s1">args_str</span><span class="s0">}</span><span class="s4">)&quot;</span>
+        <span class="s0">return </span><span class="s1">Expression</span><span class="s2">(</span><span class="s0">lambda </span><span class="s1">df</span><span class="s2">: </span><span class="s1">func</span><span class="s2">(</span><span class="s1">df</span><span class="s2">, *</span><span class="s1">args</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">), </span><span class="s1">repr_str</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__getattr__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, /) </span><span class="s1">-&gt; Any</span><span class="s2">:</span>
+        <span class="s1">repr_str </span><span class="s2">= </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self</span><span class="s0">!r}</span><span class="s4">&quot;</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_needs_parentheses</span><span class="s2">:</span>
+            <span class="s1">repr_str </span><span class="s2">= </span><span class="s4">f&quot;(</span><span class="s0">{</span><span class="s1">repr_str</span><span class="s0">}</span><span class="s4">)&quot;</span>
+        <span class="s1">repr_str </span><span class="s2">+= </span><span class="s4">f&quot;.</span><span class="s0">{</span><span class="s1">name</span><span class="s0">}</span><span class="s4">&quot;</span>
+        <span class="s0">return </span><span class="s1">Expression</span><span class="s2">(</span><span class="s0">lambda </span><span class="s1">df</span><span class="s2">: </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_eval_expression</span><span class="s2">(</span><span class="s1">df</span><span class="s2">), </span><span class="s1">name</span><span class="s2">), </span><span class="s1">repr_str</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">case_when</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">caselist</span><span class="s2">: </span><span class="s1">Sequence</span><span class="s2">[</span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">Any</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">]]) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Create an expression that evaluates :meth:`Series.case_when` in a DataFrame 
+        context. 
+ 
+        This is intended to enable patterns like:: 
+ 
+            df.assign(result=pd.col(&quot;a&quot;).case_when([(pd.col(&quot;b&quot;) &gt; 0, 1)])) 
+ 
+        where conditions/replacements may reference other columns via ``pd.col``. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s0">def </span><span class="s1">func</span><span class="s2">(</span><span class="s1">df</span><span class="s2">: </span><span class="s1">DataFrame</span><span class="s2">) </span><span class="s1">-&gt; Any</span><span class="s2">:</span>
+            <span class="s1">ser </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_eval_expression</span><span class="s2">(</span><span class="s1">df</span><span class="s2">)</span>
+            <span class="s1">evaluated </span><span class="s2">= []</span>
+            <span class="s0">for </span><span class="s1">condition</span><span class="s2">, </span><span class="s1">replacement </span><span class="s0">in </span><span class="s1">caselist</span><span class="s2">:</span>
+                <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">condition</span><span class="s2">, </span><span class="s1">Expression</span><span class="s2">):</span>
+                    <span class="s1">condition </span><span class="s2">= </span><span class="s1">condition</span><span class="s2">.</span><span class="s1">_eval_expression</span><span class="s2">(</span><span class="s1">df</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">replacement</span><span class="s2">, </span><span class="s1">Expression</span><span class="s2">):</span>
+                    <span class="s1">replacement </span><span class="s2">= </span><span class="s1">replacement</span><span class="s2">.</span><span class="s1">_eval_expression</span><span class="s2">(</span><span class="s1">df</span><span class="s2">)</span>
+                <span class="s1">evaluated</span><span class="s2">.</span><span class="s1">append</span><span class="s2">((</span><span class="s1">condition</span><span class="s2">, </span><span class="s1">replacement</span><span class="s2">))</span>
+            <span class="s0">return </span><span class="s1">ser</span><span class="s2">.</span><span class="s1">case_when</span><span class="s2">(</span><span class="s1">evaluated</span><span class="s2">)</span>
+
+        <span class="s3"># Keep repr compact; caselist may be large.</span>
+        <span class="s1">repr_str </span><span class="s2">= </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self</span><span class="s0">!r}</span><span class="s4">.case_when(...)&quot;</span>
+        <span class="s0">return </span><span class="s1">Expression</span><span class="s2">(</span><span class="s1">func</span><span class="s2">, </span><span class="s1">repr_str</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__repr__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_repr_str </span><span class="s0">or </span><span class="s4">&quot;Expr(...)&quot;</span>
+
+    <span class="s3"># Unsupported ops</span>
+    <span class="s0">def </span><span class="s1">__bool__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; NoReturn</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span><span class="s4">&quot;boolean value of an expression is ambiguous&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__iter__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; NoReturn</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span><span class="s4">&quot;Expression objects are not iterable&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__copy__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; NoReturn</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span><span class="s4">&quot;Expression objects are not copiable&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__deepcopy__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">memo</span><span class="s2">: </span><span class="s1">dict</span><span class="s2">[</span><span class="s1">int</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">] | </span><span class="s0">None</span><span class="s2">) </span><span class="s1">-&gt; NoReturn</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span><span class="s4">&quot;Expression objects are not copiable&quot;</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">set_module</span><span class="s2">(</span><span class="s4">&quot;pandas&quot;</span><span class="s2">)</span>
+<span class="s0">def </span><span class="s1">col</span><span class="s2">(</span><span class="s1">col_name</span><span class="s2">: </span><span class="s1">Hashable</span><span class="s2">) </span><span class="s1">-&gt; Expression</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Generate deferred object representing a column of a DataFrame. 
+ 
+    Any place which accepts ``lambda df: df[col_name]``, such as 
+    :meth:`DataFrame.assign` or :meth:`DataFrame.loc`, can also accept 
+    ``pd.col(col_name)``. 
+ 
+    .. versionadded:: 3.0.0 
+ 
+    Parameters 
+    ---------- 
+    col_name : Hashable 
+        Column name. 
+ 
+    Returns 
+    ------- 
+    `pandas.api.typing.Expression` 
+        A deferred object representing a column of a DataFrame. 
+ 
+    See Also 
+    -------- 
+    DataFrame.query : Query columns of a dataframe using string expressions. 
+ 
+    Examples 
+    -------- 
+ 
+    You can use `col` in `assign`. 
+ 
+    &gt;&gt;&gt; df = pd.DataFrame({&quot;name&quot;: [&quot;beluga&quot;, &quot;narwhal&quot;], &quot;speed&quot;: [100, 110]}) 
+    &gt;&gt;&gt; df.assign(name_titlecase=pd.col(&quot;name&quot;).str.title()) 
+          name  speed name_titlecase 
+    0   beluga    100         Beluga 
+    1  narwhal    110        Narwhal 
+ 
+    You can also use it for filtering. 
+ 
+    &gt;&gt;&gt; df.loc[pd.col(&quot;speed&quot;) &gt; 105] 
+          name  speed 
+    1  narwhal    110 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">col_name</span><span class="s2">, </span><span class="s1">Hashable</span><span class="s2">):</span>
+        <span class="s1">msg </span><span class="s2">= </span><span class="s4">f&quot;Expected Hashable, got: </span><span class="s0">{</span><span class="s1">type</span><span class="s2">(</span><span class="s1">col_name</span><span class="s2">)</span><span class="s0">}</span><span class="s4">&quot;</span>
+        <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">func</span><span class="s2">(</span><span class="s1">df</span><span class="s2">: </span><span class="s1">DataFrame</span><span class="s2">) </span><span class="s1">-&gt; Series</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">col_name </span><span class="s0">not in </span><span class="s1">df</span><span class="s2">.</span><span class="s1">columns</span><span class="s2">:</span>
+            <span class="s1">columns_str </span><span class="s2">= </span><span class="s1">str</span><span class="s2">(</span><span class="s1">df</span><span class="s2">.</span><span class="s1">columns</span><span class="s2">.</span><span class="s1">tolist</span><span class="s2">())</span>
+            <span class="s1">max_len </span><span class="s2">= </span><span class="s6">90</span>
+            <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">columns_str</span><span class="s2">) &gt; </span><span class="s1">max_len</span><span class="s2">:</span>
+                <span class="s1">columns_str </span><span class="s2">= </span><span class="s1">columns_str</span><span class="s2">[:</span><span class="s1">max_len</span><span class="s2">] + </span><span class="s4">&quot;...]&quot;</span>
+
+            <span class="s1">msg </span><span class="s2">= (</span>
+                <span class="s4">f&quot;Column '</span><span class="s0">{</span><span class="s1">col_name</span><span class="s0">}</span><span class="s4">' not found in given DataFrame.</span><span class="s0">\n\n</span><span class="s4">&quot;</span>
+                <span class="s4">f&quot;Hint: did you mean one of </span><span class="s0">{</span><span class="s1">columns_str</span><span class="s0">} </span><span class="s4">instead?&quot;</span>
+            <span class="s2">)</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">df</span><span class="s2">[</span><span class="s1">col_name</span><span class="s2">]</span>
+
+    <span class="s0">return </span><span class="s1">Expression</span><span class="s2">(</span><span class="s1">func</span><span class="s2">, </span><span class="s4">f&quot;col(</span><span class="s0">{</span><span class="s1">col_name</span><span class="s0">!r}</span><span class="s4">)&quot;</span><span class="s2">)</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span><span class="s4">&quot;Expression&quot;</span><span class="s2">, </span><span class="s4">&quot;col&quot;</span><span class="s2">]</span>
+</pre>
+</body>
+</html>
